@@ -5,6 +5,7 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(AppState.self) private var app
     let project: Project
+    @State private var showBuildLog = false
 
     private var session: DevSession? { app.session(for: project) }
 
@@ -15,6 +16,11 @@ struct DashboardView: View {
             controlBar
             Divider()
             logArea
+        }
+        .sheet(isPresented: $showBuildLog) {
+            if let build = app.build(for: project) {
+                BuildLogSheet(build: build)
+            }
         }
     }
 
@@ -77,9 +83,30 @@ struct DashboardView: View {
                 Label(":\(port)", systemImage: "network").foregroundStyle(.secondary)
             }
             Spacer()
+            buildControls
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private var buildControls: some View {
+        if project.buildCommand != nil {
+            if let build = app.build(for: project), build.isRunning || build.result != nil {
+                Button { showBuildLog = true } label: {
+                    if build.isRunning {
+                        Label("Building…", systemImage: "hammer.fill").foregroundStyle(.orange)
+                    } else if let r = build.result {
+                        Label(r == 0 ? "Built" : "Build failed", systemImage: "hammer.fill")
+                            .foregroundStyle(r == 0 ? .green : .red)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            Button { app.runBuild(project) } label: {
+                Label("Build", systemImage: "hammer.fill")
+            }
+            .disabled(app.build(for: project)?.isRunning ?? false)
+        }
     }
 
     @ViewBuilder private var logArea: some View {

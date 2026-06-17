@@ -28,6 +28,7 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Model/Project.swift" "$SRC/Model/SessionState.swift" "$SRC/Model/MetricsSample.swift" \
   "$SRC/Model/SupervisionEvent.swift" \
   "$SRC/Core/Detector.swift" "$SRC/Core/ProcessTree.swift" "$SRC/Core/DevSession.swift" \
+  "$SRC/Core/BuildRunner.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 
 [ "$fail" = 0 ] && echo "ALL SUITES PASSED" || echo "SOME SUITES FAILED"

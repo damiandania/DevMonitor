@@ -9,6 +9,8 @@ final class AppState {
     var selectedProjectID: Project.ID?
     /// One actively-supervised server at a time (MVP).
     var activeSession: DevSession?
+    /// One active build at a time.
+    var activeBuild: BuildRunner?
 
     @ObservationIgnored private let store = ProjectStore()
 
@@ -73,6 +75,19 @@ final class AppState {
     func session(for project: Project) -> DevSession? {
         guard let s = activeSession, s.project.id == project.id else { return nil }
         return s
+    }
+
+    func runBuild(_ project: Project) {
+        let build = BuildRunner(project: project)
+        build.onEvent = { event in Notifier.shared.notify(event) }
+        activeBuild = build
+        build.start()
+    }
+
+    /// The active build if it belongs to `project`, else nil.
+    func build(for project: Project) -> BuildRunner? {
+        guard let b = activeBuild, b.project.id == project.id else { return nil }
+        return b
     }
 
     func persist() {
