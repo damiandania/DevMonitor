@@ -55,5 +55,6 @@ struct LogPaneView: View {
             RoundedRectangle(cornerRadius: 18)
                 .strokeBorder(Color.white.opacity(0.08))
         )
+        .environment(\.colorScheme, .dark)   // dark terminal → light placeholder/cursor
     }
 }
