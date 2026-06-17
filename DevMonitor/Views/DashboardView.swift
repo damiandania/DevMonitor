@@ -94,7 +94,15 @@ struct DashboardView: View {
 
             if let port = session?.effectivePort {
                 Button { openInBrowser(port: port) } label: {
-                    Label("Open :\(port)", systemImage: "arrow.up.forward.app")
+                    Label {
+                        Text("Open :\(port)")
+                    } icon: {
+                        Image("chrome")
+                            .resizable()
+                            .renderingMode(.template)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 14, height: 14)
+                    }
                 }
                 .controlSize(.large)
                 .buttonBorderShape(.capsule)
