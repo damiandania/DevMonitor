@@ -77,7 +77,7 @@ final class DevSession {
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
         // is reliably enumerable (by session) and killable (by killpg).
         let portEnv = project.port.map { "PORT=\($0) " } ?? ""
-        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 \(portEnv)exec \(baseCommand)"
+        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         var fd: Int32 = -1
@@ -184,17 +184,18 @@ final class DevSession {
     }
 
     private func handle(line: String) {
-        if line.hasPrefix("Restored session:") || line.contains("Saving session...completed") { return }
+        let clean = line.strippedANSI
+        if clean.hasPrefix("Restored session:") || clean.contains("Saving session...completed") { return }
         append(line: line)
         if detectedPort == nil,
-           let match = line.firstMatch(of: /https?:\/\/[^\s:\/]+:(\d{2,5})/),
+           let match = clean.firstMatch(of: /https?:\/\/[^\s:\/]+:(\d{2,5})/),
            let port = Int(match.1) {
             detectedPort = port
         }
         if case .launching = state {
-            let ready = line.contains("Local:")
-                || line.range(of: "ready in", options: .caseInsensitive) != nil
-                || line.contains("started server")
+            let ready = clean.contains("Local:")
+                || clean.range(of: "ready in", options: .caseInsensitive) != nil
+                || clean.contains("started server")
             if ready {
                 graceTask?.cancel()
                 state = .running(port: effectivePort)

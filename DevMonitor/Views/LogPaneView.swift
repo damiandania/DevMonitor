@@ -11,8 +11,9 @@ struct LogPaneView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(session.logLines.enumerated()), id: \.offset) { index, line in
-                            Text(line.isEmpty ? " " : line)
+                            Text(ANSI.attributed(line.isEmpty ? " " : line))
                                 .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(Color(white: 0.85))
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(index)
