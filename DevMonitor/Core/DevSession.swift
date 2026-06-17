@@ -3,7 +3,8 @@ import Observation
 import Darwin
 
 /// Supervises a single dev-server process tree: launches it via the C session shim,
-/// streams its merged stdout/stderr, parses the port, and stops the whole tree.
+/// streams its merged stdout/stderr, samples resource metrics, probes its health, and
+/// auto-recycles the whole tree (killpg + relaunch) when it hangs.
 @MainActor
 @Observable
 final class DevSession {
@@ -13,6 +14,7 @@ final class DevSession {
     private(set) var detectedPort: Int?
     private(set) var pid: pid_t = 0
     private(set) var startedAt: Date?
+    private(set) var recycleCount = 0
 
     private let maxLogLines = 2000
     private var lineBuffer = ""
@@ -31,7 +33,15 @@ final class DevSession {
     private var prevWall: UInt64 = 0
     private var prevSysTicks: dm_cpu_ticks?
 
-    /// Sendable events flowing from the background reader to the main-actor consumer.
+    // Health & recycle (P3)
+    private var healthTask: Task<Void, Never>?
+    private var strikes = 0
+    private var recycling = false
+    private var lastMemoryGB = 4
+    private let probeInterval: Duration = .seconds(6)
+    private let httpTimeout: TimeInterval = 4
+    private let strikeLimit = 2
+
     private enum Chunk: Sendable {
         case data(Data)
         case eof
@@ -44,17 +54,20 @@ final class DevSession {
 
     var effectivePort: Int? { detectedPort ?? project.port }
 
+    // MARK: - Launch / stop
+
     func start(memoryGB: Int) {
         guard !state.isActive else { return }
         state = .launching
         stopping = false
+        recycling = false
+        strikes = 0
+        lastMemoryGB = memoryGB
         logLines.removeAll()
         lineBuffer = ""
         detectedPort = nil
         startedAt = Date()
 
-        // Silence Apple Terminal's zsh session save/restore lines in captured output.
-        setenv("SHELL_SESSIONS_DISABLE", "1", 1)
         let baseCommand = project.devCommand ?? Detector.detect(path: project.path).devCommand
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
@@ -70,8 +83,6 @@ final class DevSession {
         }
         pid = childPid
 
-        // Background reader + exit watcher → AsyncStream → main-actor consumer.
-        // The Dispatch handlers capture only Sendable values (fd, pid, continuation).
         let (stream, continuation) = AsyncStream<Chunk>.makeStream()
         let queue = DispatchQueue(label: "devsession.\(childPid)")
 
@@ -103,18 +114,13 @@ final class DevSession {
             for await chunk in stream {
                 guard let self else { continue }
                 switch chunk {
-                case .data(let data):
-                    self.ingest(data)
-                case .eof:
-                    self.readSource?.cancel()
-                    self.readSource = nil
-                case .exit(let code):
-                    self.handleExit(code: code)
+                case .data(let data): self.ingest(data)
+                case .eof: self.readSource?.cancel(); self.readSource = nil
+                case .exit(let code): self.handleExit(code: code)
                 }
             }
         }
 
-        // If no ready/port signal shows up in time, assume ready on the fallback port.
         graceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(15))
             guard let self, case .launching = self.state else { return }
@@ -122,12 +128,15 @@ final class DevSession {
         }
 
         startSampling()
+        startHealth()
     }
 
     func stop() {
         stopping = true
+        recycling = false
         graceTask?.cancel()
         sampleTask?.cancel()
+        healthTask?.cancel()
         guard pid > 0 else {
             state = .stopped(code: 0)
             return
@@ -154,7 +163,6 @@ final class DevSession {
     }
 
     private func handle(line: String) {
-        // Drop shell session-management noise (belt & suspenders alongside SHELL_SESSIONS_DISABLE).
         if line.hasPrefix("Restored session:") || line.contains("Saving session...completed") { return }
         append(line: line)
         if detectedPort == nil,
@@ -188,8 +196,17 @@ final class DevSession {
         readSource?.cancel()
         readSource = nil
         exitSource = nil
+
+        if recycling {
+            append(line: "■ old tree exited (code \(code)) — relaunching")
+            relaunchAfterRecycle()
+            return
+        }
+
+        healthTask?.cancel()
+        healthTask = nil
         switch state {
-        case .running, .launching:
+        case .running, .launching, .degraded:
             if stopping {
                 state = .stopped(code: 0)
             } else {
@@ -220,7 +237,6 @@ final class DevSession {
     private func sampleOnce() {
         let now = DispatchTime.now().uptimeNanoseconds
 
-        // Dev-server tree CPU time + memory.
         var treeCPUns: Int64 = 0
         var treeMem: Int64 = 0
         if pid > 0 {
@@ -240,7 +256,6 @@ final class DevSession {
         prevTreeCPUns = treeCPUns
         prevWall = now
 
-        // System CPU via tick deltas.
         var ticks = dm_cpu_ticks()
         _ = dm_system_cpu_ticks(&ticks)
         var sysCPU = 0.0
@@ -269,6 +284,89 @@ final class DevSession {
         history.append(point)
         if history.count > maxHistory {
             history.removeFirst(history.count - maxHistory)
+        }
+    }
+
+    // MARK: - Health & recycle (P3)
+
+    private func startHealth() {
+        strikes = 0
+        healthTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                let interval = self?.probeInterval ?? .seconds(6)
+                try? await Task.sleep(for: interval)
+                guard let self else { return }
+                let probing: Bool
+                switch self.state {
+                case .running, .degraded: probing = true
+                default: probing = false
+                }
+                guard probing, let port = self.effectivePort else { continue }
+                let alive = await Self.probe(port: port, timeout: self.httpTimeout)
+                // A probe can be in-flight when the user stops/recycles; don't clobber that.
+                if Task.isCancelled || self.stopping || self.recycling { continue }
+                if alive {
+                    if self.strikes > 0 {
+                        self.strikes = 0
+                        self.append(line: "✓ health recovered")
+                    }
+                    self.state = .running(port: port)
+                } else {
+                    self.strikes += 1
+                    self.append(line: "⚠ health probe failed (\(self.strikes)/\(self.strikeLimit))")
+                    if self.strikes >= self.strikeLimit {
+                        self.recycle()
+                    } else {
+                        self.state = .degraded(strikes: self.strikes)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func probe(port: Int, timeout: TimeInterval) async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = timeout
+        req.httpMethod = "GET"
+        do {
+            _ = try await URLSession.shared.data(for: req)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Kill the whole tree and relaunch with the last memory setting.
+    func recycle() {
+        guard !recycling else { return }
+        recycling = true
+        recycleCount += 1
+        state = .recycling
+        append(line: "♻︎ recycling (kill tree + relaunch)")
+        healthTask?.cancel()
+        sampleTask?.cancel()
+        graceTask?.cancel()
+        if pid > 0 {
+            let target = pid
+            killpg(target, SIGTERM)
+            Task.detached {
+                try? await Task.sleep(for: .seconds(2))
+                killpg(target, SIGKILL)
+            }
+            // handleExit() fires on exit and calls relaunchAfterRecycle().
+        } else {
+            relaunchAfterRecycle()
+        }
+    }
+
+    private func relaunchAfterRecycle() {
+        recycling = false
+        state = .idle  // clear "active" so start() proceeds
+        let gb = lastMemoryGB
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            self?.start(memoryGB: gb)
         }
     }
 }

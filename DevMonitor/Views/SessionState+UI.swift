@@ -5,8 +5,9 @@ extension SessionState {
     var tint: Color {
         switch self {
         case .idle, .stopped: return .secondary
-        case .launching: return .orange
+        case .launching, .recycling: return .orange
         case .running: return .green
+        case .degraded: return .yellow
         case .failed: return .red
         }
     }
