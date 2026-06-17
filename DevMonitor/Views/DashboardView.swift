@@ -218,6 +218,7 @@ struct DashboardView: View {
             LogPaneView(session: session)
                 .frame(minHeight: 160)
                 .padding(.horizontal)
+                .padding(.top, 10)
                 .padding(.bottom, 12)
         } else {
             ContentUnavailableView(

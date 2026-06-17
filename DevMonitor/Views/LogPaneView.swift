@@ -50,9 +50,9 @@ struct LogPaneView: View {
             .padding(.vertical, 7)
             .background(Color(white: 0.12))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 18)
                 .strokeBorder(Color.white.opacity(0.08))
         )
     }
