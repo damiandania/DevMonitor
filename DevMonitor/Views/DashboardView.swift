@@ -73,55 +73,29 @@ struct DashboardView: View {
     private var controlBar: some View {
         let running = session?.state.isActive ?? false
         return HStack(spacing: 12) {
-            Button {
+            PillButton(title: running ? "Stop" : "Launch",
+                       systemImage: running ? "stop.fill" : "play.fill") {
                 if running { app.stopActive() } else { app.launch(project) }
-            } label: {
-                Label(running ? "Stop" : "Launch",
-                      systemImage: running ? "stop.fill" : "play.fill")
             }
-            .controlSize(.large)
-            .buttonBorderShape(.capsule)
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
 
             if running {
-                Button { session?.recycle() } label: {
-                    Label("Restart", systemImage: "arrow.clockwise")
+                PillButton(title: "Restart", systemImage: "arrow.clockwise") {
+                    session?.recycle()
                 }
-                .controlSize(.large)
-                .buttonBorderShape(.capsule)
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             }
 
             if let port = session?.effectivePort {
-                Button { openInBrowser(port: port) } label: {
-                    Label {
-                        Text("Open")
-                    } icon: {
-                        Image("chrome")
-                            .resizable()
-                            .renderingMode(.template)
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 16, height: 16)
-                    }
+                PillButton(title: "Open", assetImage: "chrome") {
+                    openInBrowser(port: port)
                 }
-                .controlSize(.large)
-                .buttonBorderShape(.capsule)
                 .help("Open http://localhost:\(port) in Chrome")
             }
 
-            Button { openInVSCode() } label: {
-                Label {
-                    Text("Code")
-                } icon: {
-                    Image("vscode")
-                        .resizable()
-                        .renderingMode(.template)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 13, height: 13)
-                }
+            PillButton(title: "Code", assetImage: "vscode") {
+                openInVSCode()
             }
-            .controlSize(.large)
-            .buttonBorderShape(.capsule)
             .help("Open the project in VS Code")
 
             Divider().frame(height: 20)
@@ -186,47 +160,44 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button { app.runBuild(project) } label: {
-                Label("Build", systemImage: "hammer.fill")
+            PillButton(title: "Build", systemImage: "hammer.fill", prominent: true) {
+                app.runBuild(project)
             }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
             .disabled(app.build(for: project)?.isRunning ?? false)
         }
     }
 
     @ViewBuilder private var logArea: some View {
-        HStack {
-            Label("Activity", systemImage: "cpu")
-                .font(.headline)
-            Spacer()
-            Toggle("% of machine", isOn: $percentOfMachine)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-        }
-        .padding(.horizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
-
-        ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
-            .frame(minHeight: 180)
-
-        Divider()
-
         if let session {
+            HStack {
+                Label("Activity", systemImage: "cpu")
+                    .font(.headline)
+                Spacer()
+                Toggle("% of machine", isOn: $percentOfMachine)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
+                .frame(minHeight: 180)
+
+            Divider()
+
             LogPaneView(session: session)
                 .frame(minHeight: 160)
                 .padding(.horizontal)
                 .padding(.top, 10)
-                .padding(.bottom, 24)
+                .padding(.bottom, 16)
         } else {
             ContentUnavailableView(
                 "Not Running",
                 systemImage: "play.circle",
                 description: Text("Press Launch (⌘R) to start the dev server and stream its logs.")
             )
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
