@@ -3,6 +3,9 @@ import Foundation
 // dev-monitor — CLI client for the Dev Monitor hub (Unix socket).
 // Lets any terminal launch/query a dev server through the app.
 
+// A socket client must never die from SIGPIPE when the peer closes mid-write.
+signal(SIGPIPE, SIG_IGN)
+
 let usage = """
 dev-monitor — launch and supervise dev servers through the Dev Monitor app.
 
@@ -14,7 +17,8 @@ USAGE:
   dev-monitor logs [-f]             Print (or follow with -f) the live server log
   dev-monitor docs                  Print this help
 
-The Dev Monitor app must be running (it hosts the hub at ~/Library/Application Support/DevMonitor/dm.sock).
+The Dev Monitor app hosts the hub at ~/Library/Application Support/DevMonitor/dm.sock.
+If it isn't running, dev-monitor will start it automatically.
 """
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -41,12 +45,35 @@ func roundtrip(_ req: IPCRequest) -> [IPCMessage]? {
     return messages
 }
 
-func requireHub(_ req: IPCRequest) -> [IPCMessage] {
-    guard let messages = roundtrip(req) else {
-        FileHandle.standardError.write(Data("dev-monitor: Dev Monitor app is not running (open it first).\n".utf8))
-        exit(1)
+/// Opens the Dev Monitor app via LaunchServices and waits (up to ~8s) for its hub
+/// socket to come up. Returns true once the socket accepts a connection.
+func launchAppAndWait() -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    p.arguments = ["-a", "Dev Monitor"]
+    do { try p.run() } catch { return false }
+    p.waitUntilExit()
+    for _ in 0..<75 {                       // 75 × 200ms ≈ 15s (cold first-launch margin)
+        let fd = dm_ipc_connect(IPCSocket.path)
+        if fd >= 0 { close(fd); return true }
+        usleep(200_000)
     }
-    return messages
+    return false
+}
+
+func requireHub(_ req: IPCRequest) -> [IPCMessage] {
+    if let messages = roundtrip(req) { return messages }
+    // Hub unreachable — start the app, then retry (the first request right after a
+    // cold launch can race the IPC accept loop, so give it a few attempts).
+    FileHandle.standardError.write(Data("dev-monitor: starting Dev Monitor…\n".utf8))
+    if launchAppAndWait() {
+        for _ in 0..<10 {
+            if let messages = roundtrip(req) { return messages }
+            usleep(300_000)
+        }
+    }
+    FileHandle.standardError.write(Data("dev-monitor: could not reach the Dev Monitor app.\n".utf8))
+    exit(1)
 }
 
 switch cmd {
