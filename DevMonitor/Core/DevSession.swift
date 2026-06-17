@@ -27,6 +27,7 @@ final class DevSession {
     private var consumeTask: Task<Void, Never>?
     private var stopping = false
     private var stdinFD: Int32 = -1
+    private var logFile: FileHandle?
 
     // Metrics sampling (P2)
     private(set) var history: [MetricPoint] = []
@@ -40,10 +41,11 @@ final class DevSession {
     // Health & recycle (P3)
     private var healthTask: Task<Void, Never>?
     private var strikes = 0
+    private var hasBeenHealthy = false
     private var recycling = false
     private var lastMemoryGB = 4
     private let probeInterval: Duration = .seconds(6)
-    private let httpTimeout: TimeInterval = 4
+    private let httpTimeout: TimeInterval = 8   // tolerant of a busy server under load
     private let strikeLimit = 2
 
     private enum Chunk: Sendable {
@@ -71,6 +73,7 @@ final class DevSession {
         lineBuffer = ""
         detectedPort = nil
         startedAt = Date()
+        openLogFile()
 
         let baseCommand = project.devCommand ?? Detector.detect(path: project.path).devCommand
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
@@ -129,10 +132,16 @@ final class DevSession {
             }
         }
 
+        // Warm-up safety net: many dev servers print "Local:" long before HTTP is ready
+        // (e.g. MiddleSpace ~25s of Vite compile). We do NOT recycle during warm-up; only the
+        // first successful HTTP probe flips to .running (see startHealth). If nothing ever
+        // answers within the window (e.g. an API with no "/" route), assume it's up.
         graceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            guard let self, case .launching = self.state else { return }
+            try? await Task.sleep(for: .seconds(150))
+            guard let self, !self.hasBeenHealthy, case .launching = self.state else { return }
+            self.hasBeenHealthy = true
             self.state = .running(port: self.effectivePort ?? 3000)
+            self.append(line: "warn: no HTTP within warm-up window — assuming running")
         }
 
         startSampling()
@@ -192,15 +201,9 @@ final class DevSession {
            let port = Int(match.1) {
             detectedPort = port
         }
-        if case .launching = state {
-            let ready = clean.contains("Local:")
-                || clean.range(of: "ready in", options: .caseInsensitive) != nil
-                || clean.contains("started server")
-            if ready {
-                graceTask?.cancel()
-                state = .running(port: effectivePort)
-            }
-        }
+        // NOTE: we do NOT flip to .running on the "ready" log line — the server is usually
+        // still compiling and not accepting HTTP yet. .running is set by the first successful
+        // health probe (startHealth), which is what prevents the recycle-during-warm-up loop.
     }
 
     private func append(line: String) {
@@ -208,6 +211,21 @@ final class DevSession {
         if logLines.count > maxLogLines {
             logLines.removeFirst(logLines.count - maxLogLines)
         }
+        if let data = (line.strippedANSI + "\n").data(using: .utf8) {
+            logFile?.write(data)
+        }
+    }
+
+    /// Mirrors the session log (ANSI-stripped) to a file so it can be followed live from a
+    /// terminal — the diagnostics channel: ~/Library/Application Support/DevMonitor/dev-server.log
+    private func openLogFile() {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DevMonitor", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let url = base.appendingPathComponent("dev-server.log")
+        FileManager.default.createFile(atPath: url.path, contents: Data())
+        logFile = try? FileHandle(forWritingTo: url)
     }
 
     private func handleExit(code: Int32) {
@@ -315,28 +333,34 @@ final class DevSession {
 
     private func startHealth() {
         strikes = 0
+        hasBeenHealthy = false
         healthTask = Task { @MainActor [weak self] in
+            // Probe a bit more often while warming up so we flip to .running promptly.
             while !Task.isCancelled {
-                let interval = self?.probeInterval ?? .seconds(6)
-                try? await Task.sleep(for: interval)
                 guard let self else { return }
-                let probing: Bool
+                let interval: Duration = self.hasBeenHealthy ? self.probeInterval : .seconds(2)
+                try? await Task.sleep(for: interval)
                 switch self.state {
-                case .running, .degraded: probing = true
-                default: probing = false
+                case .stopped, .failed, .recycling, .idle: continue
+                default: break
                 }
-                guard probing, let port = self.effectivePort else { continue }
+                guard let port = self.effectivePort else { continue }
                 let alive = await Self.probe(port: port, timeout: self.httpTimeout)
-                // A probe can be in-flight when the user stops/recycles; don't clobber that.
                 if Task.isCancelled || self.stopping || self.recycling { continue }
+
                 if alive {
-                    if self.strikes > 0 {
-                        self.strikes = 0
+                    let recovering = self.hasBeenHealthy && self.strikes > 0
+                    let firstTime = !self.hasBeenHealthy
+                    self.hasBeenHealthy = true
+                    self.strikes = 0
+                    if firstTime { self.append(line: "ok: server is responding on :\(port)") }
+                    if recovering {
                         self.append(line: "ok: health recovered")
                         self.onEvent?(.recovered(project: self.project.name))
                     }
                     self.state = .running(port: port)
-                } else {
+                } else if self.hasBeenHealthy {
+                    // Was healthy and stopped responding → strike toward recycle.
                     self.strikes += 1
                     self.append(line: "warn: health probe failed (\(self.strikes)/\(self.strikeLimit))")
                     if self.strikes >= self.strikeLimit {
@@ -346,6 +370,8 @@ final class DevSession {
                         self.onEvent?(.hung(project: self.project.name))
                     }
                 }
+                // else: still warming up (server has never answered yet) — keep waiting,
+                // do NOT recycle. The grace task assumes-running after the warm-up window.
             }
         }
     }

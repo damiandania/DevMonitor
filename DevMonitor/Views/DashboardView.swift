@@ -147,6 +147,30 @@ struct DashboardView: View {
         do { try task.run() } catch { NSWorkspace.shared.open(URL(fileURLWithPath: project.path)) }
     }
 
+    @ViewBuilder private var systemBars: some View {
+        let sampler = app.systemSampler
+        HStack(spacing: 22) {
+            systemBar(title: "CPU", percent: sampler.systemCPU,
+                      detail: "\(Int(sampler.systemCPU))%", color: .blue)
+            systemBar(title: "Memory", percent: sampler.systemMemPercent,
+                      detail: String(format: "%.1f / %.0f GB",
+                                     sampler.systemMemUsed / 1_073_741_824,
+                                     sampler.totalMem / 1_073_741_824),
+                      color: .purple)
+        }
+    }
+
+    private func systemBar(title: String, percent: Double, detail: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Spacer()
+                Text(detail).font(.caption.monospacedDigit().weight(.semibold)).foregroundStyle(color)
+            }
+            ProgressView(value: min(max(percent / 100, 0), 1)).tint(color)
+        }
+    }
+
     @ViewBuilder private var buildControls: some View {
         if project.buildCommand != nil {
             if let build = app.build(for: project), build.isRunning || build.result != nil {
@@ -180,6 +204,10 @@ struct DashboardView: View {
             .padding(.horizontal)
             .padding(.top, 8)
             .padding(.bottom, 4)
+
+            systemBars
+                .padding(.horizontal)
+                .padding(.bottom, 8)
 
             ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
                 .frame(height: 220)

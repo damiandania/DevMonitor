@@ -57,4 +57,8 @@ int dm_all_pids(pid_t *out, int cap);
 /// Best-effort human-readable process name (executable basename). Returns length, or 0.
 int dm_proc_name(pid_t pid, char *buf, int size);
 
+/// Best-effort process arguments (argv joined by spaces). Returns length, or 0.
+/// Used to tell apart generic helpers (e.g. which VS Code language server a "Code Helper" is).
+int dm_proc_args(pid_t pid, char *buf, int size);
+
 #endif /* DM_METRICS_H */

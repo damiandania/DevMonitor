@@ -69,6 +69,14 @@ final class IPCServer {
             app.stopActive()
             IPCIO.write(client, IPCMessage(type: "ok", message: "stopped"))
 
+        case "restart":
+            if let session = app.activeSession {
+                session.recycle()
+                IPCIO.write(client, IPCMessage(type: "ok", message: "restarting \(session.project.name)"))
+            } else {
+                IPCIO.write(client, IPCMessage(type: "error", message: "no active server"))
+            }
+
         default:
             IPCIO.write(client, IPCMessage(type: "error", message: "unknown command"))
         }

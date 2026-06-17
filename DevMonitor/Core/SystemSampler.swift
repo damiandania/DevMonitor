@@ -17,9 +17,14 @@ final class SystemSampler {
     private(set) var processes: [ProcessRow] = []
     let coreCount: Int
     private(set) var totalMem: Double = 0
+    private(set) var systemCPU: Double = 0        // 0…100
+    private(set) var systemMemUsed: Double = 0    // bytes
+    var systemMemPercent: Double { totalMem > 0 ? systemMemUsed / totalMem * 100 : 0 }
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
+    private var richNameCache: [Int32: String] = [:]
+    private var prevSysTicks: dm_cpu_ticks?
     private var task: Task<Void, Never>?
     private let topN = 40
 
@@ -45,6 +50,19 @@ final class SystemSampler {
     }
 
     private func sample() {
+        // System-wide CPU (tick deltas) and memory for the top progress bars.
+        var ticks = dm_cpu_ticks()
+        _ = dm_system_cpu_ticks(&ticks)
+        if let prevTicks = prevSysTicks {
+            let dTotal = Double(ticks.total &- prevTicks.total)
+            let dIdle = Double(ticks.idle &- prevTicks.idle)
+            if dTotal > 0 { systemCPU = max(0, min(100, (1 - dIdle / dTotal) * 100)) }
+        }
+        prevSysTicks = ticks
+        var sysMem = dm_mem_info()
+        _ = dm_system_mem(&sysMem)
+        systemMemUsed = Double(sysMem.used)
+
         let now = DispatchTime.now().uptimeNanoseconds
         var pids = [pid_t](repeating: 0, count: 8192)
         let count = Int(dm_all_pids(&pids, 8192))
@@ -114,6 +132,65 @@ final class SystemSampler {
             .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }
             .sorted { impact($0) > impact($1) }
             .prefix(topN))
-        processes = result
+
+        // Give generic helpers (VS Code language servers, bare "node", …) a readable name
+        // derived from their argv — only for the few shown rows, and cached per pid.
+        processes = result.map { row in
+            guard row.id > 0, Self.isGeneric(row.name) else { return row }
+            let better = self.enrichedName(pid: row.id, comm: row.name)
+            return better == row.name ? row
+                : ProcessRow(id: row.id, name: better, cpuPerCore: row.cpuPerCore,
+                             memBytes: row.memBytes, isDevServer: row.isDevServer)
+        }
+        let liveIDs = Set(result.map { $0.id })
+        richNameCache = richNameCache.filter { liveIDs.contains($0.key) }
+    }
+
+    private static func isGeneric(_ name: String) -> Bool {
+        name.contains("Helper") || name == "node" || name == "Electron"
+    }
+
+    private func enrichedName(pid: Int32, comm: String) -> String {
+        if let cached = richNameCache[pid] { return cached }
+        var buffer = [CChar](repeating: 0, count: 8192)
+        let n = Int(dm_proc_args(pid, &buffer, 8192))
+        let args = n > 0 ? String(cString: buffer) : ""
+        let result = Self.describe(comm: comm, args: args)
+        richNameCache[pid] = result
+        return result
+    }
+
+    private static let hints: [(String, String)] = [
+        ("tailwindserver", "Tailwind CSS"), ("vscode-tailwindcss", "Tailwind CSS"),
+        ("eslintserver", "ESLint"), ("vscode-eslint", "ESLint"),
+        ("volar", "Volar (Vue)"), ("vue-language", "Volar (Vue)"),
+        ("tsserver", "TypeScript"), ("typescript-language", "TypeScript"),
+        ("jsonservermain", "JSON LS"), ("cssservermain", "CSS LS"),
+        ("html-language", "HTML LS"), ("copilot", "Copilot"),
+        ("intelephense", "Intelephense (PHP)"), ("pylance", "Pylance"), ("pyright", "Pyright"),
+        ("rust-analyzer", "rust-analyzer"), ("gopls", "gopls"),
+        ("prettier", "Prettier"), ("emmet", "Emmet"), ("graphql", "GraphQL"),
+        ("astro", "Astro LS"), ("svelte", "Svelte LS"), ("markdown", "Markdown LS"),
+        ("github-actions", "GitHub Actions"), ("docker", "Docker"), ("prisma", "Prisma"),
+    ]
+
+    private static func describe(comm: String, args: String) -> String {
+        let lower = args.lowercased()
+        for (needle, name) in hints where lower.contains(needle) {
+            return "\(name) — \(comm)"
+        }
+        // Fallback: VS Code extension folder like ".../extensions/publisher.name-1.2.3/..."
+        if let range = lower.range(of: "/extensions/") {
+            let rest = lower[range.upperBound...]
+            if let slash = rest.firstIndex(of: "/") {
+                let folder = String(rest[..<slash])
+                if let dot = folder.firstIndex(of: ".") {
+                    let after = folder[folder.index(after: dot)...]
+                    let ext = after.split(separator: "-").first.map(String.init) ?? folder
+                    if !ext.isEmpty { return "\(ext) — \(comm)" }
+                }
+            }
+        }
+        return comm
     }
 }

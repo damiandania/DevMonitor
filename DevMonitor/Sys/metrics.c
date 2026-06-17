@@ -180,3 +180,46 @@ int dm_proc_name(pid_t pid, char *buf, int size) {
     }
     return proc_name(pid, buf, size);
 }
+
+int dm_proc_args(pid_t pid, char *buf, int size) {
+    if (size <= 0) {
+        return 0;
+    }
+    buf[0] = '\0';
+
+    int argmax = 0;
+    size_t sz = sizeof(argmax);
+    int mib_max[2] = { CTL_KERN, KERN_ARGMAX };
+    if (sysctl(mib_max, 2, &argmax, &sz, NULL, 0) != 0 || argmax <= 0) {
+        return 0;
+    }
+
+    char *procargs = (char *)malloc((size_t)argmax);
+    if (procargs == NULL) {
+        return 0;
+    }
+
+    int mib[3] = { CTL_KERN, KERN_PROCARGS2, (int)pid };
+    size_t len = (size_t)argmax;
+    if (sysctl(mib, 3, procargs, &len, NULL, 0) != 0 || len < sizeof(int)) {
+        free(procargs);
+        return 0;
+    }
+
+    int argc = 0;
+    memcpy(&argc, procargs, sizeof(argc));
+    char *cp = procargs + sizeof(argc);
+    char *end = procargs + len;
+    while (cp < end && *cp != '\0') cp++;     // skip exec_path
+    while (cp < end && *cp == '\0') cp++;     // skip null padding
+
+    int written = 0, done = 0;
+    while (cp < end && written < size - 1 && done < argc) {
+        char c = *cp++;
+        if (c == '\0') { buf[written++] = ' '; done++; }
+        else { buf[written++] = c; }
+    }
+    buf[written] = '\0';
+    free(procargs);
+    return written;
+}

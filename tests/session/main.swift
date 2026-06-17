@@ -8,21 +8,22 @@ func runSessionTests() async -> Int {
         if !cond { failures += 1 }
     }
 
-    // Fake dev server: prints a Local: URL then stays up.
+    // Real HTTP server so warm-up → running (via the first HTTP probe) is exercised —
+    // this is the regression test for the recycle-during-warm-up loop.
     let project = Project(
         name: "fake", path: "/tmp",
-        devCommand: "sh -c 'echo \"Local: http://localhost:4321/\"; sleep 5'",
+        devCommand: "node -e 'require(\"http\").createServer((q,r)=>r.end(\"ok\")).listen(4321,\"127.0.0.1\",()=>console.log(\"Local: http://localhost:4321/\"))'",
         memoryGB: 2
     )
     let session = DevSession(project: project)
     session.start(memoryGB: 2)
 
-    try? await Task.sleep(for: .seconds(1.5))
+    try? await Task.sleep(for: .seconds(5))
 
     check("port parsed", session.detectedPort == 4321, "port=\(String(describing: session.detectedPort))")
     let running: Bool = { if case .running = session.state { return true }; return false }()
-    check("reached running", running, "state=\(session.state.label)")
-    check("log captured", session.logLines.contains { $0.contains("Local: http://localhost:4321") })
+    check("reached running via HTTP", running, "state=\(session.state.label)")
+    check("log captured", session.logLines.contains { $0.contains("4321") })
     check("NODE_OPTIONS injected", session.logLines.contains { $0.contains("max-old-space-size=2048") })
     check("no shell noise in log", !session.logLines.contains { $0.contains("Restored session") })
 

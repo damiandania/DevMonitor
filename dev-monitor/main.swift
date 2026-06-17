@@ -7,10 +7,12 @@ let usage = """
 dev-monitor — launch and supervise dev servers through the Dev Monitor app.
 
 USAGE:
-  dev-monitor run [--gb N]   Launch + supervise the project in the current directory
-  dev-monitor status         Show the active server (name, state, port)
-  dev-monitor stop           Stop the active server
-  dev-monitor docs           Print this help
+  dev-monitor run [path] [--gb N]   Launch + supervise a project (default: current directory)
+  dev-monitor status                Show the active server (name, state, port)
+  dev-monitor stop                  Stop the active server
+  dev-monitor restart               Recycle (kill tree + relaunch) the active server
+  dev-monitor logs [-f]             Print (or follow with -f) the live server log
+  dev-monitor docs                  Print this help
 
 The Dev Monitor app must be running (it hosts the hub at ~/Library/Application Support/DevMonitor/dm.sock).
 """
@@ -49,13 +51,37 @@ func requireHub(_ req: IPCRequest) -> [IPCMessage] {
 
 switch cmd {
 case "run":
-    var req = IPCRequest(cmd: "run", path: FileManager.default.currentDirectoryPath, name: nil, gb: nil)
+    let pathArg = args.dropFirst().first { !$0.hasPrefix("--") }
+    var req = IPCRequest(cmd: "run", path: pathArg ?? FileManager.default.currentDirectoryPath, name: nil, gb: nil)
     if let i = args.firstIndex(of: "--gb"), i + 1 < args.count { req.gb = Int(args[i + 1]) }
     for m in requireHub(req) {
         if m.type == "error" {
             FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
         }
         print(m.message ?? m.type)
+    }
+
+case "restart":
+    for m in requireHub(IPCRequest(cmd: "restart", path: nil, name: nil, gb: nil)) {
+        if m.type == "error" {
+            FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
+        }
+        print(m.message ?? m.type)
+    }
+
+case "logs":
+    let logPath = NSHomeDirectory() + "/Library/Application Support/DevMonitor/dev-server.log"
+    if args.contains("-f") || args.contains("--follow") {
+        let tail = Process()
+        tail.executableURL = URL(fileURLWithPath: "/usr/bin/tail")
+        tail.arguments = ["-n", "300", "-f", logPath]
+        try? tail.run()
+        tail.waitUntilExit()
+    } else if let data = FileManager.default.contents(atPath: logPath),
+              let text = String(data: data, encoding: .utf8) {
+        print(text)
+    } else {
+        print("(no log yet — launch a server first)")
     }
 
 case "status":
