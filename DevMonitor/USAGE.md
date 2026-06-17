@@ -8,12 +8,27 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 
 | Command | What it does |
 |---------|--------------|
-| `dev-monitor run [--gb N]` | Launch + supervise the project in the **current directory** through the app (auto-detects pnpm/npm + framework; optional heap override). |
+| `dev-monitor run [path] [--gb N]` | Launch + supervise a project (default: current directory) through the app (auto-detects pnpm/npm + framework; optional heap override). |
 | `dev-monitor status` | Show the active server (name, state, port). |
 | `dev-monitor stop` | Stop the active server. |
+| `dev-monitor restart` | Recycle (kill the tree + relaunch) the active server. |
+| `dev-monitor logs [-f]` | Print, or follow with `-f`, the live server log. |
 | `dev-monitor docs` | Print help. |
 
 The Dev Monitor app must be open (it hosts the hub). If it isn't, the CLI says so.
+
+## Diagnostics channel
+
+The app mirrors the active server's log (ANSI-stripped) to
+`~/Library/Application Support/DevMonitor/dev-server.log`. Follow it live with
+`dev-monitor logs -f` or `tail -f` that path. This is how an agent can watch a server's
+output and errors while it runs.
+
+## Warm-up note
+
+A dev server often prints `Local: http://localhost:PORT` long before it actually accepts HTTP
+(e.g. ~25s of Vite compilation). Dev Monitor stays in "Launching…" during warm-up and only flips
+to "Running" after the **first successful HTTP probe** — it never recycles during warm-up.
 
 ## For Claude Code / agents in other terminals
 
