@@ -51,4 +51,10 @@ int dm_session_pids(pid_t sid, pid_t *out, int cap);
 /// 1-minute load average, or -1 on error.
 double dm_load_avg(void);
 
+/// Fills `out` (capacity `cap`) with every pid on the system. Returns count written.
+int dm_all_pids(pid_t *out, int cap);
+
+/// Best-effort human-readable process name (executable basename). Returns length, or 0.
+int dm_proc_name(pid_t pid, char *buf, int size);
+
 #endif /* DM_METRICS_H */

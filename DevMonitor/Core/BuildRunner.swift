@@ -32,17 +32,17 @@ final class BuildRunner {
     func start() {
         guard !isRunning else { return }
         let command = "FORCE_COLOR=0 exec \(buildCommand)"
-        logLines = ["▶ \(command)  (cwd: \(project.path))"]
+        logLines = ["$ \(command)  (cwd: \(project.path))"]
         lineBuffer = ""
         result = nil
         isRunning = true
 
         var fd: Int32 = -1
-        let childPid = dm_spawn_session(command, project.path, &fd)
+        let childPid = dm_spawn_session(command, project.path, &fd, nil)
         guard childPid > 0, fd >= 0 else {
             isRunning = false
             result = -1
-            logLines.append("■ failed to spawn build")
+            logLines.append("build: failed to spawn")
             return
         }
         pid = childPid
@@ -111,7 +111,7 @@ final class BuildRunner {
         pid = 0
         isRunning = false
         result = code
-        logLines.append("■ build finished (code \(code))")
+        logLines.append("build finished (code \(code))")
         onEvent?(.buildFinished(project: project.name, success: code == 0))
     }
 }

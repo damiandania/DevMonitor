@@ -6,7 +6,7 @@ var failures = 0
 // 1) spawn + pipe capture + exit
 do {
     var fd: Int32 = -1
-    let pid = dm_spawn_session("echo DEVMON_OK; sleep 0.05; echo SECOND_LINE", "/tmp", &fd)
+    let pid = dm_spawn_session("echo DEVMON_OK; sleep 0.05; echo SECOND_LINE", "/tmp", &fd, nil)
     guard pid > 0, fd >= 0 else { print("FAIL spawn: pid=\(pid)"); exit(1) }
     var out = Data()
     var buf = [UInt8](repeating: 0, count: 4096)
@@ -27,7 +27,7 @@ do {
 // 2) cwd is honored
 do {
     var fd: Int32 = -1
-    let pid = dm_spawn_session("pwd", "/usr", &fd)
+    let pid = dm_spawn_session("pwd", "/usr", &fd, nil)
     var out = Data(); var buf = [UInt8](repeating: 0, count: 1024)
     while true { let n = read(fd, &buf, buf.count); if n <= 0 { break }; out.append(contentsOf: buf[0..<n]) }
     close(fd); var s: Int32 = 0; waitpid(pid, &s, 0)
@@ -40,7 +40,7 @@ do {
 // 3) no Apple-Terminal session noise leaks through
 do {
     var fd: Int32 = -1
-    let pid = dm_spawn_session("echo CLEAN", "/tmp", &fd)
+    let pid = dm_spawn_session("echo CLEAN", "/tmp", &fd, nil)
     var out = Data(); var buf = [UInt8](repeating: 0, count: 1024)
     while true { let n = read(fd, &buf, buf.count); if n <= 0 { break }; out.append(contentsOf: buf[0..<n]) }
     close(fd); var s: Int32 = 0; waitpid(pid, &s, 0)
@@ -53,7 +53,7 @@ do {
 // 4) killpg reaps the whole session quickly
 do {
     var fd: Int32 = -1
-    let pid = dm_spawn_session("sleep 30", "/tmp", &fd)
+    let pid = dm_spawn_session("sleep 30", "/tmp", &fd, nil)
     usleep(150_000)
     let rc = killpg(pid, SIGKILL)
     let t0 = Date()

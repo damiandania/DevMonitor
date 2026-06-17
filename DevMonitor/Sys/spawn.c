@@ -7,9 +7,16 @@
 
 #define dm_environ (*_NSGetEnviron())
 
-pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd) {
+pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd, int *in_fd) {
     int pipefd[2];
     if (pipe(pipefd) != 0) {
+        return -1;
+    }
+    int stdinfd[2] = { -1, -1 };
+    int want_stdin = (in_fd != NULL);
+    if (want_stdin && pipe(stdinfd) != 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
         return -1;
     }
 
@@ -20,6 +27,12 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd) {
     posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDERR_FILENO);
     posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    if (want_stdin) {
+        // Child reads stdin from the pipe; close the parent's write end in the child.
+        posix_spawn_file_actions_addclose(&actions, stdinfd[1]);
+        posix_spawn_file_actions_adddup2(&actions, stdinfd[0], STDIN_FILENO);
+        posix_spawn_file_actions_addclose(&actions, stdinfd[0]);
+    }
     if (cwd != NULL) {
         posix_spawn_file_actions_addchdir(&actions, cwd);
     }
@@ -39,13 +52,22 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd) {
 
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attr);
-    close(pipefd[1]); // parent never writes
+    close(pipefd[1]);                       // parent never writes to stdout pipe
+    if (want_stdin) {
+        close(stdinfd[0]);                  // parent never reads from stdin pipe
+    }
 
     if (rc != 0) {
         close(pipefd[0]);
+        if (want_stdin) {
+            close(stdinfd[1]);
+        }
         return -1;
     }
 
     *out_fd = pipefd[0];
+    if (want_stdin) {
+        *in_fd = stdinfd[1];
+    }
     return pid;
 }

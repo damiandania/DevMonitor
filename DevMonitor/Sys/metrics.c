@@ -8,6 +8,7 @@
 #include <mach/mach_time.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 // rusage CPU times are in mach absolute-time units; this scales them to ns.
 // On Intel the timebase is 1:1 (no-op); on Apple Silicon it is ~125/3.
@@ -153,4 +154,29 @@ double dm_load_avg(void) {
         return -1.0;
     }
     return avg[0];
+}
+
+int dm_all_pids(pid_t *out, int cap) {
+    int bytes = proc_listpids(PROC_ALL_PIDS, 0, out, cap * (int)sizeof(pid_t));
+    if (bytes <= 0) {
+        return 0;
+    }
+    int n = bytes / (int)sizeof(pid_t);
+    if (n > cap) {
+        n = cap;
+    }
+    return n;
+}
+
+int dm_proc_name(pid_t pid, char *buf, int size) {
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    int r = proc_pidpath(pid, path, sizeof(path));
+    if (r > 0) {
+        char *base = strrchr(path, '/');
+        base = base ? base + 1 : path;
+        strncpy(buf, base, size - 1);
+        buf[size - 1] = '\0';
+        return (int)strlen(buf);
+    }
+    return proc_name(pid, buf, size);
 }

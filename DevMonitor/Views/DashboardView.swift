@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Environment(AppState.self) private var app
     let project: Project
     @State private var showBuildLog = false
+    @State private var percentOfMachine = false
 
     private var session: DevSession? { app.session(for: project) }
 
@@ -26,11 +27,19 @@ struct DashboardView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: project.framework.symbolName)
-                .font(.title)
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(project.name).font(.title2.bold())
+            ProjectIconView(project: project, size: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(project.name).font(.title2.bold())
+                    if let branch = GitInfo.branch(for: project.path) {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
+                }
                 Text(project.path)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -64,6 +73,14 @@ struct DashboardView: View {
             }
             .controlSize(.large)
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
+
+            if running {
+                Button { session?.recycle() } label: {
+                    Label("Restart", systemImage: "arrow.clockwise")
+                }
+                .controlSize(.large)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            }
 
             Divider().frame(height: 20)
 
@@ -110,18 +127,33 @@ struct DashboardView: View {
     }
 
     @ViewBuilder private var logArea: some View {
+        HStack {
+            Label("Activity", systemImage: "cpu")
+                .font(.headline)
+            Spacer()
+            Toggle("% of machine", isOn: $percentOfMachine)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+
+        ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
+            .frame(minHeight: 180)
+
+        Divider()
+
         if let session {
-            MetricsGrid(session: session)
-                .padding(10)
-            Divider()
             LogPaneView(session: session)
+                .frame(minHeight: 140)
         } else {
             ContentUnavailableView(
                 "Not Running",
                 systemImage: "play.circle",
                 description: Text("Press Launch (⌘R) to start the dev server and stream its logs.")
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxHeight: .infinity)
         }
     }
 }

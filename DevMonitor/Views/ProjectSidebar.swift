@@ -11,13 +11,16 @@ struct ProjectSidebar: View {
         List(selection: $app.selectedProjectID) {
             Section("Projects") {
                 ForEach(app.projects) { project in
-                    Label(project.name, systemImage: project.framework.symbolName)
-                        .tag(project.id)
-                        .contextMenu {
-                            Button("Remove", role: .destructive) {
-                                app.removeProject(project.id)
-                            }
+                    HStack(spacing: 8) {
+                        ProjectIconView(project: project, size: 16)
+                        Text(project.name)
+                    }
+                    .tag(project.id)
+                    .contextMenu {
+                        Button("Remove", role: .destructive) {
+                            app.removeProject(project.id)
                         }
+                    }
                 }
             }
         }

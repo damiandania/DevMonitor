@@ -32,7 +32,7 @@ chk("load avg > 0", la > 0, "\(la)")
 // 5) child enumeration on a spawned tree
 var fd: Int32 = -1
 // Force a real fork tree (two background children under the zsh leader).
-let pid = dm_spawn_session("sleep 3 & sleep 3 & wait", "/tmp", &fd)
+let pid = dm_spawn_session("sleep 3 & sleep 3 & wait", "/tmp", &fd, nil)
 usleep(500_000)
 var kids = [pid_t](repeating: 0, count: 64)
 let n = Int(dm_child_pids(pid, &kids, 64))

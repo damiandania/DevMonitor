@@ -14,11 +14,13 @@ final class AppState {
 
     @ObservationIgnored private let store = ProjectStore()
     @ObservationIgnored private let ipcServer = IPCServer()
+    let systemSampler = SystemSampler()
 
     init() {
         projects = store.load()
         selectedProjectID = projects.first?.id
         ipcServer.start(app: self)
+        systemSampler.start()
     }
 
     var selectedProject: Project? {

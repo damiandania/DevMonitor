@@ -26,6 +26,7 @@ final class DevSession {
     private var graceTask: Task<Void, Never>?
     private var consumeTask: Task<Void, Never>?
     private var stopping = false
+    private var stdinFD: Int32 = -1
 
     // Metrics sampling (P2)
     private(set) var history: [MetricPoint] = []
@@ -76,15 +77,17 @@ final class DevSession {
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
         // is reliably enumerable (by session) and killable (by killpg).
         let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 exec \(baseCommand)"
-        append(line: "▶ \(command)  (cwd: \(project.path))")
+        append(line: "$ \(command)  (cwd: \(project.path))")
 
         var fd: Int32 = -1
-        let childPid = dm_spawn_session(command, project.path, &fd)
+        var inFD: Int32 = -1
+        let childPid = dm_spawn_session(command, project.path, &fd, &inFD)
         guard childPid > 0, fd >= 0 else {
             state = .failed("spawn failed")
             return
         }
         pid = childPid
+        stdinFD = inFD
         let pipeFD = fd  // immutable copy for the @Sendable Dispatch handlers
 
         let (stream, continuation) = AsyncStream<Chunk>.makeStream()
@@ -135,18 +138,31 @@ final class DevSession {
         startHealth()
     }
 
+    /// Send a line of input to the running dev server's stdin.
+    func sendInput(_ text: String) {
+        guard stdinFD >= 0 else { return }
+        let line = text + "\n"
+        _ = line.withCString { ptr in write(stdinFD, ptr, strlen(ptr)) }
+        append(line: "> \(text)")
+    }
+
+    private func closeStdin() {
+        if stdinFD >= 0 { close(stdinFD); stdinFD = -1 }
+    }
+
     func stop() {
         stopping = true
         recycling = false
         graceTask?.cancel()
         sampleTask?.cancel()
         healthTask?.cancel()
+        closeStdin()
         guard pid > 0 else {
             state = .stopped(code: 0)
             return
         }
         let target = pid
-        append(line: "■ stopping (SIGTERM → killpg \(target))")
+        append(line: "stop: SIGTERM → killpg \(target)")
         killpg(target, SIGTERM)
         Task.detached {
             try? await Task.sleep(for: .seconds(2))
@@ -197,12 +213,13 @@ final class DevSession {
         sampleTask?.cancel()
         sampleTask = nil
         pid = 0
+        closeStdin()
         readSource?.cancel()
         readSource = nil
         exitSource = nil
 
         if recycling {
-            append(line: "■ old tree exited (code \(code)) — relaunching")
+            append(line: "recycle: old tree exited (code \(code)) — relaunching")
             relaunchAfterRecycle()
             return
         }
@@ -220,7 +237,7 @@ final class DevSession {
         default:
             break
         }
-        append(line: "■ process exited (code \(code))")
+        append(line: "exit: process exited (code \(code))")
     }
 
     // MARK: - Metrics sampling (P2)
@@ -313,13 +330,13 @@ final class DevSession {
                 if alive {
                     if self.strikes > 0 {
                         self.strikes = 0
-                        self.append(line: "✓ health recovered")
+                        self.append(line: "ok: health recovered")
                         self.onEvent?(.recovered(project: self.project.name))
                     }
                     self.state = .running(port: port)
                 } else {
                     self.strikes += 1
-                    self.append(line: "⚠ health probe failed (\(self.strikes)/\(self.strikeLimit))")
+                    self.append(line: "warn: health probe failed (\(self.strikes)/\(self.strikeLimit))")
                     if self.strikes >= self.strikeLimit {
                         self.recycle()
                     } else {
@@ -350,7 +367,7 @@ final class DevSession {
         recycling = true
         recycleCount += 1
         state = .recycling
-        append(line: "♻︎ recycling (kill tree + relaunch)")
+        append(line: "recycle: kill tree + relaunch")
         onEvent?(.recycled(project: project.name))
         healthTask?.cancel()
         sampleTask?.cancel()
