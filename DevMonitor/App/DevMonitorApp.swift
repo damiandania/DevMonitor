@@ -9,7 +9,7 @@ struct DevMonitorApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             RootSplitView()
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
@@ -17,5 +17,11 @@ struct DevMonitorApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+
+        MenuBarExtra("Dev Monitor", systemImage: "waveform.path.ecg") {
+            MenuBarView()
+                .environment(appState)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
