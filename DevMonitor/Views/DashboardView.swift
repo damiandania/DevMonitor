@@ -188,7 +188,7 @@ struct DashboardView: View {
 
             LogPaneView(session: session)
                 .frame(maxHeight: .infinity)
-                .padding()
+                .padding(8)
         } else {
             ContentUnavailableView(
                 "Not Running",
