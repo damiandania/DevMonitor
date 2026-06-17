@@ -95,7 +95,7 @@ struct DashboardView: View {
             if let port = session?.effectivePort {
                 Button { openInBrowser(port: port) } label: {
                     Label {
-                        Text("Open :\(port)")
+                        Text("Open")
                     } icon: {
                         Image("chrome")
                             .resizable()
@@ -216,7 +216,9 @@ struct DashboardView: View {
 
         if let session {
             LogPaneView(session: session)
-                .frame(minHeight: 140)
+                .frame(minHeight: 160)
+                .padding(.horizontal)
+                .padding(.bottom, 12)
         } else {
             ContentUnavailableView(
                 "Not Running",
