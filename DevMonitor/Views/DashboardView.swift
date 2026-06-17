@@ -101,7 +101,7 @@ struct DashboardView: View {
                             .resizable()
                             .renderingMode(.template)
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 14, height: 14)
+                            .frame(width: 16, height: 16)
                     }
                 }
                 .controlSize(.large)
@@ -219,7 +219,7 @@ struct DashboardView: View {
                 .frame(minHeight: 160)
                 .padding(.horizontal)
                 .padding(.top, 10)
-                .padding(.bottom, 12)
+                .padding(.bottom, 24)
         } else {
             ContentUnavailableView(
                 "Not Running",
