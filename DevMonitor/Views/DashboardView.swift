@@ -32,12 +32,19 @@ struct DashboardView: View {
                 HStack(spacing: 8) {
                     Text(project.name).font(.title2.bold())
                     if let branch = GitInfo.branch(for: project.path) {
-                        Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
+                        HStack(spacing: 4) {
+                            Image("github")
+                                .resizable()
+                                .renderingMode(.template)
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 11, height: 11)
+                            Text(branch)
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
                     }
                 }
                 Text(project.path)

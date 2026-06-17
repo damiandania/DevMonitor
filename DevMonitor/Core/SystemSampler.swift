@@ -3,10 +3,11 @@ import Observation
 
 /// One row in the system process table.
 struct ProcessRow: Identifiable, Sendable {
-    let id: Int32          // pid
+    let id: Int32          // pid (-1 = aggregated dev-server row)
     let name: String
     let cpuPerCore: Double // per-core % (can exceed 100)
     let memBytes: Double
+    var isDevServer = false
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -21,6 +22,10 @@ final class SystemSampler {
     private var nameCache: [Int32: String] = [:]
     private var task: Task<Void, Never>?
     private let topN = 40
+
+    /// Supplies the active dev-server's pids + a readable label, so its whole tree shows as
+    /// one clear, highlighted row (e.g. "MiddleSpace :3000") instead of a bare "node".
+    var devServerInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
 
     init() {
         coreCount = max(1, ProcessInfo.processInfo.processorCount)
@@ -77,7 +82,38 @@ final class SystemSampler {
 
         prev = newPrev
         nameCache = seenNames  // drop dead pids
-        rows.sort { $0.cpuPerCore != $1.cpuPerCore ? $0.cpuPerCore > $1.cpuPerCore : $0.memBytes > $1.memBytes }
-        processes = Array(rows.prefix(topN))
+
+        // Group the active dev-server's whole tree into one clear, highlighted row; otherwise
+        // surface only processes with a real performance impact (heavy CPU or heavy memory).
+        let cores = Double(coreCount)
+        let heavyMem = 600.0 * 1_048_576  // 600 MB
+        let busyCPUPerCore = 25.0         // ~a quarter of a core or more
+        func impact(_ row: ProcessRow) -> Double {
+            row.cpuPerCore / cores + (totalMem > 0 ? row.memBytes / totalMem * 100 : 0)
+        }
+
+        let dev = devServerInfo?()
+        let devPids = dev?.pids ?? []
+        var devCPU = 0.0
+        var devMem = 0.0
+        var others: [ProcessRow] = []
+        for row in rows {
+            if !devPids.isEmpty, devPids.contains(row.id) {
+                devCPU += row.cpuPerCore
+                devMem += row.memBytes
+            } else {
+                others.append(row)
+            }
+        }
+
+        var result: [ProcessRow] = []
+        if let dev, !devPids.isEmpty {
+            result.append(ProcessRow(id: -1, name: dev.label, cpuPerCore: devCPU, memBytes: devMem, isDevServer: true))
+        }
+        result.append(contentsOf: others
+            .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }
+            .sorted { impact($0) > impact($1) }
+            .prefix(topN))
+        processes = result
     }
 }

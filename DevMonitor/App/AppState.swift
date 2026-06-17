@@ -21,6 +21,13 @@ final class AppState {
         selectedProjectID = projects.first?.id
         ipcServer.start(app: self)
         systemSampler.start()
+        systemSampler.devServerInfo = { [weak self] in
+            guard let session = self?.activeSession, session.pid > 0 else { return nil }
+            let pids = Set(ProcessTree.sessionMembers(of: session.pid))
+            guard !pids.isEmpty else { return nil }
+            let label = session.project.name + (session.effectivePort.map { " :\($0)" } ?? "")
+            return (pids, label)
+        }
     }
 
     var selectedProject: Project? {

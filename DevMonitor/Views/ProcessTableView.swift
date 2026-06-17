@@ -8,7 +8,16 @@ struct ProcessTableView: View {
     var body: some View {
         Table(sampler.processes) {
             TableColumn("Process") { row in
-                Text(row.name).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    if row.isDevServer {
+                        Image(systemName: "server.rack").foregroundStyle(.tint)
+                    }
+                    Text(row.name)
+                        .fontWeight(row.isDevServer ? .semibold : .regular)
+                        .foregroundStyle(row.isDevServer ? Color.accentColor : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             TableColumn("CPU") { row in
                 Text(cpuText(row.cpuPerCore))
