@@ -182,15 +182,13 @@ struct DashboardView: View {
             .padding(.bottom, 4)
 
             ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
-                .frame(minHeight: 180)
+                .frame(height: 220)
 
             Divider()
 
             LogPaneView(session: session)
-                .frame(minHeight: 160)
-                .padding(.horizontal)
-                .padding(.top, 10)
-                .padding(.bottom, 16)
+                .frame(maxHeight: .infinity)
+                .padding()
         } else {
             ContentUnavailableView(
                 "Not Running",
