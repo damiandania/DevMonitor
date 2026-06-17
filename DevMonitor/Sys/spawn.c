@@ -29,7 +29,10 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd) {
     // New session => child pid == its pgid == its sid, so killpg(pid) reaps the tree.
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
 
-    char *argv[] = { (char *)"/bin/zsh", (char *)"-lic", (char *)command, NULL };
+    // Login (not interactive): loads the user's PATH/fnm via .zprofile without the
+    // interactive .zshrc, which on some setups (p10k/fnm hooks) reparents the real
+    // shell out of our process group and prints session-restore noise.
+    char *argv[] = { (char *)"/bin/zsh", (char *)"-lc", (char *)command, NULL };
 
     pid_t pid = 0;
     int rc = posix_spawn(&pid, "/bin/zsh", &actions, &attr, argv, dm_environ);

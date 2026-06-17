@@ -84,6 +84,9 @@ struct DashboardView: View {
 
     @ViewBuilder private var logArea: some View {
         if let session {
+            MetricsGrid(session: session)
+                .padding(10)
+            Divider()
             LogPaneView(session: session)
         } else {
             ContentUnavailableView(

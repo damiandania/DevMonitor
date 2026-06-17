@@ -22,6 +22,15 @@ final class DevSession {
     private var consumeTask: Task<Void, Never>?
     private var stopping = false
 
+    // Metrics sampling (P2)
+    private(set) var history: [MetricPoint] = []
+    private let maxHistory = 120
+    private var sampleTask: Task<Void, Never>?
+    private var tick = 0
+    private var prevTreeCPUns: Int64 = 0
+    private var prevWall: UInt64 = 0
+    private var prevSysTicks: dm_cpu_ticks?
+
     /// Sendable events flowing from the background reader to the main-actor consumer.
     private enum Chunk: Sendable {
         case data(Data)
@@ -47,8 +56,10 @@ final class DevSession {
         // Silence Apple Terminal's zsh session save/restore lines in captured output.
         setenv("SHELL_SESSIONS_DISABLE", "1", 1)
         let baseCommand = project.devCommand ?? Detector.detect(path: project.path).devCommand
-        // Prepend env inline so the login shell applies it; avoids a C env array.
-        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 \(baseCommand)"
+        // Prepend env inline (the login shell applies it), and `exec` so the dev process
+        // REPLACES the shell — making it the session leader we spawned, so the whole tree
+        // is reliably enumerable (by session) and killable (by killpg).
+        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 exec \(baseCommand)"
         append(line: "▶ \(command)  (cwd: \(project.path))")
 
         var fd: Int32 = -1
@@ -109,11 +120,14 @@ final class DevSession {
             guard let self, case .launching = self.state else { return }
             self.state = .running(port: self.effectivePort ?? 3000)
         }
+
+        startSampling()
     }
 
     func stop() {
         stopping = true
         graceTask?.cancel()
+        sampleTask?.cancel()
         guard pid > 0 else {
             state = .stopped(code: 0)
             return
@@ -168,6 +182,8 @@ final class DevSession {
 
     private func handleExit(code: Int32) {
         graceTask?.cancel()
+        sampleTask?.cancel()
+        sampleTask = nil
         pid = 0
         readSource?.cancel()
         readSource = nil
@@ -183,5 +199,76 @@ final class DevSession {
             break
         }
         append(line: "■ process exited (code \(code))")
+    }
+
+    // MARK: - Metrics sampling (P2)
+
+    private func startSampling() {
+        prevTreeCPUns = 0
+        prevWall = 0
+        prevSysTicks = nil
+        tick = 0
+        history.removeAll()
+        sampleTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.sampleOnce()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func sampleOnce() {
+        let now = DispatchTime.now().uptimeNanoseconds
+
+        // Dev-server tree CPU time + memory.
+        var treeCPUns: Int64 = 0
+        var treeMem: Int64 = 0
+        if pid > 0 {
+            for p in ProcessTree.sessionMembers(of: pid) {
+                let st = dm_proc_stat_for(p)
+                if st.valid == 1 {
+                    treeCPUns += st.cpu_time_ns
+                    treeMem += st.phys_footprint
+                }
+            }
+        }
+        var treeCPU = 0.0
+        if prevWall > 0, treeCPUns >= prevTreeCPUns {
+            let dt = Double(now - prevWall)
+            if dt > 0 { treeCPU = Double(treeCPUns - prevTreeCPUns) / dt * 100 }
+        }
+        prevTreeCPUns = treeCPUns
+        prevWall = now
+
+        // System CPU via tick deltas.
+        var ticks = dm_cpu_ticks()
+        _ = dm_system_cpu_ticks(&ticks)
+        var sysCPU = 0.0
+        if let prev = prevSysTicks {
+            let dTotal = Double(ticks.total &- prev.total)
+            let dIdle = Double(ticks.idle &- prev.idle)
+            if dTotal > 0 { sysCPU = max(0, min(100, (1 - dIdle / dTotal) * 100)) }
+        }
+        prevSysTicks = ticks
+
+        var mem = dm_mem_info()
+        _ = dm_system_mem(&mem)
+
+        let point = MetricPoint(
+            id: tick,
+            systemCPU: sysCPU,
+            systemMemUsed: Double(mem.used),
+            systemMemTotal: Double(mem.total),
+            treeCPU: treeCPU,
+            treeMem: Double(treeMem),
+            buildCPU: 0,
+            orphanCPU: 0,
+            loadAvg: dm_load_avg()
+        )
+        tick += 1
+        history.append(point)
+        if history.count > maxHistory {
+            history.removeFirst(history.count - maxHistory)
+        }
     }
 }
