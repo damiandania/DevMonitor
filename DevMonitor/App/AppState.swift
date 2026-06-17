@@ -107,6 +107,24 @@ final class AppState {
         return b
     }
 
+    // Diagnostics (P7): a READ-ONLY Claude report about Dev Monitor itself.
+    var diagnosticReport: ClaudeRunner.Report?
+    var isGeneratingReport = false
+    var showReport = false
+
+    func generateReport() {
+        showReport = true
+        guard !isGeneratingReport else { return }
+        isGeneratingReport = true
+        diagnosticReport = nil
+        let log = AppLog.shared.recent()
+        Task { [weak self] in
+            let report = await ClaudeRunner.diagnose(internalLog: log)
+            self?.diagnosticReport = report
+            self?.isGeneratingReport = false
+        }
+    }
+
     func persist() {
         store.save(projects)
     }

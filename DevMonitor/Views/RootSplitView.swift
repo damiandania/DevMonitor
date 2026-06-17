@@ -4,6 +4,7 @@ struct RootSplitView: View {
     @Environment(AppState.self) private var app
 
     var body: some View {
+        @Bindable var app = app
         NavigationSplitView {
             ProjectSidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
@@ -19,5 +20,16 @@ struct RootSplitView: View {
             }
         }
         .navigationTitle("Dev Monitor")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { app.generateReport() } label: {
+                    Label("Diagnose", systemImage: "stethoscope")
+                }
+                .help("Ask Claude to diagnose Dev Monitor itself (read-only)")
+            }
+        }
+        .sheet(isPresented: $app.showReport) {
+            ReportSheet().environment(app)
+        }
     }
 }

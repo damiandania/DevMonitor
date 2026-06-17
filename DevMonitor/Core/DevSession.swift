@@ -88,6 +88,7 @@ final class DevSession {
         let childPid = dm_spawn_session(command, project.path, &fd, &inFD)
         guard childPid > 0, fd >= 0 else {
             state = .failed("spawn failed")
+            AppLog.shared.event("DevSession: spawn failed for \(project.name) — cmd: \(command)")
             return
         }
         pid = childPid
@@ -253,6 +254,7 @@ final class DevSession {
             } else {
                 state = .failed("exited with code \(code)")
                 onEvent?(.crashed(project: project.name, code: code))
+                AppLog.shared.event("DevSession: \(project.name) crashed (exit \(code))")
             }
         default:
             break
@@ -397,6 +399,7 @@ final class DevSession {
         state = .recycling
         append(line: "recycle: kill tree + relaunch")
         onEvent?(.recycled(project: project.name))
+        AppLog.shared.event("DevSession: recycling \(project.name) (recycle #\(recycleCount), port \(effectivePort.map(String.init) ?? "?"))")
         healthTask?.cancel()
         sampleTask?.cancel()
         graceTask?.cancel()
