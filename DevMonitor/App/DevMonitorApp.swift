@@ -4,6 +4,10 @@ import SwiftUI
 struct DevMonitorApp: App {
     @State private var appState = AppState()
 
+    init() {
+        Notifier.shared.requestAuthorization()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootSplitView()

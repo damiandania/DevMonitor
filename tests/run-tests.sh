@@ -26,6 +26,7 @@ build_run metrics  "$ROOT/tests/metrics/main.swift" "$SYS/metrics.c" "$SYS/spawn
 build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift"
 build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Model/Project.swift" "$SRC/Model/SessionState.swift" "$SRC/Model/MetricsSample.swift" \
+  "$SRC/Model/SupervisionEvent.swift" \
   "$SRC/Core/Detector.swift" "$SRC/Core/ProcessTree.swift" "$SRC/Core/DevSession.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 

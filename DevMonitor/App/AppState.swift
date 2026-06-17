@@ -60,6 +60,7 @@ final class AppState {
     func launch(_ project: Project) {
         if let s = activeSession, s.project.id != project.id { s.stop() }
         let session = DevSession(project: project)
+        session.onEvent = { event in Notifier.shared.notify(event) }
         activeSession = session
         session.start(memoryGB: project.memoryGB)
     }

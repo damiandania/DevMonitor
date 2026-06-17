@@ -16,6 +16,9 @@ final class DevSession {
     private(set) var startedAt: Date?
     private(set) var recycleCount = 0
 
+    /// Supervision-event hook (notifications). Set by AppState; nil in headless tests.
+    var onEvent: (@MainActor (SupervisionEvent) -> Void)?
+
     private let maxLogLines = 2000
     private var lineBuffer = ""
     private var readSource: DispatchSourceRead?
@@ -207,10 +210,11 @@ final class DevSession {
         healthTask = nil
         switch state {
         case .running, .launching, .degraded:
-            if stopping {
+            if stopping || code == 0 {
                 state = .stopped(code: 0)
             } else {
-                state = code == 0 ? .stopped(code: 0) : .failed("exited with code \(code)")
+                state = .failed("exited with code \(code)")
+                onEvent?(.crashed(project: project.name, code: code))
             }
         default:
             break
@@ -309,6 +313,7 @@ final class DevSession {
                     if self.strikes > 0 {
                         self.strikes = 0
                         self.append(line: "✓ health recovered")
+                        self.onEvent?(.recovered(project: self.project.name))
                     }
                     self.state = .running(port: port)
                 } else {
@@ -318,6 +323,7 @@ final class DevSession {
                         self.recycle()
                     } else {
                         self.state = .degraded(strikes: self.strikes)
+                        self.onEvent?(.hung(project: self.project.name))
                     }
                 }
             }
@@ -344,6 +350,7 @@ final class DevSession {
         recycleCount += 1
         state = .recycling
         append(line: "♻︎ recycling (kill tree + relaunch)")
+        onEvent?(.recycled(project: project.name))
         healthTask?.cancel()
         sampleTask?.cancel()
         graceTask?.cancel()
