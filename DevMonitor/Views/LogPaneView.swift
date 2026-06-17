@@ -1,0 +1,30 @@
+import SwiftUI
+
+/// Live, auto-scrolling log pane for a dev session.
+struct LogPaneView: View {
+    let session: DevSession
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(session.logLines.enumerated()), id: \.offset) { index, line in
+                        Text(line.isEmpty ? " " : line)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(index)
+                    }
+                }
+                .padding(8)
+            }
+            .background(Color(white: 0.08))
+            .onChange(of: session.logLines.count) { _, count in
+                guard count > 0 else { return }
+                withAnimation(.linear(duration: 0.1)) {
+                    proxy.scrollTo(count - 1, anchor: .bottom)
+                }
+            }
+        }
+    }
+}

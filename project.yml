@@ -1,0 +1,51 @@
+name: DevMonitor
+options:
+  bundleIdPrefix: app.devmonitor
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  DevMonitor:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - DevMonitor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.app
+        PRODUCT_NAME: "Dev Monitor"
+        INFOPLIST_FILE: DevMonitor/Resources/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_OBJC_BRIDGING_HEADER: DevMonitor/Sys/DevMonitor-Bridging-Header.h
+  dev-monitor:
+    type: tool
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - dev-monitor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.cli
+        PRODUCT_NAME: "dev-monitor"
+schemes:
+  DevMonitor:
+    build:
+      targets:
+        DevMonitor: all
+    run:
+      config: Debug
+  dev-monitor:
+    build:
+      targets:
+        dev-monitor: all
+    run:
+      config: Debug
