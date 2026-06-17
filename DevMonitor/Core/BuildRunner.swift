@@ -46,22 +46,23 @@ final class BuildRunner {
             return
         }
         pid = childPid
+        let pipeFD = fd  // immutable copy for the @Sendable Dispatch handlers
 
         let (stream, continuation) = AsyncStream<Chunk>.makeStream()
         let queue = DispatchQueue(label: "build.\(childPid)")
 
-        let reader = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
-        reader.setEventHandler {
+        let reader = DispatchSource.makeReadSource(fileDescriptor: pipeFD, queue: queue)
+        reader.setEventHandler { @Sendable in
             var buffer = [UInt8](repeating: 0, count: 1 << 16)
-            let n = read(fd, &buffer, buffer.count)
+            let n = read(pipeFD, &buffer, buffer.count)
             if n > 0 { continuation.yield(.data(Data(buffer[0..<n]))) }
         }
-        reader.setCancelHandler { close(fd) }
+        reader.setCancelHandler { @Sendable in close(pipeFD) }
         reader.resume()
         readSource = reader
 
         let watcher = DispatchSource.makeProcessSource(identifier: childPid, eventMask: .exit, queue: queue)
-        watcher.setEventHandler {
+        watcher.setEventHandler { @Sendable in
             var status: Int32 = 0
             waitpid(childPid, &status, 0)
             let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : status

@@ -32,10 +32,13 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - dev-monitor
+      - path: DevMonitor/Model/IPCProtocol.swift
+      - path: DevMonitor/Sys/ipc.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.cli
         PRODUCT_NAME: "dev-monitor"
+        SWIFT_OBJC_BRIDGING_HEADER: dev-monitor/Bridging.h
 schemes:
   DevMonitor:
     build:

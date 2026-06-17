@@ -13,10 +13,12 @@ final class AppState {
     var activeBuild: BuildRunner?
 
     @ObservationIgnored private let store = ProjectStore()
+    @ObservationIgnored private let ipcServer = IPCServer()
 
     init() {
         projects = store.load()
         selectedProjectID = projects.first?.id
+        ipcServer.start(app: self)
     }
 
     var selectedProject: Project? {
