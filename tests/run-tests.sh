@@ -31,5 +31,8 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Core/BuildRunner.swift" "$SRC/Core/ANSI.swift" "$SRC/Core/AppLog.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 
+build_run advisor "$ROOT/tests/advisor/main.swift" \
+  "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"
+
 [ "$fail" = 0 ] && echo "ALL SUITES PASSED" || echo "SOME SUITES FAILED"
 exit $fail

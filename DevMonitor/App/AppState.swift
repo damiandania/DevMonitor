@@ -125,6 +125,43 @@ final class AppState {
         }
     }
 
+    // Resource advisor (P9): Claude recommends actions on heavy processes. Managed dev processes
+    // may be stopped automatically; foreign processes are only closed after explicit confirmation.
+    var advice: ResourceAdvisor.Advice?
+    var isAdvising = false
+    var showAdvisor = false
+
+    func generateAdvice() {
+        showAdvisor = true
+        guard !isAdvising else { return }
+        isAdvising = true
+        advice = nil
+        let s = systemSampler
+        let procs: [ResourceAdvisor.Proc] = s.processes.map {
+            .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
+                  memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer)
+        }
+        let cpu = s.systemCPU, mem = s.systemMemPercent, cores = s.coreCount
+        Task { [weak self] in
+            let a = await ResourceAdvisor.advise(systemCPU: cpu, systemMemPercent: mem,
+                                                 coreCount: cores, procs: procs)
+            self?.advice = a
+            self?.isAdvising = false
+        }
+    }
+
+    /// Apply a recommendation. Foreign-process closes MUST already be confirmed by the caller.
+    func apply(_ r: ResourceAdvisor.Recommendation) {
+        switch r.action {
+        case .stopDevServer:
+            stopActive()
+        case .closeProcess:
+            if r.id > 0 { kill(r.id, SIGTERM) }   // foreign — caller has confirmed
+        case .keep, .investigate:
+            break
+        }
+    }
+
     func persist() {
         store.save(projects)
     }

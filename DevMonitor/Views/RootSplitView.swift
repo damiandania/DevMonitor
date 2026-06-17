@@ -22,6 +22,12 @@ struct RootSplitView: View {
         .navigationTitle("Dev Monitor")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button { app.generateAdvice() } label: {
+                    Label("Advisor", systemImage: "gauge.with.dots.needle.67percent")
+                }
+                .help("Ask Claude what to do about heavy processes (read-only; confirms before closing anything foreign)")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { app.generateReport() } label: {
                     Label("Diagnose", systemImage: "stethoscope")
                 }
@@ -30,6 +36,9 @@ struct RootSplitView: View {
         }
         .sheet(isPresented: $app.showReport) {
             ReportSheet().environment(app)
+        }
+        .sheet(isPresented: $app.showAdvisor) {
+            AdvisorSheet().environment(app)
         }
     }
 }

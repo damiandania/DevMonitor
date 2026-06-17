@@ -23,16 +23,20 @@ enum ClaudeRunner {
         --- Dev Monitor internal log ---
         \(internalLog)
         """
+        return await run(prompt: prompt, cwd: sourcePath)
+    }
 
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Report, Never>) in
+    /// Runs `claude -p` read-only with `prompt` on stdin, in `cwd`, and parses the JSON result.
+    /// Read-only by construction: `--permission-mode plan` + disallowed write tools.
+    static func run(prompt: String, cwd: String) async -> Report {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Report, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                // Read-only by construction: `--permission-mode plan` + disallow write tools.
                 process.arguments = ["-lc",
                     "claude -p --output-format json --permission-mode plan "
                     + "--disallowed-tools 'Edit Write MultiEdit NotebookEdit' --no-session-persistence"]
-                process.currentDirectoryURL = URL(fileURLWithPath: sourcePath)
+                process.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
                 let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
                 process.standardInput = stdin
