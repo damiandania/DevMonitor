@@ -70,6 +70,12 @@ final class AppState {
         persist()
     }
 
+    func setPort(_ port: Int?, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].port = (port ?? 0) > 0 ? port : nil
+        persist()
+    }
+
     func launch(_ project: Project) {
         if let s = activeSession, s.project.id != project.id { s.stop() }
         let session = DevSession(project: project)

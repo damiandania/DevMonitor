@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Per-project dashboard: status, launch controls and live log (P1).
 /// Charts (P2), health controls (P3) and build runner (P5) extend this.
@@ -71,7 +72,7 @@ struct DashboardView: View {
 
     private var controlBar: some View {
         let running = session?.state.isActive ?? false
-        return HStack(spacing: 14) {
+        return HStack(spacing: 12) {
             Button {
                 if running { app.stopActive() } else { app.launch(project) }
             } label: {
@@ -79,6 +80,7 @@ struct DashboardView: View {
                       systemImage: running ? "stop.fill" : "play.fill")
             }
             .controlSize(.large)
+            .buttonBorderShape(.capsule)
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
 
             if running {
@@ -86,8 +88,33 @@ struct DashboardView: View {
                     Label("Restart", systemImage: "arrow.clockwise")
                 }
                 .controlSize(.large)
+                .buttonBorderShape(.capsule)
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             }
+
+            if let port = session?.effectivePort {
+                Button { openInBrowser(port: port) } label: {
+                    Label("Open :\(port)", systemImage: "arrow.up.forward.app")
+                }
+                .controlSize(.large)
+                .buttonBorderShape(.capsule)
+                .help("Open http://localhost:\(port) in Chrome")
+            }
+
+            Button { openInVSCode() } label: {
+                Label {
+                    Text("Code")
+                } icon: {
+                    Image("vscode")
+                        .resizable()
+                        .renderingMode(.template)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 13, height: 13)
+                }
+            }
+            .controlSize(.large)
+            .buttonBorderShape(.capsule)
+            .help("Open the project in VS Code")
 
             Divider().frame(height: 20)
 
@@ -101,16 +128,41 @@ struct DashboardView: View {
                     .disabled(running)
             }
 
+            HStack(spacing: 5) {
+                Image(systemName: "network").foregroundStyle(.secondary)
+                TextField("auto", value: Binding(
+                    get: { project.port },
+                    set: { app.setPort($0, for: project.id) }
+                ), format: .number.grouping(.never))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 58)
+                    .disabled(running)
+                    .help("Port to run on (blank = framework default)")
+            }
+
             Label(project.packageManager.rawValue, systemImage: "shippingbox")
                 .foregroundStyle(.secondary)
-            if let port = session?.effectivePort {
-                Label(":\(port)", systemImage: "network").foregroundStyle(.secondary)
-            }
+
             Spacer()
             buildControls
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    private func openInBrowser(port: Int) {
+        guard let url = URL(string: "http://localhost:\(port)/") else { return }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-a", "Google Chrome", url.absoluteString]
+        do { try task.run() } catch { NSWorkspace.shared.open(url) }
+    }
+
+    private func openInVSCode() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-a", "Visual Studio Code", project.path]
+        do { try task.run() } catch { NSWorkspace.shared.open(URL(fileURLWithPath: project.path)) }
     }
 
     @ViewBuilder private var buildControls: some View {
@@ -129,6 +181,9 @@ struct DashboardView: View {
             Button { app.runBuild(project) } label: {
                 Label("Build", systemImage: "hammer.fill")
             }
+            .controlSize(.large)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
             .disabled(app.build(for: project)?.isRunning ?? false)
         }
     }

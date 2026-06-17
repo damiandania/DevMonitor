@@ -76,7 +76,8 @@ final class DevSession {
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
         // is reliably enumerable (by session) and killable (by killpg).
-        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 exec \(baseCommand)"
+        let portEnv = project.port.map { "PORT=\($0) " } ?? ""
+        let command = "NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=0 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         var fd: Int32 = -1
