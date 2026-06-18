@@ -34,7 +34,9 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd, int *i
         posix_spawn_file_actions_addclose(&actions, stdinfd[0]);
     }
     if (cwd != NULL) {
-        posix_spawn_file_actions_addchdir(&actions, cwd);
+        // Use the macOS-canonical `_np` name: available on every macOS SDK, unlike the bare
+        // POSIX-2024 `posix_spawn_file_actions_addchdir` which only the newest SDK declares.
+        posix_spawn_file_actions_addchdir_np(&actions, cwd);
     }
 
     posix_spawnattr_t attr;
