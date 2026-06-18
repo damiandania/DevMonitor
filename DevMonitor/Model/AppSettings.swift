@@ -15,24 +15,28 @@ struct AppSettings: Codable, Sendable, Equatable {
     var defaultMemoryGB: Int
     /// Which activity bars to show on the dashboard (ids from `allBars`).
     var bars: [String]
+    /// UI appearance: "system" (follow macOS), "light", or "dark".
+    var theme: String
 
     init(browser: String? = nil,
          editor: String? = nil,
          analysisModel: String = AppSettings.defaultModel,
          autoCloseOrphans: Bool = true,
          defaultMemoryGB: Int = 4,
-         bars: [String] = AppSettings.defaultBars) {
+         bars: [String] = AppSettings.defaultBars,
+         theme: String = "system") {
         self.browser = browser
         self.editor = editor
         self.analysisModel = analysisModel
         self.autoCloseOrphans = autoCloseOrphans
         self.defaultMemoryGB = defaultMemoryGB
         self.bars = bars
+        self.theme = theme
     }
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
-        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars
+        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -42,9 +46,29 @@ struct AppSettings: Codable, Sendable, Equatable {
         autoCloseOrphans = try c.decodeIfPresent(Bool.self, forKey: .autoCloseOrphans) ?? true
         defaultMemoryGB = try c.decodeIfPresent(Int.self, forKey: .defaultMemoryGB) ?? 4
         bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
+        theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
     }
 
     static let defaultModel = "claude-haiku-4-5"
+
+    /// Appearance options for the theme picker.
+    struct ThemeOption: Identifiable, Sendable { let id: String; let label: String }
+    static let themes: [ThemeOption] = [
+        .init(id: "system", label: "System"),
+        .init(id: "light", label: "Light"),
+        .init(id: "dark", label: "Dark"),
+    ]
+
+    /// Apply a theme to the whole app (all windows, modals and the menu-bar panel).
+    /// Uses `NSApplication.shared` (never nil) — `NSApp` is still nil during SwiftUI `App.init`.
+    @MainActor static func applyAppearance(_ theme: String) {
+        let appearance: NSAppearance? = switch theme {
+        case "light": NSAppearance(named: .aqua)
+        case "dark":  NSAppearance(named: .darkAqua)
+        default:      nil   // follow the system setting
+        }
+        NSApplication.shared.appearance = appearance
+    }
 
     /// Models offered for analysis (newest Claude family).
     struct ModelOption: Identifiable, Sendable { let id: String; let label: String }

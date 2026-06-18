@@ -53,6 +53,12 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             ClaudeHookSection()
+            Section("Appearance") {
+                Picker("Theme", selection: theme) {
+                    ForEach(AppSettings.themes) { Text($0.label).tag($0.id) }
+                }
+                .pickerStyle(.segmented)
+            }
             Section("Open in") {
                 Picker("Browser (Open)", selection: browser) {
                     Text("System default").tag(String?.none)
@@ -117,6 +123,11 @@ private struct GeneralSettings: View {
     }
     private var defaultMem: Binding<Int> {
         .init(get: { app.settings.defaultMemoryGB }, set: { app.settings.defaultMemoryGB = $0; app.persistSettings() })
+    }
+    private var theme: Binding<String> {
+        .init(get: { app.settings.theme }, set: {
+            app.settings.theme = $0; app.persistSettings(); AppSettings.applyAppearance($0)
+        })
     }
 }
 

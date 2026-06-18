@@ -26,6 +26,9 @@ final class AppState {
 
     init() {
         settings = settingsStore.load()
+        // Apply the saved theme once the run loop is up — NSApp is nil during SwiftUI App.init.
+        let theme = settings.theme
+        Task { @MainActor in AppSettings.applyAppearance(theme) }
         projects = store.load()
         installedBrowsers = BrowserList.installed()
         installedEditors = EditorList.installed()
