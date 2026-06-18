@@ -164,6 +164,7 @@ private struct SectionRow: View {
             .foregroundStyle(.white)
             .frame(width: 18, height: 18)
             .background(Circle().fill(color))
+            .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
     }
 }
 
