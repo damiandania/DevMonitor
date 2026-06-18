@@ -24,6 +24,7 @@ struct AppSettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
         }

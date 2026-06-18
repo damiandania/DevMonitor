@@ -35,11 +35,23 @@ struct DoctorSheet: View {
             }
             .navigationTitle("Doctor")
             .navigationSplitViewColumnWidth(min: 210, ideal: 230)
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
                 .navigationTitle(section.title)
-                .overlay(alignment: .topTrailing) {
-                    CircleAction(busy: busy, start: start, stop: stop).padding()
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { busy ? stop() : start() } label: {
+                            Image(systemName: busy ? "stop.fill"
+                                  : (hasResult ? "arrow.clockwise" : "play.fill"))
+                                .font(.system(size: 14, weight: .bold))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.circle)
+                        .tint(busy ? .red : .accentColor)
+                        .help(busy ? "Stop analysis" : (hasResult ? "Re-analyze" : "Analyze"))
+                    }
                 }
         }
         .frame(minWidth: 820, minHeight: 580)
@@ -68,6 +80,13 @@ struct DoctorSheet: View {
         case .memory: return app.isGeneratingMemory
         }
     }
+    private var hasResult: Bool {
+        switch section {
+        case .heavy: return app.advice != nil
+        case .devMonitor: return app.diagnosticReport != nil
+        case .memory: return app.memoryAdvice != nil
+        }
+    }
     private func start() {
         switch section {
         case .heavy: app.generateAdvice()
@@ -88,24 +107,6 @@ struct DoctorSheet: View {
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(text)
-    }
-}
-
-/// Big circular Analyze button (top-right corner); becomes a red Stop while running.
-private struct CircleAction: View {
-    let busy: Bool
-    let start: () -> Void
-    let stop: () -> Void
-    var body: some View {
-        Button { busy ? stop() : start() } label: {
-            Image(systemName: busy ? "stop.fill" : "play.fill")
-                .font(.system(size: 20, weight: .bold))
-                .frame(width: 52, height: 52)
-        }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.circle)
-        .tint(busy ? .red : .accentColor)
-        .help(busy ? "Stop analysis" : "Analyze")
     }
 }
 
@@ -149,7 +150,6 @@ private struct AdviceList: View {
                         }
                     }
                     .padding()
-                    .padding(.top, 40)   // clear the circular button
                 }
                 CostFooter(isError: advice.isError, cost: advice.costUSD)
             } else {
@@ -245,7 +245,6 @@ private struct DiagnosisDetail: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
-                    .padding(.top, 40)
             }
             CostFooter(isError: report.isError, cost: report.costUSD)
         } else {
