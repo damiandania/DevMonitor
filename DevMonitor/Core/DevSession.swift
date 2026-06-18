@@ -15,6 +15,11 @@ final class DevSession {
     private(set) var pid: pid_t = 0
     private(set) var startedAt: Date?
     private(set) var recycleCount = 0
+    /// Exit code of the most recent process exit (nil until it has exited at least once).
+    private(set) var lastExitCode: Int32?
+    /// Human-readable cause of the last failure, with a remedy when known (e.g. an OOM hint), so an
+    /// agent can diagnose from `status --json` without reading internal log files. Cleared on health.
+    private(set) var lastError: String?
 
     /// Supervision-event hook (notifications). Set by AppState; nil in headless tests.
     var onEvent: (@MainActor (SupervisionEvent) -> Void)?
@@ -46,7 +51,22 @@ final class DevSession {
     private var lastMemoryGB = 4
     private let probeInterval: Duration = .seconds(6)
     private let httpTimeout: TimeInterval = 8   // tolerant of a busy server under load
+    private let warmHTTPTimeout: TimeInterval = 3   // snappier flip to .running during warm-up
     private let strikeLimit = 2
+
+    // Crash recovery (auto-revive)
+    /// Last port the server actually bound to — re-pinned across recycles/restarts so it doesn't
+    /// drift (e.g. 3000 → 3001) when relaunched.
+    private var lastKnownPort: Int?
+    /// One-shot: bump the heap and relaunch when a crash looks like an out-of-memory kill.
+    private var oomRetried = false
+    /// Bounded auto-restart after an unexpected crash (budget restored after a stable healthy streak).
+    private var crashRestarts = 0
+    private let crashRestartLimit = 3
+    /// Consecutive healthy probes since the last (re)launch; the crash budget is only restored once
+    /// this reaches `stableProbesToReset`, so a flapping server doesn't auto-restart forever.
+    private var stableProbes = 0
+    private let stableProbesToReset = 3
 
     private enum Chunk: Sendable {
         case data(Data)
@@ -58,7 +78,14 @@ final class DevSession {
         self.project = project
     }
 
-    var effectivePort: Int? { detectedPort ?? project.port }
+    var effectivePort: Int? { detectedPort ?? project.port ?? lastKnownPort }
+
+    /// HTTP-confirmed running — the reliable "ready" signal for agents (true only after a successful
+    /// health probe, never during warm-up).
+    var isReady: Bool { if case .running = state { return true }; return false }
+
+    /// The server's URL once a port is known (detected, configured, or pinned).
+    var url: String? { effectivePort.map { "http://localhost:\($0)/" } }
 
     // MARK: - Launch / stop
 
@@ -79,7 +106,15 @@ final class DevSession {
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
         // is reliably enumerable (by session) and killable (by killpg).
-        let portEnv = project.port.map { "PORT=\($0) " } ?? ""
+        // Pin the port: an explicit project.port wins; otherwise reuse the last port the server
+        // actually bound to, so a relaunch/recycle keeps the same port instead of drifting (3000→3001).
+        let pinnedPort = project.port ?? lastKnownPort
+        let portEnv = pinnedPort.map { "PORT=\($0) " } ?? ""
+        // Auto-cleanup: reap any leftover/orphan dev process for this project (e.g. from a
+        // previously force-killed Dev Monitor, reparented to launchd) before launching — both
+        // whatever is holding the port we'll bind and any stray tree of this project — otherwise
+        // the fresh server collides and exits ("code 6").
+        reapLeftovers(pinnedPort: pinnedPort)
         // NUXT_IGNORE_LOCK=1: Dev Monitor is the single authority that supervises one server per
         // project, so Nuxt's own dev-lock would only get in the way — e.g. a stale `nuxt.lock`
         // left behind by a SIGKILLed run would block the relaunch. We dedupe ourselves.
@@ -90,6 +125,7 @@ final class DevSession {
         var inFD: Int32 = -1
         let childPid = dm_spawn_session(command, project.path, &fd, &inFD)
         guard childPid > 0, fd >= 0 else {
+            lastError = "spawn failed — could not start the dev command"
             state = .failed("spawn failed")
             AppLog.shared.event("DevSession: spawn failed for \(project.name) — cmd: \(command)")
             return
@@ -152,6 +188,42 @@ final class DevSession {
         startHealth()
     }
 
+    /// Reap leftover/orphan dev processes for this project before (re)launching: anything holding
+    /// the port we're about to bind, and any stray tree of this project (e.g. an orphan from a
+    /// force-killed Dev Monitor, reparented to launchd). Conservative on purpose — only JS-runtime
+    /// dev servers are touched, and editors / language servers that reference the same path are
+    /// explicitly skipped, so we never kill VS Code, tsserver, an unrelated native service, etc.
+    private func reapLeftovers(pinnedPort: Int?) {
+        var pids = [pid_t](repeating: 0, count: 8192)
+        let count = Int(dm_all_pids(&pids, 8192))
+        guard count > 0 else { return }
+        var nameBuf = [CChar](repeating: 0, count: 1024)
+        var argsBuf = [CChar](repeating: 0, count: 8192)
+        let jsRuntimes: Set<String> = ["node", "npm", "npx", "nuxt", "vite", "next", "pnpm", "yarn", "bun", "deno"]
+        let editorMarkers = ["tsserver", "typescript/lib", "Code Helper", "Visual Studio Code",
+                             ".vscode", "Cursor", "language-server", "languageserver", "eslintServer", "Electron"]
+        let devTokens = ["nuxt", "vite", "next", "run dev", "astro", "remix", "webpack", "parcel", "node_modules/.bin"]
+        for i in 0..<count {
+            let p = pids[i]
+            if p <= 1 || p == pid { continue }
+            let comm = dm_proc_name(p, &nameBuf, 1024) > 0 ? String(cString: nameBuf).lowercased() : ""
+            let args = dm_proc_args(p, &argsBuf, 8192) > 0 ? String(cString: argsBuf) : ""
+            let isJS = jsRuntimes.contains(comm)
+            let isEditor = editorMarkers.contains { args.contains($0) }
+            let onPort = pinnedPort.map { Int(dm_proc_listen_port(p)) == $0 } ?? false
+            // (a) holds the exact port we'll bind (a JS server or this project's process), or
+            // (b) a leftover dev-server tree of THIS project still lingering.
+            let portVictim = onPort && !isEditor && (isJS || args.contains(project.path))
+            let projectVictim = isJS && !isEditor && args.contains(project.path)
+                && devTokens.contains { args.contains($0) }
+            guard portVictim || projectVictim else { continue }
+            let pgid = getpgid(p)
+            append(line: "cleanup: reaping leftover pid \(p) (\(comm))\(onPort ? " on port \(pinnedPort!)" : "")")
+            if pgid > 1 { killpg(pgid, SIGKILL) }
+            kill(p, SIGKILL)
+        }
+    }
+
     /// Send a line of input to the running dev server's stdin.
     func sendInput(_ text: String) {
         guard stdinFD >= 0 else { return }
@@ -204,6 +276,7 @@ final class DevSession {
            let match = clean.firstMatch(of: /https?:\/\/[^\s:\/]+:(\d{2,5})/),
            let port = Int(match.1) {
             detectedPort = port
+            lastKnownPort = port
         }
         // NOTE: we do NOT flip to .running on the "ready" log line — the server is usually
         // still compiling and not accepting HTTP yet. .running is set by the first successful
@@ -220,16 +293,22 @@ final class DevSession {
         }
     }
 
-    /// Mirrors the session log (ANSI-stripped) to a file so it can be followed live from a
-    /// terminal — the diagnostics channel: ~/Library/Application Support/DevMonitor/dev-server.log
+    /// Mirrors this project's session log (ANSI-stripped) to its OWN file so it can be followed live
+    /// from a terminal (`dev-monitor logs [path]`) and so one project's output never clobbers
+    /// another's. Previous runs are retained (a crash log survives the next launch) up to a size cap.
     private func openLogFile() {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DevMonitor", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let url = base.appendingPathComponent("dev-server.log")
-        FileManager.default.createFile(atPath: url.path, contents: Data())
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Project.logsDirectory, withIntermediateDirectories: true)
+        let url = project.logFileURL
+        let size = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+        if !fm.fileExists(atPath: url.path) || size > 5_000_000 {
+            fm.createFile(atPath: url.path, contents: Data())   // fresh start (new file or rotated)
+        }
         logFile = try? FileHandle(forWritingTo: url)
+        logFile?.seekToEndOfFile()
+        if let header = "\n===== \(project.name) — new run =====\n".data(using: .utf8) {
+            logFile?.write(header)
+        }
     }
 
     private func handleExit(code: Int32) {
@@ -237,6 +316,7 @@ final class DevSession {
         sampleTask?.cancel()
         sampleTask = nil
         pid = 0
+        lastExitCode = code
         closeStdin()
         readSource?.cancel()
         readSource = nil
@@ -252,17 +332,73 @@ final class DevSession {
         healthTask = nil
         switch state {
         case .running, .launching, .degraded:
+            append(line: "exit: process exited (code \(code))")
             if stopping || code == 0 {
                 state = .stopped(code: 0)
-            } else {
-                state = .failed("exited with code \(code)")
+                lastError = nil
+            } else if looksLikeOOM(), !oomRetried, let bigger = biggerHeap() {
+                // The crash looks like an out-of-memory kill → relaunch once with a bigger heap.
+                oomRetried = true
+                lastError = "out of memory — relaunching with \(bigger) GB heap (set explicitly with: dev-monitor up --gb \(bigger))"
+                append(line: "oom: out-of-memory detected — relaunching with \(bigger) GB heap")
+                AppLog.shared.event("DevSession: \(project.name) OOM (exit \(code)) — retrying with \(bigger) GB")
+                onEvent?(.recycled(project: project.name))
+                scheduleRestart(memoryGB: bigger, delaySeconds: 1)
+            } else if hasBeenHealthy, crashRestarts < crashRestartLimit {
+                // A server that WAS up then died → bounded auto-restart with exponential backoff
+                // (1s, 2s, 4s). A server that never became healthy is left Failed (likely a config
+                // error, not worth looping on).
+                crashRestarts += 1
+                let backoff = min(8, 1 << (crashRestarts - 1))
+                lastError = "exited with code \(code) — auto-restarting (\(crashRestarts)/\(crashRestartLimit))"
+                append(line: "crash: exit \(code) — auto-restarting in \(backoff)s (\(crashRestarts)/\(crashRestartLimit))")
+                AppLog.shared.event("DevSession: \(project.name) crashed (exit \(code)) — auto-restart \(crashRestarts)/\(crashRestartLimit)")
                 onEvent?(.crashed(project: project.name, code: code))
-                AppLog.shared.event("DevSession: \(project.name) crashed (exit \(code))")
+                scheduleRestart(memoryGB: lastMemoryGB, delaySeconds: backoff)
+            } else {
+                // Give up. Keep an OOM hint if that's what it looked like, else the plain exit cause.
+                lastError = looksLikeOOM()
+                    ? "out of memory — relaunch with more heap (e.g. dev-monitor up --gb \(biggerHeap() ?? lastMemoryGB))"
+                    : "exited with code \(code)"
+                state = .failed(lastError ?? "exited with code \(code)")
+                onEvent?(.crashed(project: project.name, code: code))
+                AppLog.shared.event("DevSession: \(project.name) crashed (exit \(code)) — giving up after \(crashRestarts) auto-restarts")
             }
         default:
-            break
+            append(line: "exit: process exited (code \(code))")
         }
-        append(line: "exit: process exited (code \(code))")
+    }
+
+    /// Heuristic: did the recent output look like a V8 out-of-memory abort? (Robust to the exit code,
+    /// which varies — SIGABRT 134, Nuxt 6, etc.)
+    private func looksLikeOOM() -> Bool {
+        logLines.suffix(60).contains { line in
+            let s = line.lowercased()
+            return s.contains("heap out of memory") || s.contains("javascript heap")
+                || s.contains("reached heap limit") || s.contains("allocation failed")
+        }
+    }
+
+    /// The next heap to try after an OOM: double the last, floored at 4 GB, capped at physical RAM.
+    /// Returns nil when there's no headroom left to grow.
+    private func biggerHeap() -> Int? {
+        let sysGB = max(4, Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824))
+        let next = min(max(lastMemoryGB * 2, 4), sysGB)
+        return next > lastMemoryGB ? next : nil
+    }
+
+    /// Relaunch after a delay (unless the user has since stopped us). During the backoff the state
+    /// reads `.recycling` ("Recycling…", active) — not `.idle` — so an observer (human or agent
+    /// polling `status`) sees it *recovering*, not dead. `.idle` is set only at the instant of
+    /// relaunch so `start()`'s `!isActive` guard passes.
+    private func scheduleRestart(memoryGB gb: Int, delaySeconds: Int) {
+        state = .recycling
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            guard let self, !self.stopping else { return }
+            self.state = .idle
+            self.start(memoryGB: gb)
+        }
     }
 
     // MARK: - Metrics sampling (P2)
@@ -338,19 +474,24 @@ final class DevSession {
 
     private func startHealth() {
         strikes = 0
+        stableProbes = 0
         hasBeenHealthy = false
         healthTask = Task { @MainActor [weak self] in
             // Probe a bit more often while warming up so we flip to .running promptly.
             while !Task.isCancelled {
                 guard let self else { return }
-                let interval: Duration = self.hasBeenHealthy ? self.probeInterval : .seconds(2)
+                let interval: Duration = self.hasBeenHealthy ? self.probeInterval : .seconds(1)
                 try? await Task.sleep(for: interval)
                 switch self.state {
                 case .stopped, .failed, .recycling, .idle: continue
                 default: break
                 }
                 guard let port = self.effectivePort else { continue }
-                let alive = await Self.probe(port: port, timeout: self.httpTimeout)
+                // While warming up use a SHORT timeout: a server that's still compiling can accept the
+                // connection and hold it, which would otherwise block this loop for the full (load-
+                // tolerant) timeout and delay the flip to .running. Once healthy, use the long one.
+                let timeout = self.hasBeenHealthy ? self.httpTimeout : self.warmHTTPTimeout
+                let alive = await Self.probe(port: port, timeout: timeout)
                 if Task.isCancelled || self.stopping || self.recycling { continue }
 
                 if alive {
@@ -358,6 +499,15 @@ final class DevSession {
                     let firstTime = !self.hasBeenHealthy
                     self.hasBeenHealthy = true
                     self.strikes = 0
+                    // Restore the crash-recovery budget only after a STABLE streak of healthy
+                    // probes — so a server that flaps (heal → crash → heal …) still hits the
+                    // restart cap instead of auto-restarting forever.
+                    self.lastError = nil   // it's responding now — clear any stale failure cause
+                    self.stableProbes += 1
+                    if self.stableProbes >= self.stableProbesToReset {
+                        self.crashRestarts = 0
+                        self.oomRetried = false
+                    }
                     if firstTime { self.append(line: "ok: server is responding on :\(port)") }
                     if recovering {
                         self.append(line: "ok: health recovered")
@@ -365,6 +515,7 @@ final class DevSession {
                     }
                     self.state = .running(port: port)
                 } else if self.hasBeenHealthy {
+                    self.stableProbes = 0
                     // Was healthy and stopped responding → strike toward recycle.
                     self.strikes += 1
                     self.append(line: "warn: health probe failed (\(self.strikes)/\(self.strikeLimit))")

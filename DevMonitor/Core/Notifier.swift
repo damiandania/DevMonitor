@@ -8,7 +8,11 @@ final class Notifier {
     private init() {}
 
     func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // Guarded: `UNUserNotificationCenter.current()` aborts (NSException) on a bundle the
+        // notification daemon rejects (e.g. an ad-hoc build not yet registered). Never crash for it.
+        _ = dm_try {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     /// A free-form notification (e.g. "closed orphaned processes").
@@ -18,7 +22,7 @@ final class Notifier {
         content.title = title
         content.body = body
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        deliver(request)
     }
 
     func notify(_ event: SupervisionEvent) {
@@ -46,6 +50,12 @@ final class Notifier {
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        deliver(request)
+    }
+
+    /// Post a request, guarded so a notification subsystem failure can never abort the app
+    /// (critically: a *managed server crashing* must not take the supervisor down with it).
+    private func deliver(_ request: UNNotificationRequest) {
+        _ = dm_try { UNUserNotificationCenter.current().add(request) }
     }
 }

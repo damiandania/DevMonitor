@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AppKit
 
 /// Root observable app state. Owns the project list, selection and the active session.
 @MainActor
@@ -32,6 +33,14 @@ final class AppState {
         let theme = settings.theme
         Task { @MainActor in AppSettings.applyAppearance(theme) }
         projects = store.load()
+        // Drop entries whose folder no longer exists (stale/junk paths) so `status`, the sidebar
+        // and projects.json stay in sync with reality. Missing folders can never be launched anyway.
+        let onDisk = projects.filter { FileManager.default.fileExists(atPath: $0.path) }
+        if onDisk.count != projects.count {
+            AppLog.shared.event("Startup: pruned \(projects.count - onDisk.count) project(s) with a missing folder")
+            projects = onDisk
+            store.save(projects)
+        }
         installedBrowsers = BrowserList.installed()
         installedEditors = EditorList.installed()
         selectedProjectID = projects.first?.id
@@ -61,6 +70,12 @@ final class AppState {
             return (pids, label)
         }
         systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
+        // Clean up on quit: stop every supervised server/build so none is left orphaned holding a
+        // port — they run in their own session (SETSID) and would otherwise outlive the app.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shutdown() }
+        }
     }
 
     var selectedProject: Project? {
@@ -68,11 +83,21 @@ final class AppState {
         return projects.first { $0.id == id }
     }
 
-    func addProject(path: String) {
+    /// Physical RAM in whole GB — the ceiling for any injected heap.
+    var systemRAMGB: Int { max(1, Int((systemSampler.totalMem / 1_073_741_824).rounded())) }
+
+    /// The heap (GB) that will actually be injected for `project`, capped at this machine's RAM.
+    func effectiveMemoryGB(for project: Project) -> Int { project.effectiveMemoryGB(systemGB: systemRAMGB) }
+
+    /// Add (or focus, if already present) a project. Returns the project, or `nil` when `path` is not
+    /// a launchable project folder — in which case nothing is created or persisted.
+    @discardableResult
+    func addProject(path: String) -> Project? {
         if let existing = projects.first(where: { $0.path == path }) {
             selectedProjectID = existing.id
-            return
+            return existing
         }
+        guard Detector.isProject(path: path) else { return nil }
         let d = Detector.detect(path: path)
         let name = URL(fileURLWithPath: path).lastPathComponent
         let project = Project(
@@ -88,6 +113,7 @@ final class AppState {
         projects.append(project)
         selectedProjectID = project.id
         persist()
+        return project
     }
 
     func removeProject(_ id: Project.ID) {
@@ -147,7 +173,7 @@ final class AppState {
         let session = DevSession(project: project)
         session.onEvent = { event in Notifier.shared.notify(event) }
         sessions[project.id] = session
-        session.start(memoryGB: project.memoryGB)
+        session.start(memoryGB: effectiveMemoryGB(for: project))
     }
 
     /// Stop the supervised server for one project.
@@ -155,6 +181,19 @@ final class AppState {
 
     /// Stop every supervised server (pressure relief / Doctor "stop dev servers").
     func stopAllSessions() { for s in sessions.values { s.stop() } }
+
+    /// Reap every supervised server and build process tree on app quit, so nothing is left orphaned
+    /// holding a port (they run in their own session via SETSID and would otherwise survive). Runs
+    /// synchronously since the process is terminating: SIGTERM each group, a short grace, then
+    /// SIGKILL. A force-kill of the app can't run this — the next launch's `reapLeftovers` covers it.
+    func shutdown() {
+        let pgids = sessions.values.map(\.pid).filter { $0 > 0 }
+                  + builds.values.map(\.pid).filter { $0 > 0 }
+        guard !pgids.isEmpty else { return }
+        for pg in pgids { killpg(pg, SIGTERM) }
+        usleep(400_000)
+        for pg in pgids { killpg(pg, SIGKILL) }
+    }
 
     /// Close a server tab in the global terminal: stop the dev server and drop it.
     func closeServer(id: Project.ID) {
@@ -183,10 +222,7 @@ final class AppState {
     }
 
     /// The active build if it belongs to `project`, else nil.
-    func build(for project: Project) -> BuildRunner? {
-        guard let b = builds[project.id] else { return nil }
-        return b
-    }
+    func build(for project: Project) -> BuildRunner? { builds[project.id] }
 
     // Diagnostics (P7): a READ-ONLY Claude report about Dev Monitor itself.
     var diagnosticReport: ClaudeRunner.Report?

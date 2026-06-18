@@ -10,6 +10,17 @@ enum Detector {
         var port: Int?
     }
 
+    /// Whether `path` is an existing directory that actually holds a launchable JS/TS project — a
+    /// `package.json` or a Deno config. Used to reject bogus `up <path>` calls before a junk entry
+    /// is ever created/persisted (e.g. `up /tmp` or `up /does/not/exist`).
+    static func isProject(path: String) -> Bool {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { return false }
+        let manifests = ["package.json", "deno.json", "deno.jsonc", "deno.lock"]
+        return manifests.contains { fm.fileExists(atPath: path + "/" + $0) }
+    }
+
     static func detect(path: String) -> Result {
         let fm = FileManager.default
 

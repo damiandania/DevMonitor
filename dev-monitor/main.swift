@@ -6,29 +6,40 @@ import Foundation
 // A socket client must never die from SIGPIPE when the peer closes mid-write.
 signal(SIGPIPE, SIG_IGN)
 
+let dmVersion = "0.1.0"   // keep in sync with project.yml MARKETING_VERSION
+
 let usage = """
 dev-monitor — launch, build and supervise dev servers through the Dev Monitor app.
 
 USAGE:
-  dev-monitor up [path] [--gb N]    Start the project's server (no-op if already up). Alias: run
-  dev-monitor build [path]          Build the project — stops its server first, relaunches after
-  dev-monitor status [--json]       List every supervised server (name, state, port)
+  dev-monitor up [path] [--gb N] [--wait]   Start the server (--wait blocks until ready, prints URL). Alias: run
+  dev-monitor build [path]          Build the project (runs alongside the dev server)
+  dev-monitor status [--json]       List every known project (name, state, port)
   dev-monitor stop [path] [--all]   Stop one project's server (default: cwd), or --all of them
-  dev-monitor restart [path]        Recycle (kill tree + relaunch) the project's server
-  dev-monitor logs [-f]             Print (or follow with -f) the live server log
+  dev-monitor restart [path]        Relaunch the project's server (works from any state)
+  dev-monitor remove [path]         Stop and forget the project (aliases: rm, forget)
+  dev-monitor logs [path] [-f]      Print (or follow with -f) that project's log (default: cwd)
+  dev-monitor version               Print the version (aliases: -v, --version)
   dev-monitor docs                  Print this help
 
 One supervised server PER PROJECT; several projects can run at once. Paths default to the
-current directory. The Dev Monitor app hosts the hub at
+current directory and are resolved to absolute. The Dev Monitor app hosts the hub at
 ~/Library/Application Support/DevMonitor/dm.sock — if it isn't running, it's started for you.
 """
 
 let args = Array(CommandLine.arguments.dropFirst())
 let cmd = args.first ?? "status"
+let rest = Array(args.dropFirst())
 
-/// First non-flag argument, or the current working directory.
-func pathArg() -> String {
-    args.dropFirst().first { !$0.hasPrefix("-") } ?? FileManager.default.currentDirectoryPath
+func die(_ msg: String) -> Never {
+    FileHandle.standardError.write(Data("dev-monitor: \(msg)\n".utf8)); exit(1)
+}
+
+/// Exactly one optional path positional; resolved to absolute. More than one is an error.
+func singlePath(_ a: DMArgs) -> String {
+    if a.positionals.count > 1 { die("too many arguments: \(a.positionals.joined(separator: " "))") }
+    if let p = a.positionals.first { return DMParse.absolutePath(p) }
+    return FileManager.default.currentDirectoryPath
 }
 
 func roundtrip(_ req: IPCRequest) -> [IPCMessage]? {
@@ -52,7 +63,7 @@ func roundtrip(_ req: IPCRequest) -> [IPCMessage]? {
     return messages
 }
 
-/// Opens the Dev Monitor app via LaunchServices and waits (up to ~8s) for its hub
+/// Opens the Dev Monitor app via LaunchServices and waits (up to ~15s) for its hub
 /// socket to come up. Returns true once the socket accepts a connection.
 func launchAppAndWait() -> Bool {
     let p = Process()
@@ -93,21 +104,83 @@ func runAndReport(_ req: IPCRequest) {
     }
 }
 
+/// All known projects, as reported by the hub (used by `status`, `logs` and `--wait`).
+func fetchServers() -> [IPCServerInfo] {
+    var servers: [IPCServerInfo] = []
+    for m in requireHub(IPCRequest(cmd: "status", path: nil, name: nil, gb: nil, all: nil)) where m.type == "status" {
+        servers = m.servers ?? []
+    }
+    return servers
+}
+
+/// Block until the project at `path` is HTTP-ready (print its URL, exit 0), has Failed (print the
+/// cause, exit 1), or the timeout elapses — so `up --wait` saves the caller from polling itself.
+func waitUntilReady(_ path: String, timeoutSeconds: Double = 180) {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+        // Tolerate a transient untrack/retrack (e.g. a rapid stop→up, or a crash auto-restart): if
+        // the project momentarily isn't in the list, keep waiting rather than failing — only `Failed`
+        // or the overall timeout ends the wait.
+        if let s = fetchServers().first(where: { $0.path == path }) {
+            if s.ready == true { print("ready: \(s.url ?? "(running)")"); return }
+            if s.state.hasPrefix("Failed") { die("failed: \(s.lastError ?? s.state)") }
+        }
+        usleep(400_000)
+    }
+    die("timed out after \(Int(timeoutSeconds))s waiting for readiness (see: dev-monitor logs '\(path)')")
+}
+
 switch cmd {
 case "run", "up":
-    var req = IPCRequest(cmd: cmd, path: pathArg(), name: nil, gb: nil, all: nil)
-    if let i = args.firstIndex(of: "--gb"), i + 1 < args.count { req.gb = Int(args[i + 1]) }
-    runAndReport(req)
+    let a = DMParse.parse(rest, boolFlags: ["--wait"], allowGB: true)
+    if let e = a.error { die(e) }
+    let upPath = singlePath(a)
+    runAndReport(IPCRequest(cmd: cmd, path: upPath, name: nil, gb: a.gb, all: nil))
+    if a.flags.contains("--wait") { waitUntilReady(upPath) }
 
-case "build":
-    runAndReport(IPCRequest(cmd: "build", path: pathArg(), name: nil, gb: nil, all: nil))
+case "build", "restart", "remove", "rm", "forget":
+    let a = DMParse.parse(rest, boolFlags: [], allowGB: false)
+    if let e = a.error { die(e) }
+    let normalized = (cmd == "rm" || cmd == "forget") ? "remove" : cmd
+    runAndReport(IPCRequest(cmd: normalized, path: singlePath(a), name: nil, gb: nil, all: nil))
 
-case "restart":
-    runAndReport(IPCRequest(cmd: "restart", path: pathArg(), name: nil, gb: nil, all: nil))
+case "stop":
+    let a = DMParse.parse(rest, boolFlags: ["--all"], allowGB: false)
+    if let e = a.error { die(e) }
+    let all = a.flags.contains("--all")
+    runAndReport(IPCRequest(cmd: "stop", path: all ? nil : singlePath(a),
+                            name: nil, gb: nil, all: all ? true : nil))
+
+case "status":
+    let a = DMParse.parse(rest, boolFlags: ["--json"], allowGB: false)
+    if let e = a.error { die(e) }
+    let servers = fetchServers()
+    if a.flags.contains("--json") {
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(servers), let s = String(data: data, encoding: .utf8) { print(s) }
+        else { print("[]") }
+    } else if servers.isEmpty {
+        print("No projects yet.")
+    } else {
+        for s in servers {
+            // The state label already carries the port for a running server ("Running · :3999"),
+            // so only append the port when the label doesn't already mention it (e.g. a configured
+            // port on an idle project).
+            let portSuffix = (s.port.map { ":\($0)" }).flatMap { s.state.contains($0) ? nil : "  \($0)" } ?? ""
+            print("● \(s.name)  —  \(s.state)\(portSuffix)")
+            print("  \(s.path)")
+        }
+    }
 
 case "logs":
-    let logPath = NSHomeDirectory() + "/Library/Application Support/DevMonitor/dev-server.log"
-    if args.contains("-f") || args.contains("--follow") {
+    let a = DMParse.parse(rest, boolFlags: ["-f", "--follow"], allowGB: false)
+    if let e = a.error { die(e) }
+    let follow = a.flags.contains("-f") || a.flags.contains("--follow")
+    let target = singlePath(a)
+    guard let server = fetchServers().first(where: { $0.path == target }), let logPath = server.logPath else {
+        die("no project tracked for \(target) — run 'dev-monitor up' here first")
+    }
+    if follow {
         let tail = Process()
         tail.executableURL = URL(fileURLWithPath: "/usr/bin/tail")
         tail.arguments = ["-n", "300", "-f", logPath]
@@ -120,32 +193,12 @@ case "logs":
         print("(no log yet — launch a server first)")
     }
 
-case "status":
-    let wantJSON = args.contains("--json")
-    for m in requireHub(IPCRequest(cmd: "status", path: nil, name: nil, gb: nil, all: nil)) where m.type == "status" {
-        let servers = m.servers ?? []
-        if wantJSON {
-            let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-            if let data = try? enc.encode(servers), let s = String(data: data, encoding: .utf8) { print(s) }
-            else { print("[]") }
-            break
-        }
-        if servers.isEmpty { print("No active servers."); break }
-        for s in servers {
-            print("● \(s.name)  —  \(s.state)\(s.port.map { "  :\($0)" } ?? "")")
-            print("  \(s.path)")
-        }
-    }
+case "version", "--version", "-v":
+    print("dev-monitor \(dmVersion)")
 
-case "stop":
-    let all = args.contains("--all")
-    let req = IPCRequest(cmd: "stop", path: all ? nil : pathArg(), name: nil, gb: nil, all: all ? true : nil)
-    runAndReport(req)
-
-case "docs", "--help", "-h":
+case "docs", "--help", "-h", "help":
     print(usage)
 
 default:
-    FileHandle.standardError.write(Data("dev-monitor: unknown command '\(cmd)'. Try 'dev-monitor --help'.\n".utf8))
-    exit(1)
+    die("unknown command '\(cmd)'. Try 'dev-monitor --help'.")
 }

@@ -109,3 +109,39 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         packageManagerAuto = try c.decodeIfPresent(Bool.self, forKey: .packageManagerAuto) ?? true
     }
 }
+
+extension Project {
+    /// Hard floor for the injected heap — guards against a stale, too-low `memoryGB` (e.g. a
+    /// leftover `1`) starving the dev server into an out-of-memory crash.
+    static let minHeapGB = 2
+
+    /// The heap (GB) actually injected as `--max-old-space-size` at launch — the single source of
+    /// truth shared by the launcher, the IPC reply and the settings UI.
+    ///
+    /// In **auto** mode it follows the framework default (Nuxt/Next 8, Astro/Vite 4, …); only when
+    /// `memoryAuto` is off does the explicit `memoryGB` win. Always floored at `minHeapGB`, and —
+    /// when a machine size is supplied — capped at physical RAM, so the result is deterministic and
+    /// never depends on a stale stored value.
+    func effectiveMemoryGB(systemGB: Int? = nil) -> Int {
+        let base = memoryAuto ? Detector.defaultMemoryGB(for: framework) : memoryGB
+        var gb = max(Project.minHeapGB, base)
+        if let systemGB, systemGB > 0 { gb = min(gb, max(Project.minHeapGB, systemGB)) }
+        return gb
+    }
+
+    /// `~/Library/Application Support/DevMonitor/logs` — one file per project lives here.
+    static var logsDirectory: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DevMonitor/logs", isDirectory: true)
+    }
+
+    /// Stable per-project log file: a name slug plus a short id so it survives renames/restarts and
+    /// never collides with another project. Both the supervisor (writer) and the CLI (`logs`, via
+    /// the hub's `status`) derive the path from here.
+    var logFileURL: URL {
+        let slug = String(name.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "-" })
+        let trimmed = slug.isEmpty ? "project" : String(slug.prefix(40))
+        return Project.logsDirectory.appendingPathComponent("\(trimmed)-\(id.uuidString.prefix(8)).log")
+    }
+}

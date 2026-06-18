@@ -14,6 +14,20 @@ struct IPCServerInfo: Codable, Sendable {
     var path: String
     var state: String
     var port: Int?
+    /// Absolute path to this project's log file (so `dev-monitor logs [path]` can find it).
+    var logPath: String?
+    // Structured fields so an agent can operate/diagnose from `status --json` alone — no curl, no
+    // reading internal files. All optional for backward/forward compatibility.
+    /// HTTP-confirmed running (reliable readiness — true only after a successful health probe).
+    var ready: Bool?
+    /// The server URL once a port is known, e.g. "http://localhost:3000/".
+    var url: String?
+    /// Process-group leader pid while running (nil when not running).
+    var pid: Int?
+    /// Exit code of the last process exit (nil if it has never exited).
+    var exitCode: Int?
+    /// Human cause of the last failure, with a remedy when known (e.g. an OOM hint).
+    var lastError: String?
 }
 
 struct IPCMessage: Codable, Sendable {

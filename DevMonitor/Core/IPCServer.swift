@@ -43,15 +43,33 @@ final class IPCServer {
         }
         switch req.cmd {
         case "status":
-            let servers = app.sessions.values
-                .sorted { $0.project.name < $1.project.name }
-                .map { IPCServerInfo(name: $0.project.name, path: $0.project.path,
-                                     state: $0.state.label, port: $0.effectivePort) }
+            // Report EVERY persisted project (not just live sessions), so `status` matches
+            // projects.json and a crashed/idle project still appears (and exposes its log path).
+            let servers = app.projects
+                .sorted { $0.name < $1.name }
+                .map { p -> IPCServerInfo in
+                    let s = app.sessions[p.id]
+                    return IPCServerInfo(
+                        name: p.name, path: p.path,
+                        state: s?.state.label ?? "Idle",
+                        port: s?.effectivePort ?? p.port,
+                        logPath: p.logFileURL.path,
+                        ready: s?.isReady ?? false,
+                        url: s.flatMap { $0.isReady ? $0.url : nil },
+                        pid: (s?.pid).flatMap { $0 > 0 ? Int($0) : nil },
+                        exitCode: (s?.lastExitCode).map { Int($0) },
+                        lastError: s?.lastError)
+                }
             IPCIO.write(client, IPCMessage(type: "status", servers: servers))
 
         case "run", "up":
             guard let project = resolveProject(req, app: app, client: client) else { return }
-            if let gb = req.gb { app.setMemoryGB(gb, for: project.id) }
+            // An explicit --gb means "use exactly this heap" → pin it AND turn auto off, otherwise
+            // auto mode would override it with the framework default.
+            if let gb = req.gb {
+                app.setMemoryGB(gb, for: project.id)
+                app.setMemoryAuto(false, for: project.id)
+            }
             app.selectedProjectID = project.id
             // Idempotent: if this project's server is already supervised, report it, don't relaunch.
             if let existing = app.sessions[project.id], existing.state.isActive {
@@ -61,8 +79,13 @@ final class IPCServer {
             }
             let toLaunch = app.projects.first { $0.id == project.id }!
             app.launch(toLaunch)
+            // Surface when the requested/auto heap was capped to physical RAM, so an explicit
+            // `--gb 99` on an 8 GB machine reports "8 GB (capped …)" instead of silently shrinking.
+            let gb = app.effectiveMemoryGB(for: toLaunch)
+            let requested = toLaunch.memoryAuto ? Detector.defaultMemoryGB(for: toLaunch.framework) : toLaunch.memoryGB
+            let capNote = gb < requested ? " — capped from \(requested) GB to fit \(app.systemRAMGB) GB RAM" : ""
             IPCIO.write(client, IPCMessage(type: "ok",
-                message: "launched \(project.name) (\(project.framework.displayName), \(toLaunch.memoryGB) GB)"))
+                message: "launched \(toLaunch.name) (\(toLaunch.framework.displayName), \(gb) GB\(capNote))"))
 
         case "build":
             guard let project = resolveProject(req, app: app, client: client) else { return }
@@ -83,27 +106,47 @@ final class IPCServer {
             }
 
         case "restart":
-            if let path = req.path, let project = app.projects.first(where: { $0.path == path }),
-               let session = app.sessions[project.id], session.state.isActive {
+            // Relaunch in ANY state — restart is most needed precisely when a server has Failed.
+            guard let path = req.path, let project = app.projects.first(where: { $0.path == path }) else {
+                IPCIO.write(client, IPCMessage(type: "error",
+                    message: "no project tracked for this path — run 'up' here first")); return
+            }
+            app.selectedProjectID = project.id
+            if let session = app.sessions[project.id], session.state.isActive {
                 session.recycle()
                 IPCIO.write(client, IPCMessage(type: "ok", message: "restarting \(project.name)"))
             } else {
-                IPCIO.write(client, IPCMessage(type: "error", message: "no active server for this path"))
+                app.launch(project)
+                IPCIO.write(client, IPCMessage(type: "ok", message: "relaunching \(project.name)"))
             }
+
+        case "remove":
+            guard let path = req.path, let project = app.projects.first(where: { $0.path == path }) else {
+                IPCIO.write(client, IPCMessage(type: "error", message: "no project tracked for this path")); return
+            }
+            let name = project.name
+            app.removeProject(project.id)   // stops its server/build, then forgets it
+            IPCIO.write(client, IPCMessage(type: "ok", message: "removed \(name)"))
 
         default:
             IPCIO.write(client, IPCMessage(type: "error", message: "unknown command"))
         }
     }
 
-    /// Resolve the request's `path` to a known/added project, writing an error to the client and
-    /// returning nil if it can't. Shared by run/up/build.
+    /// Resolve the request's `path` to a known (or newly added) project. Writes an error and returns
+    /// nil when the path is missing or isn't a launchable project folder — so a bogus `up <path>`
+    /// never creates a junk entry. Shared by run/up/build.
     private func resolveProject(_ req: IPCRequest, app: AppState, client: Int32) -> Project? {
         guard let path = req.path else {
             IPCIO.write(client, IPCMessage(type: "error", message: "missing path")); return nil
         }
-        app.addProject(path: path)
-        guard let project = app.projects.first(where: { $0.path == path }) else {
+        if let existing = app.projects.first(where: { $0.path == path }) { return existing }
+        guard Detector.isProject(path: path) else {
+            IPCIO.write(client, IPCMessage(type: "error",
+                message: "not a project: \(path)\n  (need an existing folder with a package.json / deno config)"))
+            return nil
+        }
+        guard let project = app.addProject(path: path) else {
             IPCIO.write(client, IPCMessage(type: "error", message: "could not add project")); return nil
         }
         return project
