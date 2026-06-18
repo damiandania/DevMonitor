@@ -213,30 +213,55 @@ struct DashboardView: View {
         }
     }
 
-    /// Server and/or build terminals — tabbed when both are present.
+    /// Server and/or build terminals, with pill tabs (each closable via an ✕).
     @ViewBuilder private func terminals(build: BuildRunner?) -> some View {
-        if let session, let build {
-            VStack(spacing: 6) {
-                Picker("", selection: $logTab) {
-                    Text("Server").tag(0)
-                    Text("Build").tag(1)
+        let hasServer = session != nil
+        let hasBuild = build != nil
+        // Selected tab, falling back to whichever terminal exists.
+        let tab = (hasServer && hasBuild) ? logTab : (hasBuild ? 1 : 0)
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                if hasServer {
+                    terminalTab(title: "Server", tag: 0, selected: tab == 0) { app.closeServer() }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 220)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if logTab == 1 {
-                    LogPaneView(lines: build.logLines)
-                } else {
-                    serverLog(session)
+                if hasBuild {
+                    terminalTab(title: "Build", tag: 1, selected: tab == 1) { app.closeBuild() }
                 }
+                Spacer()
             }
-        } else if let session {
-            serverLog(session)
-        } else if let build {
-            LogPaneView(lines: build.logLines)
+
+            if tab == 1, let build {
+                LogPaneView(lines: build.logLines)
+            } else if let session {
+                serverLog(session)
+            } else if let build {
+                LogPaneView(lines: build.logLines)
+            }
         }
+    }
+
+    /// A pill tab (like the preset buttons) with an ✕ that closes the terminal and its tab.
+    private func terminalTab(title: String, tag: Int, selected: Bool,
+                             close: @escaping () -> Void) -> some View {
+        HStack(spacing: 7) {
+            Text(title)
+                .font(.callout.weight(selected ? .semibold : .regular))
+                .contentShape(Rectangle())
+                .onTapGesture { logTab = tag }
+            Button(action: close) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .opacity(0.7)
+            }
+            .buttonStyle(.plain)
+            .help("Close the \(title.lowercased()) terminal")
+        }
+        .foregroundStyle(selected ? Color.white : Color.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(selected ? AnyShapeStyle(Color.accentColor)
+                             : AnyShapeStyle(Color(.quaternaryLabelColor)),
+                    in: Capsule())
     }
 
     private func serverLog(_ session: DevSession) -> some View {

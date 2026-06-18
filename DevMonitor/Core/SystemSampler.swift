@@ -122,46 +122,10 @@ final class SystemSampler {
         prev = newPrev
         nameCache = seenNames  // drop dead pids
 
-        // Group the active dev-server's whole tree into one clear, highlighted row; otherwise
-        // surface only processes with a real performance impact (heavy CPU or heavy memory).
-        let cores = Double(coreCount)
-        let heavyMem = 600.0 * 1_048_576  // 600 MB
-        let busyCPUPerCore = 25.0         // ~a quarter of a core or more
-        func impact(_ row: ProcessRow) -> Double {
-            row.cpuPerCore / cores + (totalMem > 0 ? row.memBytes / totalMem * 100 : 0)
-        }
-
-        let dev = devServerInfo?()
-        let devPids = dev?.pids ?? []
-        let build = buildInfo?()
-        let buildPids = build?.pids ?? []
-        var devCPU = 0.0, devMem = 0.0
-        var buildCPU = 0.0, buildMem = 0.0
-        var others: [ProcessRow] = []
-        for row in rows {
-            if !devPids.isEmpty, devPids.contains(row.id) {
-                devCPU += row.cpuPerCore
-                devMem += row.memBytes
-            } else if !buildPids.isEmpty, buildPids.contains(row.id) {
-                buildCPU += row.cpuPerCore
-                buildMem += row.memBytes
-            } else {
-                others.append(row)
-            }
-        }
-
-        var result: [ProcessRow] = []
-        if let dev, !devPids.isEmpty {
-            result.append(ProcessRow(id: -1, name: dev.label, cpuPerCore: devCPU, memBytes: devMem, isDevServer: true))
-        }
-        // The build always shows (like the server), even when momentarily idle.
-        if let build, !buildPids.isEmpty {
-            result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))
-        }
-        result.append(contentsOf: others
-            .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }
-            .sorted { impact($0) > impact($1) }
-            .prefix(topN))
+        // Aggregate the dev-server and build trees into single identified rows; otherwise surface
+        // only processes with a real performance impact. (Pure + testable — see SystemSampler.aggregate.)
+        let result = Self.aggregate(rows: rows, dev: devServerInfo?(), build: buildInfo?(),
+                                    coreCount: coreCount, totalMem: totalMem, topN: topN)
 
         // Give generic helpers (VS Code language servers, bare "node", …) a readable name
         // derived from their argv — only for the few shown rows, and cached per pid.
@@ -179,23 +143,84 @@ final class SystemSampler {
     }
 
     private func updatePressure() {
-        let cpuHot = systemCPU >= 90
-        let memHot = systemMemPercent >= 90 && systemSwapPercent >= 50
         let now = DispatchTime.now().uptimeNanoseconds
-        if cpuHot || memHot {
-            if hotSince == nil { hotSince = now }
-            let elapsed = Double(now &- (hotSince ?? now)) / 1_000_000_000
-            if pressure == .normal, elapsed >= sustainSeconds {
-                pressure = .stuck
-                pressureReason = cpuHot
-                    ? "CPU pinned at \(Int(systemCPU))% for \(Int(elapsed))s"
-                    : "Memory \(Int(systemMemPercent))% full, swapping (\(Int(systemSwapPercent))%)"
-                onStuck?()
-            }
-        } else if systemCPU < 70, systemMemPercent < 85 {   // hysteresis: clear once it cools
-            hotSince = nil
-            pressure = .normal
+        let r = Self.evaluatePressure(cpu: systemCPU, memPercent: systemMemPercent,
+                                      swapPercent: systemSwapPercent, hotSince: hotSince,
+                                      now: now, sustainSeconds: sustainSeconds, current: pressure)
+        hotSince = r.hotSince
+        pressure = r.pressure
+        if r.justStuck {
+            pressureReason = r.reason
+            onStuck?()
         }
+    }
+
+    // MARK: - Pure logic (testable without the C metrics or the run loop)
+
+    /// Aggregates the dev-server and build trees into single identified rows (ids -1 and -2), and
+    /// keeps only other processes with real impact (heavy CPU or memory), ranked, capped at `topN`.
+    nonisolated static func aggregate(
+        rows: [ProcessRow],
+        dev: (pids: Set<Int32>, label: String)?,
+        build: (pids: Set<Int32>, label: String)?,
+        coreCount: Int, totalMem: Double, topN: Int
+    ) -> [ProcessRow] {
+        let cores = Double(coreCount)
+        let heavyMem = 600.0 * 1_048_576   // 600 MB
+        let busyCPUPerCore = 25.0          // ~a quarter of a core or more
+        func impact(_ row: ProcessRow) -> Double {
+            row.cpuPerCore / cores + (totalMem > 0 ? row.memBytes / totalMem * 100 : 0)
+        }
+        let devPids = dev?.pids ?? []
+        let buildPids = build?.pids ?? []
+        var devCPU = 0.0, devMem = 0.0, buildCPU = 0.0, buildMem = 0.0
+        var others: [ProcessRow] = []
+        for row in rows {
+            if !devPids.isEmpty, devPids.contains(row.id) {
+                devCPU += row.cpuPerCore; devMem += row.memBytes
+            } else if !buildPids.isEmpty, buildPids.contains(row.id) {
+                buildCPU += row.cpuPerCore; buildMem += row.memBytes
+            } else {
+                others.append(row)
+            }
+        }
+        var result: [ProcessRow] = []
+        if let dev, !devPids.isEmpty {
+            result.append(ProcessRow(id: -1, name: dev.label, cpuPerCore: devCPU, memBytes: devMem, isDevServer: true))
+        }
+        // The build always shows (like the server), even when momentarily idle.
+        if let build, !buildPids.isEmpty {
+            result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))
+        }
+        result.append(contentsOf: others
+            .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }
+            .sorted { impact($0) > impact($1) }
+            .prefix(topN))
+        return result
+    }
+
+    /// Pure pressure state machine: stuck when CPU is pinned, or memory is full while swapping, for
+    /// a sustained window; clears with hysteresis. `justStuck` marks the normal → stuck transition.
+    nonisolated static func evaluatePressure(
+        cpu: Double, memPercent: Double, swapPercent: Double,
+        hotSince: UInt64?, now: UInt64, sustainSeconds: Double, current: Pressure
+    ) -> (pressure: Pressure, reason: String, hotSince: UInt64?, justStuck: Bool) {
+        let cpuHot = cpu >= 90
+        let memHot = memPercent >= 90 && swapPercent >= 50
+        if cpuHot || memHot {
+            let since = hotSince ?? now
+            let elapsed = Double(now &- since) / 1_000_000_000
+            if current == .normal, elapsed >= sustainSeconds {
+                let reason = cpuHot
+                    ? "CPU pinned at \(Int(cpu))% for \(Int(elapsed))s"
+                    : "Memory \(Int(memPercent))% full, swapping (\(Int(swapPercent))%)"
+                return (.stuck, reason, since, true)
+            }
+            return (current, "", since, false)
+        } else if cpu < 70, memPercent < 85 {   // hysteresis: clear once it cools
+            return (.normal, "", nil, false)
+        }
+        return (current, "", hotSince, false)
     }
 
     private static func isGeneric(_ name: String) -> Bool {

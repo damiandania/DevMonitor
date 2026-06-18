@@ -43,6 +43,10 @@ with a Developer ID and notarize.
   npm·pnpm picker). Auto memory follows the framework default; auto port is parsed from stdout.
 - **Hang detection + auto-recycle**: HTTP probes the server; after consecutive failures it kills the
   whole process tree (including orphans) and relaunches.
+- **Build runner**: runs the project's build script as a separate tracked tree. Its process tree
+  shows as one identified row in the activity table (just like the dev server), the log area becomes
+  **pill tabs** (Server / Build, each closable with an ✕) and auto-switches to Build on start, and the
+  Build button turns into a red **Stop build** while running.
 - **Pressure auto-kill**: when the machine is detected as *stuck* (CPU pinned, or memory full and
   swapping, for a sustained window), the sidebar surfaces a panel — a fast **Haiku** evaluation of
   which orphan/heavy processes are safe to kill — each with a red **skull** button (SIGTERM →
@@ -92,7 +96,7 @@ DevMonitor/
   Sys/        spawn.c (posix_spawn SETSID), metrics.c (libproc/mach + swap), ipc.c + bridging header
   Views/      RootSplitView, ProjectSidebar, DashboardView, LogPaneView, MenuBarView, ServerConfigView,
               PressureSuggestionsView, ReportSheet (P7), AdvisorSheet (P9), PillButton, SessionState+UI
-  Resources/  Assets.xcassets (AppIcon + monochrome github/vscode/chrome/skull), Info.plist
+  Resources/  Assets.xcassets (AppIcon + monochrome github + skull), Info.plist
   tools/      make-icon.swift (Core Graphics app-icon generator)
 dev-monitor/  CLI target (IPC client — run/status/stop/restart/logs, auto-starts the app)
 ```
@@ -126,15 +130,28 @@ The app is **ad-hoc signed** (no Developer ID on this machine) — fine for loca
 
 ## Tests
 
-Headless Swift test programs live under `tests/` (run `bash tests/run-tests.sh`). They validate the
-C shims and pure logic end-to-end without a GUI:
+`bash tests/run-tests.sh` is the one command that verifies the whole project still works, in two
+phases (add `--unit` to skip the slower Phase 1):
+
+**Phase 1 — full compile.** Regenerates the project and builds *both* targets (app + CLI). This
+catches SwiftUI/view errors that the standalone unit suites can't see (the views aren't compiled by
+swiftc in Phase 2).
+
+**Phase 2 — headless unit suites** (each compiles the real source files standalone with `swiftc`,
+no Xcode host, no GUI):
 
 - **spawn** — `posix_spawn` session + cwd + `killpg` tree reap.
 - **metrics** — `proc_pid_rusage` (timebase-scaled), system CPU/mem/swap, child enumeration.
 - **detector** — package-manager/framework detection over real local projects.
+- **model** — `Project` Codable backward-compat (legacy JSON → auto defaults), `effectiveMemoryGB`,
+  encode/decode round trip.
+- **sampler** — `SystemSampler.aggregate` (dev/build identified rows + impact filter) and
+  `evaluatePressure` (the stuck-machine state machine: sustain, hysteresis, reasons).
 - **session** — `DevSession` launch → port parse → HTTP-ready → stop, recycle, build success/failure.
 - **advisor** — `ResourceAdvisor` snapshot rendering, tolerant JSON parsing of Claude's reply, and
   the heuristic kill list (protected-process exclusion, impact ranking).
 
-The Claude integrations (Diagnose, Advisor) reuse the same read-only `ClaudeRunner.run` path and were
-additionally verified live against the logged-in `claude` CLI.
+When you add a feature, prefer extracting its decision logic into a pure (ideally `nonisolated
+static`) function so it can be unit-tested here, and add or extend a suite. The Claude integrations
+(Diagnose, Advisor) reuse the same read-only `ClaudeRunner.run` path and were additionally verified
+live against the logged-in `claude` CLI.

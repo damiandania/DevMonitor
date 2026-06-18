@@ -124,6 +124,18 @@ final class AppState {
         activeSession?.stop()
     }
 
+    /// Close the server terminal+tab: stop the dev server and drop it from the dashboard.
+    func closeServer() {
+        activeSession?.stop()
+        activeSession = nil
+    }
+
+    /// Close the build terminal+tab: stop the build if running and drop it.
+    func closeBuild() {
+        activeBuild?.stop()
+        activeBuild = nil
+    }
+
     /// The active session if it belongs to `project`, else nil.
     func session(for project: Project) -> DevSession? {
         guard let s = activeSession, s.project.id == project.id else { return nil }
