@@ -15,7 +15,8 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 | `dev-monitor logs [-f]` | Print, or follow with `-f`, the live server log. |
 | `dev-monitor docs` | Print help. |
 
-The Dev Monitor app must be open (it hosts the hub). If it isn't, the CLI says so.
+The Dev Monitor app hosts the hub. If it isn't running, the CLI **starts it automatically** (via
+LaunchServices) and waits for the hub before issuing the command.
 
 ## Diagnostics channel
 

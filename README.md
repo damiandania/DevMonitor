@@ -16,20 +16,37 @@ central IPC hub other terminals route through, and Claude-generated self-error r
 | P1 — Launch & log | ✅ | Detector + supervisor (`posix_spawn` session, `killpg`), log streaming, port/ready parsing, `NODE_OPTIONS` |
 | P2 — Metrics & charts | ✅ | Per-process CPU/mem (`libproc`), system CPU/mem (`mach`), 4 live Swift Charts |
 | P3 — Health & recycle | ✅ | HTTP health probe + strike state machine + automatic tree recycle |
-| P4 — Notifications | ⏳ | Native notifications (crash/hang/recycle/build) with sound |
-| P5 — Build runner | ⏳ | Run the project's build script as a tracked tree |
-| P6 — Hub + CLI + docs | ⏳ | Unix-socket hub + `dev-monitor` CLI (run/status/logs) |
-| P7 — Claude reports | ⏳ | Read-only error reports about Dev Monitor itself |
-| P8 — Polish & dist | ⏳ | Liquid Glass pass, MenuBarExtra, icon, Release + CLI install |
-| P9 — Resource advisor | ⏳ | Claude-recommended actions on heavy processes (ask before killing non-dev) |
+| P4 — Notifications | ✅ | Native notifications (crash/hang/recycle/build) with sound |
+| P5 — Build runner | ✅ | Run the project's build script as a tracked tree |
+| P6 — Hub + CLI + docs | ✅ | Unix-socket hub + `dev-monitor` CLI (run/status/stop/restart/logs) + auto-start |
+| P7 — Claude reports | ✅ | Read-only "Diagnose" report about Dev Monitor itself |
+| P8 — Polish & dist | ✅ | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (signing: ad-hoc¹) |
+| P9 — Resource advisor | ✅ | Claude-recommended actions on heavy processes; auto-stop managed dev, **confirm before closing foreign** |
+
+¹ Signed ad-hoc (`CODE_SIGN_IDENTITY = -`): no Apple Developer ID identity is installed on this
+machine. Local notifications and the menu-bar item work; for distribution outside this Mac, sign
+with a Developer ID and notarize.
 
 ## Features (current)
 
 - **Auto-detects** package manager (pnpm/npm) and framework (Nuxt/Next/Astro/Express) per project.
 - **Launches** the dev server with a chosen heap size (`--max-old-space-size`), streaming its log live.
-- **Live charts**: system CPU, system memory, dev-server tree CPU and memory.
+- **Live activity**: system CPU/memory progress bars + an Activity-Monitor-style table of only the
+  processes with real impact (heavy CPU or memory), with the dev-server tree aggregated into one row
+  and generic helpers (`node`, "Code Helper") named from their argv (Tailwind/ESLint/tsserver/…).
 - **Hang detection + auto-recycle**: HTTP probes the server; after consecutive failures it kills the
   whole process tree (including orphans) and relaunches.
+- **Menu-bar item** (`MenuBarExtra`): active-server status, live uptime, Launch/Stop/Restart, and a
+  system CPU/memory snapshot without opening the main window.
+- **Central hub + CLI**: run servers from any terminal through the app with `dev-monitor run`
+  (auto-starts the app if needed); `status` / `stop` / `restart` / `logs -f`. See
+  [DevMonitor/USAGE.md](DevMonitor/USAGE.md).
+- **Diagnose (read-only)**: a toolbar button runs the logged-in `claude` against Dev Monitor's *own*
+  source to explain its internal errors — never edits anything (`--permission-mode plan` + write
+  tools disallowed).
+- **Resource advisor (read-only)**: Claude ranks the machine's heavy processes and proposes actions.
+  Managed dev processes can be stopped with one tap; **foreign processes (editors/browsers/daemons)
+  are only closed after an explicit confirmation — never auto-killed.**
 
 ## Requirements
 
@@ -54,13 +71,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short:
 
 ```
 DevMonitor/
-  App/        @main App, AppState (@Observable @MainActor)
-  Model/      Project, SessionState, MetricPoint
+  App/        @main App (WindowGroup + MenuBarExtra), AppState (@Observable @MainActor)
+  Model/      Project, SessionState, MetricPoint, IPCProtocol
   Store/      ProjectStore (Application Support JSON)
-  Core/       Detector, DevSession (supervisor+metrics+health), ProcessTree
-  Sys/        spawn.c (posix_spawn SETSID), metrics.c (libproc/mach) + bridging header
-  Views/      RootSplitView, ProjectSidebar, DashboardView, LogPaneView, Charts/
-dev-monitor/  CLI target (IPC client — P6)
+  Core/       Detector, DevSession (supervisor+metrics+health), ProcessTree, SystemSampler,
+              BuildRunner, IPCServer, Notifier, AppLog, ClaudeRunner, ResourceAdvisor
+  Sys/        spawn.c (posix_spawn SETSID), metrics.c (libproc/mach), ipc.c + bridging header
+  Views/      RootSplitView, ProjectSidebar, DashboardView, LogPaneView, MenuBarView,
+              ReportSheet (P7), AdvisorSheet (P9), PillButton, SessionState+UI
+  Resources/  Assets.xcassets (AppIcon + monochrome github/vscode/chrome), Info.plist
+  tools/      make-icon.swift (Core Graphics app-icon generator)
+dev-monitor/  CLI target (IPC client — run/status/stop/restart/logs, auto-starts the app)
 ```
 
 ## Technical notes
@@ -76,7 +97,30 @@ A few non-obvious things this codebase gets right (verified with headless tests 
 - **CPU times need timebase conversion**: `proc_pid_rusage` returns CPU time in *mach* units on
   Apple Silicon (not nanoseconds); scaled via `mach_timebase_info` (1:1 on Intel).
 
+## Install (local)
+
+A Release build installs the app to `/Applications` and the CLI to `~/.local/bin`:
+
+```bash
+xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor  -configuration Release -derivedDataPath build build
+xcodebuild -project DevMonitor.xcodeproj -scheme dev-monitor -configuration Release -derivedDataPath build build
+cp -R "build/Build/Products/Release/Dev Monitor.app" "/Applications/Dev Monitor.app"
+cp    "build/Build/Products/Release/dev-monitor"      ~/.local/bin/dev-monitor
+```
+
+The app is **ad-hoc signed** (no Developer ID on this machine) — fine for local use. The
+`dev-monitor` CLI auto-starts the app via LaunchServices when the hub isn't already running.
+
 ## Tests
 
-Headless Swift test programs live under `tests/` and validate the C shims and the `DevSession`
-supervisor end-to-end (spawn/cwd/killpg, detector over real projects, metrics, recycle).
+Headless Swift test programs live under `tests/` (run `bash tests/run-tests.sh`). They validate the
+C shims and pure logic end-to-end without a GUI:
+
+- **spawn** — `posix_spawn` session + cwd + `killpg` tree reap.
+- **metrics** — `proc_pid_rusage` (timebase-scaled), system CPU/mem, child enumeration.
+- **detector** — package-manager/framework detection over real local projects.
+- **session** — `DevSession` launch → port parse → HTTP-ready → stop, recycle, build success/failure.
+- **advisor** — `ResourceAdvisor` snapshot rendering + tolerant JSON parsing of Claude's reply.
+
+The Claude integrations (Diagnose, Advisor) reuse the same read-only `ClaudeRunner.run` path and were
+additionally verified live against the logged-in `claude` CLI.
