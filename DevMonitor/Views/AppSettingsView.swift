@@ -23,6 +23,7 @@ struct AppSettingsView: View {
                     }
                 }
             }
+            .navigationTitle("Settings")
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
         } detail: {
             detail

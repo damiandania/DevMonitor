@@ -1,17 +1,22 @@
 import SwiftUI
 
-/// The "Doctor" (stethoscope) panel — read-only AI analyses in three sections, each started and
-/// stopped manually: Heavy Processes (advisor), Dev Monitor (self-diagnosis), and Memory & RAM.
+/// The "Doctor" panel — same sidebar layout as Settings. Left: the three analyses; right: big
+/// Analyze / Stop / Reset buttons and the read-only AI result. Nothing runs until you press Analyze.
 struct DoctorSheet: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
     @State private var section: Section = .heavy
 
     enum Section: String, CaseIterable, Identifiable {
-        case heavy = "Heavy Processes"
-        case devMonitor = "Dev Monitor"
-        case memory = "Memory & RAM"
+        case heavy, devMonitor, memory
         var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .heavy: return "Heavy Processes"
+            case .devMonitor: return "Dev Monitor"
+            case .memory: return "Memory & RAM"
+            }
+        }
         var icon: String {
             switch self {
             case .heavy: return "gauge.with.dots.needle.67percent"
@@ -22,33 +27,28 @@ struct DoctorSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Label("Doctor", systemImage: "stethoscope").font(.headline)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            .padding()
-
-            Picker("", selection: $section) {
+        NavigationSplitView {
+            List(selection: $section) {
                 ForEach(Section.allCases) { s in
-                    Label(s.rawValue, systemImage: s.icon).tag(s)
+                    Label(s.title, systemImage: s.icon).tag(s)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal)
-            .padding(.bottom, 10)
-
-            Divider()
-
-            switch section {
-            case .heavy: HeavyProcessesSection()
-            case .devMonitor: DevMonitorSection()
-            case .memory: MemorySection()
-            }
+            .navigationTitle("Doctor")
+            .navigationSplitViewColumnWidth(min: 210, ideal: 230)
+        } detail: {
+            detail
+                .navigationTitle(section.title)
+                .toolbar { ToolbarItem(placement: .primaryAction) { Button("Done") { dismiss() } } }
         }
-        .frame(minWidth: 660, minHeight: 520)
+        .frame(minWidth: 800, minHeight: 560)
+    }
+
+    @ViewBuilder private var detail: some View {
+        switch section {
+        case .heavy: HeavyDetail()
+        case .devMonitor: ReportDetail(kind: .devMonitor)
+        case .memory: ReportDetail(kind: .memory)
+        }
     }
 
     static func markdown(_ text: String) -> AttributedString {
@@ -59,16 +59,52 @@ struct DoctorSheet: View {
     }
 }
 
-// MARK: - Heavy Processes (resource advisor)
+// MARK: - big action buttons
 
-private struct HeavyProcessesSection: View {
+private struct DoctorActions: View {
+    let busy: Bool
+    let hasResult: Bool
+    let start: () -> Void
+    let stop: () -> Void
+    let reset: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if busy {
+                Button(role: .destructive) { stop() } label: {
+                    Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large).tint(.red)
+            } else {
+                Button { start() } label: {
+                    Label(hasResult ? "Re-analyze" : "Analyze",
+                          systemImage: hasResult ? "arrow.clockwise" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+            }
+            if hasResult && !busy {
+                Button { reset() } label: {
+                    Label("Reset", systemImage: "trash").frame(maxWidth: 130)
+                }
+                .buttonStyle(.bordered).controlSize(.large)
+            }
+        }
+        .padding()
+    }
+}
+
+// MARK: - Heavy Processes
+
+private struct HeavyDetail: View {
     @Environment(AppState.self) private var app
     @State private var pendingClose: ResourceAdvisor.Recommendation?
 
     var body: some View {
         VStack(spacing: 0) {
-            SectionToolbar(title: "Heavy processes", busy: app.isAdvising, hasResult: app.advice != nil,
-                           start: { app.generateAdvice() }, stop: { app.stopAdvice() })
+            DoctorActions(busy: app.isAdvising, hasResult: app.advice != nil,
+                          start: { app.generateAdvice() }, stop: { app.stopAdvice() },
+                          reset: { app.resetAdvice() })
             if app.isAdvising {
                 Loading("Claude is analyzing the machine…")
             } else if let advice = app.advice {
@@ -83,11 +119,11 @@ private struct HeavyProcessesSection: View {
                         }
                         ForEach(advice.recommendations) { row($0) }
                     }
-                    .padding()
+                    .padding([.horizontal, .bottom])
                 }
                 CostFooter(isError: advice.isError, cost: advice.costUSD)
             } else {
-                IdlePrompt("Analyze the machine's heaviest processes.") { app.generateAdvice() }
+                Idle("Analyze the machine's heaviest processes and what's safe to close.")
             }
         }
         .confirmationDialog(
@@ -147,26 +183,38 @@ private struct HeavyProcessesSection: View {
     }
 }
 
-// MARK: - Dev Monitor self-diagnosis & Memory report
+// MARK: - Dev Monitor diagnosis & Memory report
 
-private struct DevMonitorSection: View {
+private struct ReportDetail: View {
+    enum Kind { case devMonitor, memory }
     @Environment(AppState.self) private var app
-    var body: some View {
-        ReportView(title: "Diagnose Dev Monitor", prompt: "Diagnose Dev Monitor's own errors.",
-                   busy: app.isGeneratingReport, report: app.diagnosticReport,
-                   start: { app.generateReport() }, stop: { app.stopReport() })
-    }
-}
+    let kind: Kind
 
-private struct MemorySection: View {
-    @Environment(AppState.self) private var app
+    private var busy: Bool { kind == .devMonitor ? app.isGeneratingReport : app.isGeneratingMemoryReport }
+    private var report: ClaudeRunner.Report? { kind == .devMonitor ? app.diagnosticReport : app.memoryReport }
+    private func start() { if kind == .devMonitor { app.generateReport() } else { app.generateMemoryReport() } }
+    private func stop() { if kind == .devMonitor { app.stopReport() } else { app.stopMemoryReport() } }
+    private func reset() { if kind == .devMonitor { app.resetReport() } else { app.resetMemoryReport() } }
+
     var body: some View {
         VStack(spacing: 0) {
-            MemoryBars()
-            Divider()
-            ReportView(title: "How to free RAM", prompt: "Analyze how to free RAM (and swap).",
-                       busy: app.isGeneratingMemoryReport, report: app.memoryReport,
-                       start: { app.generateMemoryReport() }, stop: { app.stopMemoryReport() })
+            if kind == .memory { MemoryBars() }
+            DoctorActions(busy: busy, hasResult: report != nil, start: start, stop: stop, reset: reset)
+            if busy {
+                Loading("Asking Claude…")
+            } else if let report {
+                ScrollView {
+                    Text(DoctorSheet.markdown(report.text))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding([.horizontal, .bottom])
+                }
+                CostFooter(isError: report.isError, cost: report.costUSD)
+            } else {
+                Idle(kind == .devMonitor
+                     ? "Diagnose Dev Monitor's own internal errors (read-only)."
+                     : "Analyze how to free up RAM (and what can be done about swap).")
+            }
         }
     }
 }
@@ -181,7 +229,7 @@ private struct MemoryBars: View {
             bar("Swap", percent: s.systemSwapPercent, color: .orange,
                 detail: s.systemSwapTotal > 0 ? String(format: "%.1f / %.0f GB", s.systemSwapUsed / 1_073_741_824, s.systemSwapTotal / 1_073_741_824) : "off")
         }
-        .padding()
+        .padding([.horizontal, .top])
     }
     private func bar(_ t: String, percent: Double, color: Color, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -195,74 +243,18 @@ private struct MemoryBars: View {
     }
 }
 
-private struct ReportView: View {
-    let title: String
-    let prompt: String
-    let busy: Bool
-    let report: ClaudeRunner.Report?
-    let start: () -> Void
-    let stop: () -> Void
+// MARK: - shared
 
-    var body: some View {
-        VStack(spacing: 0) {
-            SectionToolbar(title: title, busy: busy, hasResult: report != nil, start: start, stop: stop)
-            if busy {
-                Loading("Asking Claude…")
-            } else if let report {
-                ScrollView {
-                    Text(DoctorSheet.markdown(report.text))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                }
-                CostFooter(isError: report.isError, cost: report.costUSD)
-            } else {
-                IdlePrompt(prompt, start: start)
-            }
-        }
-    }
-}
-
-// MARK: - shared pieces
-
-private struct SectionToolbar: View {
-    let title: String
-    let busy: Bool
-    let hasResult: Bool
-    let start: () -> Void
-    let stop: () -> Void
-
-    var body: some View {
-        HStack {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-            Spacer()
-            if busy {
-                Button(role: .destructive) { stop() } label: { Label("Stop", systemImage: "stop.fill") }
-                    .buttonBorderShape(.capsule).controlSize(.small).tint(.red)
-            } else {
-                Button { start() } label: {
-                    Label(hasResult ? "Re-analyze" : "Analyze",
-                          systemImage: hasResult ? "arrow.clockwise" : "play.fill")
-                }
-                .buttonBorderShape(.capsule).controlSize(.small)
-            }
-        }
-        .padding(.horizontal).padding(.vertical, 8)
-    }
-}
-
-private struct IdlePrompt: View {
+private struct Idle: View {
     let text: String
-    let start: () -> Void
-    init(_ text: String, start: @escaping () -> Void) { self.text = text; self.start = start }
+    init(_ text: String) { self.text = text }
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(.secondary)
-            Text(text).foregroundStyle(.secondary)
-            Button { start() } label: { Label("Analyze", systemImage: "play.fill") }
-                .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+            Text(text).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
 
@@ -280,7 +272,6 @@ private struct CostFooter: View {
     let cost: Double?
     var body: some View {
         if isError || cost != nil {
-            Divider()
             HStack {
                 if isError {
                     Label("claude reported an error", systemImage: "exclamationmark.triangle")
@@ -289,7 +280,7 @@ private struct CostFooter: View {
                 Spacer()
                 if let cost { Text(String(format: "claude · $%.4f", cost)).foregroundStyle(.secondary) }
             }
-            .font(.caption).padding(8)
+            .font(.caption).padding(.horizontal).padding(.bottom, 8)
         }
     }
 }

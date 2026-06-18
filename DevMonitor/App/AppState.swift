@@ -183,6 +183,7 @@ final class AppState {
     }
 
     func stopReport() { reportTask?.cancel(); isGeneratingReport = false }
+    func resetReport() { stopReport(); diagnosticReport = nil }
 
     // Resource advisor (P9): Claude recommends actions on heavy processes. Managed dev processes
     // may be stopped automatically; foreign processes are only closed after explicit confirmation.
@@ -211,6 +212,7 @@ final class AppState {
     }
 
     func stopAdvice() { adviceTask?.cancel(); isAdvising = false }
+    func resetAdvice() { stopAdvice(); advice = nil }
 
     func persistSettings() { settingsStore.save(settings) }
 
@@ -220,6 +222,7 @@ final class AppState {
     @ObservationIgnored private var memoryTask: Task<Void, Never>?
 
     func stopMemoryReport() { memoryTask?.cancel(); isGeneratingMemoryReport = false }
+    func resetMemoryReport() { stopMemoryReport(); memoryReport = nil }
 
     func generateMemoryReport() {
         guard !isGeneratingMemoryReport else { return }
