@@ -46,12 +46,12 @@ struct DoctorSheet: View {
                 let b = busy(section), r = hasResult(section)
                 Button { b ? stop(section) : start(section) } label: {
                     Image(systemName: b ? "stop.fill" : (r ? "arrow.clockwise" : "play.fill"))
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
                         .frame(width: 26, height: 26)
+                        .background(Circle().fill(b ? Color.red : Color.accentColor))
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .tint(b ? .red : .accentColor)
+                .buttonStyle(.plain)
                 .help(b ? "Stop analysis" : (r ? "Re-analyze" : "Analyze"))
             }
         }
@@ -143,23 +143,27 @@ private struct SectionRow: View {
     @ViewBuilder private var status: some View {
         if busy {
             if hovering {
-                Button(action: stop) {
-                    Image(systemName: "stop.circle.fill").foregroundStyle(.red)
-                }
-                .buttonStyle(.plain).help("Stop")
+                Button(action: stop) { badge("stop.fill", .red) }.buttonStyle(.plain).help("Stop")
             } else {
                 ProgressView().controlSize(.small)
             }
         } else if hasResult {
             if hovering {
-                Button(action: reset) {
-                    Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain).help("Reset")
+                Button(action: reset) { badge("arrow.clockwise", .gray) }.buttonStyle(.plain).help("Reset")
             } else {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                badge("checkmark", .green)
             }
         }
+    }
+
+    /// A small colored circle with a white glyph — readable on both the white list and the blue
+    /// selected row.
+    private func badge(_ icon: String, _ color: Color) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 18, height: 18)
+            .background(Circle().fill(color))
     }
 }
 
