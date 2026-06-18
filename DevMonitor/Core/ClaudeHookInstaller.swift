@@ -7,9 +7,10 @@ import Foundation
 enum ClaudeHookInstaller {
     static let scriptName = "route-dev-through-devmonitor.sh"
 
-    static var claudeDir: URL {
-        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude", isDirectory: true)
-    }
+    /// Directory that holds `.claude` — the user's home in production; overridable in tests so they
+    /// never touch the real `~/.claude`.
+    nonisolated(unsafe) static var baseDir = URL(fileURLWithPath: NSHomeDirectory())
+    static var claudeDir: URL { baseDir.appendingPathComponent(".claude", isDirectory: true) }
     static var hooksDir: URL { claudeDir.appendingPathComponent("hooks", isDirectory: true) }
     static var scriptURL: URL { hooksDir.appendingPathComponent(scriptName) }
     static var settingsURL: URL { claudeDir.appendingPathComponent("settings.json") }

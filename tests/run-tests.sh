@@ -64,6 +64,9 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
 build_run advisor "$ROOT/tests/advisor/main.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"
 build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/dev-monitor/ArgParse.swift"
+build_run git    "$ROOT/tests/git/main.swift" "$SRC/Core/GitInfo.swift"
+build_run hook   "$ROOT/tests/hook/main.swift" "$SRC/Core/ClaudeHookInstaller.swift"
+build_run ipc    "$ROOT/tests/ipc/main.swift" "$SRC/Core/IPCIO.swift" "$SRC/Model/IPCProtocol.swift"
 
 echo "────────────────────────────────────────────────"
 [ "$fail" = 0 ] && echo "✅ ALL CHECKS PASSED" || echo "❌ SOME CHECKS FAILED"
