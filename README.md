@@ -217,4 +217,4 @@ When adding a feature, prefer extracting its decision logic into a pure (ideally
 
 ## License
 
-No license file is currently included — all rights reserved by default. Add a `LICENSE` before distributing.
+Released under the [MIT License](LICENSE) — free to use, copy, modify, and distribute, provided the copyright notice is preserved. © 2026 Damian.
