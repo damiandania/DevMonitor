@@ -29,7 +29,14 @@ It deliberately does **not** touch `xcodebuild`, `go build`, `cargo build`, `doc
 `make`, `npm install`, `npm test`, `npm run dev:<variant>`, or any command that already calls
 `dev-monitor`. Escape hatch: prefix any command with `DM_RAW=1 ` to run it untouched.
 
-## Install (user-global)
+## Install
+
+**Easiest — from the app:** Dev Monitor → **Settings → General → Claude Code** → **Install hook**
+(and **Uninstall hook** to remove it). It writes the script to `~/.claude/hooks/` and adds the
+PreToolUse entry to `~/.claude/settings.json`, preserving your other settings. Restart Claude Code
+afterwards (hooks load at session start).
+
+### Manual (user-global)
 
 1. Copy the hook somewhere stable and make it executable:
 

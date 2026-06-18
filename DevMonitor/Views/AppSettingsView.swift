@@ -52,6 +52,7 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            ClaudeHookSection()
             Section("Open in") {
                 Picker("Browser (Open)", selection: browser) {
                     Text("System default").tag(String?.none)
@@ -116,6 +117,50 @@ private struct GeneralSettings: View {
     }
     private var defaultMem: Binding<Int> {
         .init(get: { app.settings.defaultMemoryGB }, set: { app.settings.defaultMemoryGB = $0; app.persistSettings() })
+    }
+}
+
+// MARK: - Claude Code hook (install / uninstall)
+
+/// Lets the user install (or remove) the global Claude Code hook that makes OTHER Claude sessions
+/// route dev servers through this app instead of launching them themselves. Shown first in General.
+private struct ClaudeHookSection: View {
+    @State private var installed = ClaudeHookInstaller.isInstalled
+    @State private var error: String?
+
+    var body: some View {
+        Section("Claude Code") {
+            LabeledContent("Route dev servers through the app") {
+                Label(installed ? "Installed" : "Not installed",
+                      systemImage: installed ? "checkmark.seal.fill" : "circle")
+                    .foregroundStyle(installed ? Color.green : .secondary)
+                    .labelStyle(.titleAndIcon)
+            }
+            Text("Other Claude Code sessions are blocked from running `npm run dev` / `nuxt dev` / "
+                 + "builds directly and told to use `dev-monitor`, so every server is supervised here. "
+                 + "Adds a PreToolUse hook to ~/.claude/settings.json.")
+                .font(.caption).foregroundStyle(.secondary)
+            if installed {
+                Button(role: .destructive) { run(ClaudeHookInstaller.uninstall) } label: {
+                    Label("Uninstall hook", systemImage: "trash")
+                }
+            } else {
+                Button { run(ClaudeHookInstaller.install) } label: {
+                    Label("Install hook", systemImage: "checkmark.shield")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.red)
+            }
+        }
+        .onAppear { installed = ClaudeHookInstaller.isInstalled }
+    }
+
+    private func run(_ action: () throws -> Void) {
+        do { try action(); error = nil } catch { self.error = error.localizedDescription }
+        installed = ClaudeHookInstaller.isInstalled
     }
 }
 
