@@ -252,6 +252,7 @@ final class AppState {
     }
 
     /// Apply a recommendation. Foreign-process closes MUST already be confirmed by the caller.
+    /// The recommendation is removed from the Doctor lists immediately so the row disappears.
     func apply(_ r: ResourceAdvisor.Recommendation) {
         switch r.action {
         case .stopDevServer:
@@ -261,6 +262,8 @@ final class AppState {
         case .keep, .investigate:
             break
         }
+        advice?.recommendations.removeAll { $0.id == r.id }
+        memoryAdvice?.recommendations.removeAll { $0.id == r.id }
     }
 
     /// Apply every closeable recommendation (the "Free memory" / close-all button). The caller

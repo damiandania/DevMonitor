@@ -30,7 +30,9 @@ struct DoctorSheet: View {
         NavigationSplitView {
             List(selection: $section) {
                 ForEach(Section.allCases) { s in
-                    Label(s.title, systemImage: s.icon).tag(s)
+                    SectionRow(section: s, busy: busy(s), hasResult: hasResult(s),
+                               stop: { stop(s) }, reset: { reset(s) })
+                        .tag(s)
                 }
             }
             .navigationTitle("Doctor")
@@ -41,15 +43,16 @@ struct DoctorSheet: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { busy ? stop() : start() } label: {
-                    Image(systemName: busy ? "stop.fill" : (hasResult ? "arrow.clockwise" : "play.fill"))
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 30, height: 30)
+                let b = busy(section), r = hasResult(section)
+                Button { b ? stop(section) : start(section) } label: {
+                    Image(systemName: b ? "stop.fill" : (r ? "arrow.clockwise" : "play.fill"))
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
-                .tint(busy ? .red : .accentColor)
-                .help(busy ? "Stop analysis" : (hasResult ? "Re-analyze" : "Analyze"))
+                .tint(b ? .red : .accentColor)
+                .help(b ? "Stop analysis" : (r ? "Re-analyze" : "Analyze"))
             }
         }
         .frame(minWidth: 820, minHeight: 580)
@@ -70,33 +73,41 @@ struct DoctorSheet: View {
         }
     }
 
-    // Current section's analyze state/actions (drives the circular button).
-    private var busy: Bool {
-        switch section {
+    // Per-section analyze state/actions (so the sidebar shows each tab's progress, not just the
+    // selected one).
+    private func busy(_ s: Section) -> Bool {
+        switch s {
         case .heavy: return app.isAdvising
         case .devMonitor: return app.isGeneratingReport
         case .memory: return app.isGeneratingMemory
         }
     }
-    private var hasResult: Bool {
-        switch section {
+    private func hasResult(_ s: Section) -> Bool {
+        switch s {
         case .heavy: return app.advice != nil
         case .devMonitor: return app.diagnosticReport != nil
         case .memory: return app.memoryAdvice != nil
         }
     }
-    private func start() {
-        switch section {
+    private func start(_ s: Section) {
+        switch s {
         case .heavy: app.generateAdvice()
         case .devMonitor: app.generateReport()
         case .memory: app.generateMemory()
         }
     }
-    private func stop() {
-        switch section {
+    private func stop(_ s: Section) {
+        switch s {
         case .heavy: app.stopAdvice()
         case .devMonitor: app.stopReport()
         case .memory: app.stopMemory()
+        }
+    }
+    private func reset(_ s: Section) {
+        switch s {
+        case .heavy: app.resetAdvice()
+        case .devMonitor: app.resetReport()
+        case .memory: app.resetMemory()
         }
     }
 
@@ -105,6 +116,50 @@ struct DoctorSheet: View {
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(text)
+    }
+}
+
+/// A Doctor sidebar row: title + a status accessory on the right so you can see which tab is
+/// working even when it isn't selected — a spinner while analyzing (hover → red Stop), or a green
+/// check once done (hover → Reset).
+private struct SectionRow: View {
+    let section: DoctorSheet.Section
+    let busy: Bool
+    let hasResult: Bool
+    let stop: () -> Void
+    let reset: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack {
+            Label(section.title, systemImage: section.icon)
+            Spacer()
+            status
+                .frame(width: 22, height: 22)
+                .onHover { hovering = $0 }
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        if busy {
+            if hovering {
+                Button(action: stop) {
+                    Image(systemName: "stop.circle.fill").foregroundStyle(.red)
+                }
+                .buttonStyle(.plain).help("Stop")
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        } else if hasResult {
+            if hovering {
+                Button(action: reset) {
+                    Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help("Reset")
+            } else {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+        }
     }
 }
 
