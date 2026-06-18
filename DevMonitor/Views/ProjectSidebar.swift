@@ -14,6 +14,18 @@ struct ProjectSidebar: View {
                     HStack(spacing: 8) {
                         ProjectIconView(project: project, size: 16)
                         Text(project.name).lineLimit(1)
+                        if let st = app.session(for: project)?.state, st.isActive {
+                            Spacer(minLength: 4)
+                            // Running indicator: status tint (green = running, orange = launching, …).
+                            // `.drawingGroup()` rasterises the dot into an opaque Metal bitmap so the
+                            // macOS selection *vibrancy* can't darken it — a plain Circle/SF Symbol on
+                            // the selected (blue) row gets blended down (green 20,174,60 → 0,113,58).
+                            Circle()
+                                .fill(st.tint)
+                                .frame(width: 9, height: 9)
+                                .drawingGroup()
+                                .help("Server: \(st.label)")
+                        }
                     }
                     .tag(project.id)
                     .contextMenu {

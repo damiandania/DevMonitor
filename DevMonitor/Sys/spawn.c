@@ -39,8 +39,12 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd, int *i
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
-    // New session => child pid == its pgid == its sid, so killpg(pid) reaps the tree.
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
+    // SETSID: new session => child pid == its pgid == its sid, so killpg(pid) reaps the tree.
+    // CLOEXEC_DEFAULT: treat every inherited fd as close-on-exec EXCEPT the ones wired up by the
+    // file actions above (stdout/stderr/stdin). Without this the long-lived dev server inherits
+    // unrelated fds — notably the IPC client socket — and keeps a `dev-monitor` CLI blocked on
+    // read() until the server dies (the connection never sees EOF).
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT);
 
     // Login (not interactive): loads the user's PATH/fnm via .zprofile without the
     // interactive .zshrc, which on some setups (p10k/fnm hooks) reparents the real

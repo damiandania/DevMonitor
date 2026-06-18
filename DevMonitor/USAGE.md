@@ -8,15 +8,16 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 
 | Command | What it does |
 |---------|--------------|
-| `dev-monitor run [path] [--gb N]` | Launch + supervise a project (default: current directory) through the app (auto-detects pnpm/npm + framework; optional heap override). |
-| `dev-monitor status` | Show the active server (name, state, port). |
-| `dev-monitor stop` | Stop the active server. |
-| `dev-monitor restart` | Recycle (kill the tree + relaunch) the active server. |
+| `dev-monitor up [path] [--gb N]` | Start + supervise a project (default: cwd) through the app. **Idempotent** — a no-op that reports the port if that project's server is already running. Auto-detects pnpm/npm + framework; optional heap override. (`run` is an alias.) |
+| `dev-monitor build [path]` | Build the project. If its dev server is running, **stops it first** (so dev & build don't fight over the same build dir, e.g. Nuxt's `.nuxt`), runs the build, then **relaunches** the server. |
+| `dev-monitor status [--json]` | List **every** supervised server (name, state, port). `--json` prints a machine-readable array for scripts/agents. |
+| `dev-monitor stop [path] [--all]` | Stop one project's server (default: cwd), or `--all` of them. |
+| `dev-monitor restart [path]` | Recycle (kill the tree + relaunch) the project's server (default: cwd). |
 | `dev-monitor logs [-f]` | Print, or follow with `-f`, the live server log. |
 | `dev-monitor docs` | Print help. |
 
-The Dev Monitor app hosts the hub. If it isn't running, the CLI **starts it automatically** (via
-LaunchServices) and waits for the hub before issuing the command.
+Paths default to the current directory. The Dev Monitor app hosts the hub; if it isn't running the
+CLI **starts it automatically** (via LaunchServices) and waits for the hub before issuing the command.
 
 ## Diagnostics channel
 
@@ -33,19 +34,29 @@ to "Running" after the **first successful HTTP probe** — it never recycles dur
 
 ## For Claude Code / agents in other terminals
 
-When asked to start a dev server for a project, prefer:
+Route dev servers and JS builds through the app instead of running them directly:
 
 ```bash
-dev-monitor run        # instead of `npm run dev` / `pnpm dev`
+dev-monitor up          # instead of `npm run dev` / `pnpm dev` / `nuxt dev`
+dev-monitor build       # instead of `npm run build` (stops the server, builds, relaunches)
+dev-monitor status      # what's already running (add --json to parse)
 ```
 
-so Dev Monitor supervises it — auto-recycle on hang, live resource graphs, and notifications.
-Query state with `dev-monitor status`. This lets you (or the user) keep every dev server under
-one supervised, observable place instead of scattered across terminals.
+so Dev Monitor supervises each one — auto-recycle on hang, live resource graphs, notifications —
+and you keep every server under one observable place instead of scattered across terminals.
+
+This is enforced machine-wide by a **Claude Code hook** that hard-blocks raw `npm run dev` /
+`nuxt dev` / framework builds and points back at `dev-monitor`. See
+[`integrations/claude/`](../integrations/claude/) to install it. Because the app is launched by
+LaunchServices (its environment has no `CLAUDECODE`/`AI_AGENT` vars), routing through it also
+sidesteps Nuxt's agent-only dev-lock; servers are additionally spawned with `NUXT_IGNORE_LOCK=1`.
 
 ## Notes
 
-- One actively-supervised server at a time in this MVP (matches the app's UI). Multi-server hub
-  is a planned extension.
+- **One supervised server per project**, keyed by project path — several projects can run at once.
+  `dev-monitor up` is idempotent per project; `status` lists them all.
 - The heap size (`--gb`) maps to `NODE_OPTIONS=--max-old-space-size`. On an 8 GB Mac, prefer 4 GB
   over 8 GB to avoid memory pressure.
+- A server you start **outside** the app is still identified in the activity table and the menu-bar
+  list as *project :port* (in **purple**, vs blue for supervised ones) — but it isn't supervised:
+  only servers started through Dev Monitor are health-probed and recycled.

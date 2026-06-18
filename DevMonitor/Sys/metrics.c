@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <netinet/in.h>
+#include <netinet/tcp_fsm.h>
+#include <arpa/inet.h>
 
 // rusage CPU times are in mach absolute-time units; this scales them to ns.
 // On Intel the timebase is 1:1 (no-op); on Apple Silicon it is ~125/3.
@@ -234,4 +237,40 @@ int dm_proc_args(pid_t pid, char *buf, int size) {
     buf[written] = '\0';
     free(procargs);
     return written;
+}
+
+int dm_proc_listen_port(pid_t pid) {
+    int bufSize = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+    if (bufSize <= 0) {
+        return 0;
+    }
+    struct proc_fdinfo *fds = (struct proc_fdinfo *)malloc((size_t)bufSize);
+    if (fds == NULL) {
+        return 0;
+    }
+    int n = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, bufSize);
+    int count = (n > 0) ? n / (int)sizeof(struct proc_fdinfo) : 0;
+    int port = 0;
+    for (int i = 0; i < count; i++) {
+        if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) {
+            continue;
+        }
+        struct socket_fdinfo si;
+        int r = proc_pidfdinfo(pid, fds[i].proc_fd, PROC_PIDFDSOCKETINFO, &si, PROC_PIDFDSOCKETINFO_SIZE);
+        if (r < (int)PROC_PIDFDSOCKETINFO_SIZE || si.psi.soi_kind != SOCKINFO_TCP) {
+            continue;
+        }
+        struct tcp_sockinfo *t = &si.psi.soi_proto.pri_tcp;
+        int lport = ntohs((uint16_t)t->tcpsi_ini.insi_lport);
+        int fport = ntohs((uint16_t)t->tcpsi_ini.insi_fport);
+        if (t->tcpsi_state == TCPS_LISTEN && lport > 0) {
+            port = lport;     // a real listener — prefer it and stop
+            break;
+        }
+        if (fport == 0 && lport > 0 && port == 0) {
+            port = lport;     // fallback (bound, no peer); keep scanning for a true LISTEN
+        }
+    }
+    free(fds);
+    return port;
 }

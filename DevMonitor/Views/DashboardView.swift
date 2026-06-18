@@ -84,7 +84,7 @@ struct DashboardView: View {
         return HStack(spacing: 12) {
             PillButton(title: running ? "Stop" : "Launch",
                        systemImage: running ? "stop.fill" : "play.fill") {
-                if running { app.stopActive() } else { app.launch(project) }
+                if running { app.stop(project) } else { app.launch(project) }
             }
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
 
@@ -253,10 +253,10 @@ struct DashboardView: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 if hasServer {
-                    terminalTab(title: "Server", tag: 0, selected: tab == 0) { app.closeServer() }
+                    terminalTab(title: "Server", tag: 0, selected: tab == 0) { app.closeServer(project) }
                 }
                 if hasBuild {
-                    terminalTab(title: "Build", tag: 1, selected: tab == 1) { app.closeBuild() }
+                    terminalTab(title: "Build", tag: 1, selected: tab == 1) { app.closeBuild(project) }
                 }
                 Spacer()
             }

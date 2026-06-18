@@ -7,10 +7,10 @@ import Observation
 final class AppState {
     var projects: [Project] = []
     var selectedProjectID: Project.ID?
-    /// One actively-supervised server at a time (MVP).
-    var activeSession: DevSession?
-    /// One active build at a time.
-    var activeBuild: BuildRunner?
+    /// One supervised server PER PROJECT, keyed by project id. Several projects can run at once.
+    var sessions: [Project.ID: DevSession] = [:]
+    /// One build per project, keyed by project id.
+    var builds: [Project.ID: BuildRunner] = [:]
 
     /// App-wide settings (browser, analysis model, …) — the gear at the bottom of the sidebar.
     var settings: AppSettings
@@ -33,17 +33,27 @@ final class AppState {
         ipcServer.start(app: self)
         systemSampler.start()
         systemSampler.devServerInfo = { [weak self] in
-            guard let session = self?.activeSession, session.pid > 0 else { return nil }
-            let pids = Set(ProcessTree.sessionMembers(of: session.pid))
-            guard !pids.isEmpty else { return nil }
-            let label = session.project.name + (session.effectivePort.map { " :\($0)" } ?? "")
-            return (pids, label)
+            guard let self else { return [] }
+            // One entry PER supervised server (each gets its own table row, not aggregated).
+            // id = -pid so the synthetic row never collides with a real pid and skips enrichment.
+            return self.sessions.values
+                .filter { $0.pid > 0 }
+                .map { s -> (id: Int32, pids: Set<Int32>, label: String) in
+                    let pids = Set(ProcessTree.sessionMembers(of: s.pid))
+                    let label = s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")
+                    return (id: -s.pid, pids: pids, label: label)
+                }
+                .filter { !$0.pids.isEmpty }
         }
         systemSampler.buildInfo = { [weak self] in
-            guard let build = self?.activeBuild, build.isRunning, build.pid > 0 else { return nil }
-            let pids = Set(ProcessTree.sessionMembers(of: build.pid))
+            guard let self else { return nil }
+            let live = self.builds.values.filter { $0.isRunning && $0.pid > 0 }
+            guard !live.isEmpty else { return nil }
+            var pids = Set<Int32>()
+            for b in live { pids.formUnion(ProcessTree.sessionMembers(of: b.pid)) }
             guard !pids.isEmpty else { return nil }
-            return (pids, "Build · \(build.project.name)")
+            let label = live.count == 1 ? "Build · \(live.first!.project.name)" : "\(live.count) builds"
+            return (pids, label)
         }
         systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
     }
@@ -76,7 +86,8 @@ final class AppState {
     }
 
     func removeProject(_ id: Project.ID) {
-        if activeSession?.project.id == id { activeSession?.stop() }
+        sessions[id]?.stop(); sessions[id] = nil
+        builds[id]?.stop(); builds[id] = nil
         projects.removeAll { $0.id == id }
         if selectedProjectID == id { selectedProjectID = projects.first?.id }
         persist()
@@ -123,46 +134,67 @@ final class AppState {
         persist()
     }
 
+    /// Launch (or no-op if already running) the supervised server for `project`. Idempotent:
+    /// other projects' servers are left alone — one server per project, several at once.
     func launch(_ project: Project) {
-        if let s = activeSession, s.project.id != project.id { s.stop() }
+        if let existing = sessions[project.id], existing.state.isActive { return }
         let session = DevSession(project: project)
         session.onEvent = { event in Notifier.shared.notify(event) }
-        activeSession = session
+        sessions[project.id] = session
         session.start(memoryGB: project.memoryGB)
     }
 
-    func stopActive() {
-        activeSession?.stop()
-    }
+    /// Stop the supervised server for one project.
+    func stop(_ project: Project) { sessions[project.id]?.stop() }
+
+    /// Stop every supervised server (pressure relief / Doctor "stop dev servers").
+    func stopAllSessions() { for s in sessions.values { s.stop() } }
 
     /// Close the server terminal+tab: stop the dev server and drop it from the dashboard.
-    func closeServer() {
-        activeSession?.stop()
-        activeSession = nil
+    func closeServer(_ project: Project) {
+        sessions[project.id]?.stop()
+        sessions[project.id] = nil
     }
 
     /// Close the build terminal+tab: stop the build if running and drop it.
-    func closeBuild() {
-        activeBuild?.stop()
-        activeBuild = nil
+    func closeBuild(_ project: Project) {
+        builds[project.id]?.stop()
+        builds[project.id] = nil
     }
 
-    /// The active session if it belongs to `project`, else nil.
-    func session(for project: Project) -> DevSession? {
-        guard let s = activeSession, s.project.id == project.id else { return nil }
-        return s
-    }
+    /// The supervised session for `project`, if any.
+    func session(for project: Project) -> DevSession? { sessions[project.id] }
 
+    /// Build a project. If its dev server is running, stop it first (so dev & build don't fight
+    /// over the same build dir — e.g. Nuxt's `.nuxt`), wait for it to exit, run the build, then
+    /// relaunch the server when the build finishes.
     func runBuild(_ project: Project) {
-        let build = BuildRunner(project: project)
-        build.onEvent = { event in Notifier.shared.notify(event) }
-        activeBuild = build
-        build.start()
+        if let existing = builds[project.id], existing.isRunning { return }
+        let session = sessions[project.id]
+        let restartAfter = session?.state.isActive ?? false
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if restartAfter {
+                session?.stop()
+                for _ in 0..<25 {                       // ≤5s: wait for the tree to actually exit
+                    if (session?.pid ?? 0) == 0 { break }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                self.sessions[project.id] = nil
+            }
+            let build = BuildRunner(project: project)
+            build.onEvent = { event in Notifier.shared.notify(event) }
+            build.onFinish = { [weak self] _ in
+                if restartAfter { self?.launch(project) }   // relaunch regardless of build result
+            }
+            self.builds[project.id] = build
+            build.start()
+        }
     }
 
     /// The active build if it belongs to `project`, else nil.
     func build(for project: Project) -> BuildRunner? {
-        guard let b = activeBuild, b.project.id == project.id else { return nil }
+        guard let b = builds[project.id] else { return nil }
         return b
     }
 
@@ -256,7 +288,7 @@ final class AppState {
     func apply(_ r: ResourceAdvisor.Recommendation) {
         switch r.action {
         case .stopDevServer:
-            stopActive()
+            stopAllSessions()
         case .closeProcess:
             if r.id > 0 { Self.killPid(r.id) }   // foreign — caller has confirmed
         case .keep, .investigate:
@@ -339,7 +371,7 @@ final class AppState {
     /// supervisor; a foreign process gets SIGTERM, escalating to SIGKILL if still alive.
     func killSuggestion(_ rec: ResourceAdvisor.Recommendation) {
         if rec.action == .stopDevServer || rec.id == -1 {
-            stopActive()
+            stopAllSessions()
         } else if rec.id > 0 {
             Self.killPid(rec.id)
         }

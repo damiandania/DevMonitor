@@ -11,12 +11,16 @@ struct ProcessTableView: View {
                 HStack(spacing: 6) {
                     if row.isDevServer {
                         Image(systemName: "server.rack").foregroundStyle(.tint)
+                    } else if row.isExternalDev {
+                        // Same format as a managed server, but purple = running outside the app.
+                        Image(systemName: "server.rack").foregroundStyle(Color.purple)
                     } else if row.isBuild {
                         Image(systemName: "hammer.fill").foregroundStyle(.orange)
                     }
                     Text(row.name)
-                        .fontWeight(row.isDevServer || row.isBuild ? .semibold : .regular)
+                        .fontWeight(row.isDevServer || row.isBuild || row.isExternalDev ? .semibold : .regular)
                         .foregroundStyle(row.isDevServer ? Color.accentColor
+                                         : row.isExternalDev ? Color.purple
                                          : (row.isBuild ? Color.orange : .primary))
                         .lineLimit(1)
                         .truncationMode(.middle)

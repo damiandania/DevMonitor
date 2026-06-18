@@ -7,22 +7,29 @@ import Foundation
 signal(SIGPIPE, SIG_IGN)
 
 let usage = """
-dev-monitor — launch and supervise dev servers through the Dev Monitor app.
+dev-monitor — launch, build and supervise dev servers through the Dev Monitor app.
 
 USAGE:
-  dev-monitor run [path] [--gb N]   Launch + supervise a project (default: current directory)
-  dev-monitor status                Show the active server (name, state, port)
-  dev-monitor stop                  Stop the active server
-  dev-monitor restart               Recycle (kill tree + relaunch) the active server
+  dev-monitor up [path] [--gb N]    Start the project's server (no-op if already up). Alias: run
+  dev-monitor build [path]          Build the project — stops its server first, relaunches after
+  dev-monitor status [--json]       List every supervised server (name, state, port)
+  dev-monitor stop [path] [--all]   Stop one project's server (default: cwd), or --all of them
+  dev-monitor restart [path]        Recycle (kill tree + relaunch) the project's server
   dev-monitor logs [-f]             Print (or follow with -f) the live server log
   dev-monitor docs                  Print this help
 
-The Dev Monitor app hosts the hub at ~/Library/Application Support/DevMonitor/dm.sock.
-If it isn't running, dev-monitor will start it automatically.
+One supervised server PER PROJECT; several projects can run at once. Paths default to the
+current directory. The Dev Monitor app hosts the hub at
+~/Library/Application Support/DevMonitor/dm.sock — if it isn't running, it's started for you.
 """
 
 let args = Array(CommandLine.arguments.dropFirst())
 let cmd = args.first ?? "status"
+
+/// First non-flag argument, or the current working directory.
+func pathArg() -> String {
+    args.dropFirst().first { !$0.hasPrefix("-") } ?? FileManager.default.currentDirectoryPath
+}
 
 func roundtrip(_ req: IPCRequest) -> [IPCMessage]? {
     let fd = dm_ipc_connect(IPCSocket.path)
@@ -76,25 +83,27 @@ func requireHub(_ req: IPCRequest) -> [IPCMessage] {
     exit(1)
 }
 
-switch cmd {
-case "run":
-    let pathArg = args.dropFirst().first { !$0.hasPrefix("--") }
-    var req = IPCRequest(cmd: "run", path: pathArg ?? FileManager.default.currentDirectoryPath, name: nil, gb: nil)
-    if let i = args.firstIndex(of: "--gb"), i + 1 < args.count { req.gb = Int(args[i + 1]) }
+/// Send a request, print ok messages, exit 1 on error.
+func runAndReport(_ req: IPCRequest) {
     for m in requireHub(req) {
         if m.type == "error" {
             FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
         }
         print(m.message ?? m.type)
     }
+}
+
+switch cmd {
+case "run", "up":
+    var req = IPCRequest(cmd: cmd, path: pathArg(), name: nil, gb: nil, all: nil)
+    if let i = args.firstIndex(of: "--gb"), i + 1 < args.count { req.gb = Int(args[i + 1]) }
+    runAndReport(req)
+
+case "build":
+    runAndReport(IPCRequest(cmd: "build", path: pathArg(), name: nil, gb: nil, all: nil))
 
 case "restart":
-    for m in requireHub(IPCRequest(cmd: "restart", path: nil, name: nil, gb: nil)) {
-        if m.type == "error" {
-            FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
-        }
-        print(m.message ?? m.type)
-    }
+    runAndReport(IPCRequest(cmd: "restart", path: pathArg(), name: nil, gb: nil, all: nil))
 
 case "logs":
     let logPath = NSHomeDirectory() + "/Library/Application Support/DevMonitor/dev-server.log"
@@ -112,9 +121,16 @@ case "logs":
     }
 
 case "status":
-    for m in requireHub(IPCRequest(cmd: "status", path: nil, name: nil, gb: nil)) where m.type == "status" {
+    let wantJSON = args.contains("--json")
+    for m in requireHub(IPCRequest(cmd: "status", path: nil, name: nil, gb: nil, all: nil)) where m.type == "status" {
         let servers = m.servers ?? []
-        if servers.isEmpty { print("No active server."); break }
+        if wantJSON {
+            let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+            if let data = try? enc.encode(servers), let s = String(data: data, encoding: .utf8) { print(s) }
+            else { print("[]") }
+            break
+        }
+        if servers.isEmpty { print("No active servers."); break }
         for s in servers {
             print("● \(s.name)  —  \(s.state)\(s.port.map { "  :\($0)" } ?? "")")
             print("  \(s.path)")
@@ -122,7 +138,9 @@ case "status":
     }
 
 case "stop":
-    for m in requireHub(IPCRequest(cmd: "stop", path: nil, name: nil, gb: nil)) { print(m.message ?? m.type) }
+    let all = args.contains("--all")
+    let req = IPCRequest(cmd: "stop", path: all ? nil : pathArg(), name: nil, gb: nil, all: all ? true : nil)
+    runAndReport(req)
 
 case "docs", "--help", "-h":
     print(usage)

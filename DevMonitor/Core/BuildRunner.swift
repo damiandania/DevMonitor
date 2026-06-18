@@ -20,6 +20,9 @@ final class BuildRunner {
     private let maxLogLines = 4000
 
     var onEvent: (@MainActor (SupervisionEvent) -> Void)?
+    /// Fired once when the build process exits. `success` is true on exit code 0.
+    /// Used by the orchestrator to relaunch a server that was stopped for the build.
+    var onFinish: (@MainActor (Bool) -> Void)?
 
     private enum Chunk: Sendable { case data(Data); case exit(code: Int32) }
 
@@ -113,5 +116,6 @@ final class BuildRunner {
         result = code
         logLines.append("build finished (code \(code))")
         onEvent?(.buildFinished(project: project.name, success: code == 0))
+        onFinish?(code == 0)
     }
 }

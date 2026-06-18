@@ -2,10 +2,11 @@ import Foundation
 
 /// Shared IPC types between the app (hub) and the `dev-monitor` CLI.
 struct IPCRequest: Codable, Sendable {
-    var cmd: String          // "run" | "status" | "stop"
-    var path: String?        // project path (run)
-    var name: String?        // project name (stop)
-    var gb: Int?             // heap override (run)
+    var cmd: String          // "run"/"up" | "status" | "stop" | "restart" | "build"
+    var path: String?        // project path (run/up/build/stop/restart) — defaults to the CLI's cwd
+    var name: String?        // reserved
+    var gb: Int?             // heap override (run/up)
+    var all: Bool?           // stop: stop every supervised server, not just this path's
 }
 
 struct IPCServerInfo: Codable, Sendable {

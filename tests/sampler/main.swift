@@ -21,7 +21,7 @@ let rows = [
 ]
 let agg = SystemSampler.aggregate(
     rows: rows,
-    dev: (pids: [100, 101], label: "MiddleSpace :3000"),
+    devs: [(id: -1, pids: [100, 101], label: "MiddleSpace :3000")],
     build: (pids: [200], label: "Build · MiddleSpace"),
     coreCount: 8, totalMem: 8 * GB, topN: 40)
 
@@ -37,7 +37,7 @@ chk(!agg.contains { [100, 101, 200].contains($0.id) }, "aggregate: tree members 
 
 let aggIdle = SystemSampler.aggregate(
     rows: [ProcessRow(id: 200, name: "node", cpuPerCore: 1, memBytes: 5 * MB)],
-    dev: nil, build: (pids: [200], label: "Build · X"),
+    devs: [], build: (pids: [200], label: "Build · X"),
     coreCount: 8, totalMem: 8 * GB, topN: 40)
 chk(aggIdle.contains { $0.id == -2 }, "aggregate: idle build still shown (always-on like server)")
 

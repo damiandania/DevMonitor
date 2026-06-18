@@ -31,7 +31,7 @@ struct DoctorSheet: View {
             List(selection: $section) {
                 ForEach(Section.allCases) { s in
                     SectionRow(section: s, busy: busy(s), hasResult: hasResult(s),
-                               stop: { stop(s) }, reset: { reset(s) })
+                               stop: { stop(s) }, reanalyze: { start(s) })
                         .tag(s)
                 }
             }
@@ -44,14 +44,16 @@ struct DoctorSheet: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 let b = busy(section), r = hasResult(section)
+                // The button itself is the coloured circle (prominent + .circle shape) so there's no
+                // white toolbar bezel/glass pill around it — drawing our own circle left the system
+                // background showing as a white halo.
                 Button { b ? stop(section) : start(section) } label: {
                     Image(systemName: b ? "stop.fill" : (r ? "arrow.clockwise" : "play.fill"))
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(b ? Color.red : Color.accentColor))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .tint(b ? .red : .accentColor)
                 .help(b ? "Stop analysis" : (r ? "Re-analyze" : "Analyze"))
             }
         }
@@ -127,7 +129,7 @@ private struct SectionRow: View {
     let busy: Bool
     let hasResult: Bool
     let stop: () -> Void
-    let reset: () -> Void
+    let reanalyze: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -149,22 +151,24 @@ private struct SectionRow: View {
             }
         } else if hasResult {
             if hovering {
-                Button(action: reset) { badge("arrow.clockwise", .gray) }.buttonStyle(.plain).help("Reset")
+                Button(action: reanalyze) { badge("arrow.clockwise", .accentColor) }
+                    .buttonStyle(.plain).help("Re-analyze")
             } else {
                 badge("checkmark", .green)
             }
         }
     }
 
-    /// A small colored circle with a white glyph — readable on both the white list and the blue
-    /// selected row.
+    /// A small colored circle with a white glyph. `.drawingGroup()` rasterises it into an opaque
+    /// bitmap so the macOS selection vibrancy can't darken the colour on the blue selected row —
+    /// the same fix as the sidebar's running dot. No white ring/background.
     private func badge(_ icon: String, _ color: Color) -> some View {
         Image(systemName: icon)
             .font(.system(size: 10, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 18, height: 18)
             .background(Circle().fill(color))
-            .overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+            .drawingGroup()
     }
 }
 

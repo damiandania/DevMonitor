@@ -64,4 +64,8 @@ int dm_proc_name(pid_t pid, char *buf, int size);
 /// Used to tell apart generic helpers (e.g. which VS Code language server a "Code Helper" is).
 int dm_proc_args(pid_t pid, char *buf, int size);
 
+/// The TCP port a process is LISTENing on (e.g. a dev server's port), or 0 if none.
+/// Used to identify a dev server started outside the app (e.g. "MiddleSpace :3001").
+int dm_proc_listen_port(pid_t pid);
+
 #endif /* DM_METRICS_H */

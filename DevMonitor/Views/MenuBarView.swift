@@ -1,13 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Compact panel shown from the menu-bar icon: active server status, quick
-/// controls, and a live system snapshot — without opening the main window.
+/// Compact panel shown from the menu-bar icon: every online server (supervised + external),
+/// quick controls, and a live system snapshot — without opening the main window.
 struct MenuBarView: View {
     @Environment(AppState.self) private var app
     @Environment(\.openWindow) private var openWindow
-
-    private var session: DevSession? { app.activeSession }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -15,8 +13,7 @@ struct MenuBarView: View {
                 .font(.headline)
 
             Divider()
-            sessionSection
-            controls
+            serversSection
 
             Divider()
             systemSection
@@ -37,44 +34,63 @@ struct MenuBarView: View {
         .frame(width: 300)
     }
 
-    @ViewBuilder private var sessionSection: some View {
-        if let session {
-            TimelineView(.periodic(from: Date(), by: 1)) { _ in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(session.project.name)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Label(session.state.label, systemImage: "circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                        .foregroundStyle(session.state.tint)
-                    if let started = session.startedAt, session.state.isActive {
-                        Text("up \(Self.uptime(since: started))"
-                            + (session.recycleCount > 0 ? " · \(session.recycleCount) recycles" : ""))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+    /// Lists every online server: each supervised session (with Stop/Restart) and each dev server
+    /// running OUTSIDE the app (purple, display-only). Falls back to a Launch button for the
+    /// selected project when nothing is running for it.
+    @ViewBuilder private var serversSection: some View {
+        let managed = app.sessions.values
+            .filter { $0.state.isActive }
+            .sorted { $0.project.name < $1.project.name }
+        let external = app.systemSampler.processes.filter { $0.isExternalDev }
+
+        TimelineView(.periodic(from: Date(), by: 1)) { _ in
+            VStack(alignment: .leading, spacing: 10) {
+                if managed.isEmpty && external.isEmpty {
+                    Text("No servers running").font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    ForEach(managed, id: \.project.id) { managedRow($0) }
+                    ForEach(external) { externalRow($0) }
+                }
+                if let p = app.selectedProject, app.sessions[p.id]?.state.isActive != true {
+                    Button { app.launch(p) } label: {
+                        Label("Launch \(p.name)", systemImage: "play.fill")
                     }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
                 }
             }
-        } else {
-            Text(app.selectedProject.map { "\($0.name) — idle" } ?? "No project selected")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
         }
     }
 
-    @ViewBuilder private var controls: some View {
-        HStack(spacing: 8) {
-            if let session, session.state.isActive {
-                Button("Stop", systemImage: "stop.fill") { app.stopActive() }
-                Button("Restart", systemImage: "arrow.clockwise") { session.recycle() }
-            } else if let project = app.selectedProject {
-                Button("Launch", systemImage: "play.fill") { app.launch(project) }
-                    .buttonStyle(.borderedProminent)
+    private func managedRow(_ s: DevSession) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Label(s.state.label, systemImage: "circle.fill")
+                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(s.state.tint)
+                if let started = s.startedAt, s.state.isActive {
+                    Text("up \(Self.uptime(since: started))"
+                        + (s.recycleCount > 0 ? " · \(s.recycleCount) recycles" : ""))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
+            Spacer()
+            HStack(spacing: 6) {
+                Button { app.stop(s.project) } label: { Image(systemName: "stop.fill") }.help("Stop")
+                Button { s.recycle() } label: { Image(systemName: "arrow.clockwise") }.help("Restart")
+            }
+            .buttonStyle(.borderless).controlSize(.small)
         }
-        .font(.callout)
-        .controlSize(.small)
+    }
+
+    private func externalRow(_ row: ProcessRow) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "server.rack").font(.caption).foregroundStyle(.purple)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.name).font(.subheadline.weight(.semibold)).foregroundStyle(.purple).lineLimit(1)
+                Text("external · not supervised").font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
     }
 
     private var systemSection: some View {

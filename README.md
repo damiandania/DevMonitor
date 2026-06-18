@@ -23,6 +23,7 @@ central IPC hub other terminals route through, and Claude-generated self-error r
 | P8 — Polish & dist | ✅ | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (signing: ad-hoc¹) |
 | P9 — Resource advisor | ✅ | Claude-recommended actions on heavy processes; auto-stop managed dev, **confirm before closing foreign** |
 | P9b — Pressure auto-kill | ✅ | Detects a stuck machine (sustained CPU, or memory full + swapping) → **auto-closes orphaned dev processes** (+notify); other heavy processes are surfaced with a fast **Haiku** eval and a red **skull** button (manual) |
+| P10 — Multi-session orchestrator | ✅ | **One supervised server per project** (concurrent, each its own table row), idempotent `dev-monitor up`, `build` orchestration (stop→build→relaunch), `status --json`, sidebar running indicator, **external dev servers identified** in the table & menu (*project :port*, purple), the menu-bar item lists **all** online servers, a global **Claude Code hook** that routes raw `npm run dev`/builds through the CLI, and `NUXT_IGNORE_LOCK=1` + a CLOEXEC fd fix so cold launches don't hang |
 
 ¹ Signed ad-hoc (`CODE_SIGN_IDENTITY = -`): no Apple Developer ID identity is installed on this
 machine. Local notifications and the menu-bar item work; for distribution outside this Mac, sign
@@ -34,11 +35,14 @@ with a Developer ID and notarize.
   Express) per project.
 - **Launches** the dev server with a chosen heap size (`--max-old-space-size`), streaming its log live.
 - **Live activity**: system **CPU / Memory / Swap** progress bars + an Activity-Monitor-style table
-  of only the processes with real impact (heavy CPU or memory), with the dev-server tree aggregated
-  into one row. CPU is per-core (100% = one core), so a busy tree can read >100% like Activity
-  Monitor; the "% of machine" toggle re-expresses it as a share of total capacity. Generic helpers
-  (`node`, "Code Helper") are named from the extension's own `package.json` `displayName` (resolving
-  `%key%` via `package.nls.json`) — e.g. *Vue (Official)*, *ESLint*, *Tailwind CSS IntelliSense*.
+  of only the processes with real impact (heavy CPU or memory). **Each supervised server is its own
+  identified row** (e.g. *MiddleSpace :3000*, blue) — trees aren't merged. A dev server running
+  **outside** the app is identified the same way but in **purple** (e.g. *MiddleSpace :3001*) so you
+  can tell it apart at a glance; it's shown, not supervised. CPU is per-core (100% = one core), so a
+  busy tree can read >100% like Activity Monitor; the "% of machine" toggle re-expresses it as a
+  share of total capacity. Generic helpers (`node`, "Code Helper") are named from the extension's own
+  `package.json` `displayName` (resolving `%key%` via `package.nls.json`) — e.g. *Vue (Official)*,
+  *ESLint*, *Tailwind CSS IntelliSense*.
 - **Per-project settings** (gear on each sidebar row → modal): **Memory / Port / Package**, each with
   an **Auto** toggle (on by default); turn it off for a manual value (slider / field / package picker:
   npm·pnpm·yarn·bun·deno). Auto memory follows the framework default; auto port is parsed from stdout.
@@ -64,11 +68,18 @@ with a Developer ID and notarize.
     (foreign processes are only closed when *you* press it). A heuristic list shows instantly while
     Haiku refines it. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself)
     are never suggested or auto-closed.
-- **Menu-bar item** (`MenuBarExtra`): active-server status, live uptime, Launch/Stop/Restart, and a
-  system CPU/memory snapshot without opening the main window.
-- **Central hub + CLI**: run servers from any terminal through the app with `dev-monitor run`
-  (auto-starts the app if needed); `status` / `stop` / `restart` / `logs -f`. See
-  [DevMonitor/USAGE.md](DevMonitor/USAGE.md).
+- **Menu-bar item** (`MenuBarExtra`): lists **every online server** — each supervised one with live
+  status/uptime and Stop/Restart, plus any **external** dev servers (purple, display-only) — a Launch
+  button for the selected idle project, and a system CPU/memory snapshot, without opening the window.
+- **Central hub + CLI**: run servers from any terminal through the app — **one supervised server
+  per project**, several concurrently. `dev-monitor up` (idempotent), `build` (stops the project's
+  server, builds, relaunches), `status [--json]`, `stop [path]/--all`, `restart [path]`, `logs -f`;
+  auto-starts the app if needed. The sidebar shows a small **status dot** on each project whose
+  server is live. See [DevMonitor/USAGE.md](DevMonitor/USAGE.md).
+- **Routes other Claude Code sessions through the app**: a global PreToolUse hook hard-blocks raw
+  `npm run dev` / `nuxt dev` / framework builds and redirects to `dev-monitor`, so every terminal's
+  servers land in one supervised place. See [integrations/claude/](integrations/claude/). A server
+  started **outside** the app still appears in the activity table but isn't supervised.
 - **Diagnose (read-only)**: a toolbar button runs the logged-in `claude` against Dev Monitor's *own*
   source to explain its internal errors — never edits anything (`--permission-mode plan` + write
   tools disallowed).
@@ -105,13 +116,14 @@ DevMonitor/
   Core/       Detector, DevSession (supervisor+metrics+health), ProcessTree, SystemSampler
               (+pressure detection), BuildRunner, IPCServer, Notifier, AppLog, ClaudeRunner,
               ResourceAdvisor (advise / pressureKills(Haiku) / heuristicKills)
-  Sys/        spawn.c (posix_spawn SETSID), metrics.c (libproc/mach + swap), ipc.c + bridging header
+  Sys/        spawn.c (posix_spawn SETSID + CLOEXEC_DEFAULT), metrics.c (libproc/mach + swap +
+              listen-port), ipc.c (FD_CLOEXEC) + bridging header
   Views/      RootSplitView, ProjectSidebar, DashboardView, LogPaneView, MenuBarView, ServerConfigView,
               ProjectSettingsSheet, AppSettingsView, PressureSuggestionsView, ReportSheet (P7),
               AdvisorSheet (P9), PillButton, SessionState+UI
   Resources/  Assets.xcassets (AppIcon + monochrome github + skull), Info.plist
   tools/      make-icon.swift (Core Graphics app-icon generator)
-dev-monitor/  CLI target (IPC client — run/status/stop/restart/logs, auto-starts the app)
+dev-monitor/  CLI target (IPC client — up/run/build/status[--json]/stop[--all]/restart/logs, auto-starts the app)
 ```
 
 ## Technical notes
@@ -126,6 +138,17 @@ A few non-obvious things this codebase gets right (verified with headless tests 
   process-group churn. `killpg` reaps exactly what we measure.
 - **CPU times need timebase conversion**: `proc_pid_rusage` returns CPU time in *mach* units on
   Apple Silicon (not nanoseconds); scaled via `mach_timebase_info` (1:1 on Intel).
+- **Spawned servers must not inherit the IPC socket**: the supervisor spawns with
+  `POSIX_SPAWN_CLOEXEC_DEFAULT` (and sets `FD_CLOEXEC` on the hub sockets), so a long-lived dev
+  server can't inherit the `dev-monitor` client socket — otherwise a cold-launch CLI call blocks on
+  `read()` until the server dies, because the connection never sees EOF.
+- **Nuxt's dev-lock is agent-only**: `std-env` enables it whenever `CLAUDECODE`/`AI_AGENT` is set,
+  so it fires inside Claude Code terminals. Servers are spawned with `NUXT_IGNORE_LOCK=1`, and the
+  app's own (LaunchServices) environment has no agent vars, so app-spawned servers never lock.
+- **External dev servers are identified, not just listed**: a process whose argv looks like a dev
+  server (`looksLikeDevServer`) is labelled *project :port* — project from the path before
+  `/node_modules/`, port from `dm_proc_listen_port` (a `proc_pidfdinfo` scan for the LISTENing TCP
+  socket). It's flagged `isExternalDev` (purple) but never supervised (no probe/recycle).
 
 ## Install (local)
 

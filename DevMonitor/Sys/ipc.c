@@ -4,6 +4,14 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <string.h>
+#include <fcntl.h>
+
+// Mark a socket close-on-exec so no process we spawn can inherit it (which would otherwise keep a
+// CLI connection open forever). dm_spawn_session also sets POSIX_SPAWN_CLOEXEC_DEFAULT; this is
+// belt-and-suspenders for any other spawn path.
+static void dm_cloexec(int fd) {
+    if (fd >= 0) fcntl(fd, F_SETFD, FD_CLOEXEC);
+}
 
 static int dm_set_path(struct sockaddr_un *addr, const char *path) {
     memset(addr, 0, sizeof(*addr));
@@ -20,6 +28,7 @@ int dm_ipc_listen(const char *path) {
     if (fd < 0) {
         return -1;
     }
+    dm_cloexec(fd);
     struct sockaddr_un addr;
     if (dm_set_path(&addr, path) != 0) {
         close(fd);
@@ -38,7 +47,9 @@ int dm_ipc_listen(const char *path) {
 }
 
 int dm_ipc_accept(int listen_fd) {
-    return accept(listen_fd, NULL, NULL);
+    int fd = accept(listen_fd, NULL, NULL);
+    dm_cloexec(fd);
+    return fd;
 }
 
 int dm_ipc_connect(const char *path) {

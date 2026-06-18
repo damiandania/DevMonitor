@@ -7,8 +7,9 @@ struct ProcessRow: Identifiable, Sendable {
     let name: String
     let cpuPerCore: Double // per-core % (can exceed 100)
     let memBytes: Double
-    var isDevServer = false
+    var isDevServer = false      // a server SUPERVISED by the app (managed tree)
     var isBuild = false
+    var isExternalDev = false    // a dev server running OUTSIDE the app (identified, not supervised)
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -41,14 +42,14 @@ final class SystemSampler {
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
-    private var richNameCache: [Int32: String] = [:]
+    private var richNameCache: [Int32: (name: String, ext: Bool)] = [:]
     private var prevSysTicks: dm_cpu_ticks?
     private var task: Task<Void, Never>?
     private let topN = 40
 
-    /// Supplies the active dev-server's pids + a readable label, so its whole tree shows as
-    /// one clear, highlighted row (e.g. "MiddleSpace :3000") instead of a bare "node".
-    var devServerInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
+    /// Supplies one entry PER supervised dev server (id + pids + readable label), so each shows as
+    /// its own highlighted row (e.g. "MiddleSpace :3000") instead of a bare "node" or one merged row.
+    var devServerInfo: (@MainActor () -> [(id: Int32, pids: Set<Int32>, label: String)])?
     /// Same, for an in-progress build — its tree shows as one identified row (like the server).
     var buildInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
 
@@ -129,17 +130,18 @@ final class SystemSampler {
 
         // Aggregate the dev-server and build trees into single identified rows; otherwise surface
         // only processes with a real performance impact. (Pure + testable — see SystemSampler.aggregate.)
-        let result = Self.aggregate(rows: rows, dev: devServerInfo?(), build: buildInfo?(),
+        let result = Self.aggregate(rows: rows, devs: devServerInfo?() ?? [], build: buildInfo?(),
                                     coreCount: coreCount, totalMem: totalMem, topN: topN)
 
         // Give generic helpers (VS Code language servers, bare "node", …) a readable name
         // derived from their argv — only for the few shown rows, and cached per pid.
         processes = result.map { row in
             guard row.id > 0, Self.isGeneric(row.name) else { return row }
-            let better = self.enrichedName(pid: row.id, comm: row.name)
-            return better == row.name ? row
-                : ProcessRow(id: row.id, name: better, cpuPerCore: row.cpuPerCore,
-                             memBytes: row.memBytes, isDevServer: row.isDevServer)
+            let e = self.enrichedName(pid: row.id, comm: row.name)
+            if !e.ext && e.name == row.name { return row }
+            return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
+                              memBytes: row.memBytes, isDevServer: row.isDevServer,
+                              isBuild: row.isBuild, isExternalDev: e.ext)
         }
         let liveIDs = Set(result.map { $0.id })
         richNameCache = richNameCache.filter { liveIDs.contains($0.key) }
@@ -162,11 +164,12 @@ final class SystemSampler {
 
     // MARK: - Pure logic (testable without the C metrics or the run loop)
 
-    /// Aggregates the dev-server and build trees into single identified rows (ids -1 and -2), and
-    /// keeps only other processes with real impact (heavy CPU or memory), ranked, capped at `topN`.
+    /// Aggregates each dev-server tree into its OWN identified row, the build tree into one row
+    /// (id -2), and keeps only other processes with real impact (heavy CPU or memory), ranked,
+    /// capped at `topN`.
     nonisolated static func aggregate(
         rows: [ProcessRow],
-        dev: (pids: Set<Int32>, label: String)?,
+        devs: [(id: Int32, pids: Set<Int32>, label: String)],
         build: (pids: Set<Int32>, label: String)?,
         coreCount: Int, totalMem: Double, topN: Int
     ) -> [ProcessRow] {
@@ -176,13 +179,18 @@ final class SystemSampler {
         func impact(_ row: ProcessRow) -> Double {
             row.cpuPerCore / cores + (totalMem > 0 ? row.memBytes / totalMem * 100 : 0)
         }
-        let devPids = dev?.pids ?? []
+        // Map each pid to its dev-server index so trees are summed PER server, not all together.
+        var devIndexByPid: [Int32: Int] = [:]
+        for (i, d) in devs.enumerated() { for p in d.pids { devIndexByPid[p] = i } }
         let buildPids = build?.pids ?? []
-        var devCPU = 0.0, devMem = 0.0, buildCPU = 0.0, buildMem = 0.0
+
+        var devCPU = [Double](repeating: 0, count: devs.count)
+        var devMem = [Double](repeating: 0, count: devs.count)
+        var buildCPU = 0.0, buildMem = 0.0
         var others: [ProcessRow] = []
         for row in rows {
-            if !devPids.isEmpty, devPids.contains(row.id) {
-                devCPU += row.cpuPerCore; devMem += row.memBytes
+            if let gi = devIndexByPid[row.id] {
+                devCPU[gi] += row.cpuPerCore; devMem[gi] += row.memBytes
             } else if !buildPids.isEmpty, buildPids.contains(row.id) {
                 buildCPU += row.cpuPerCore; buildMem += row.memBytes
             } else {
@@ -190,10 +198,11 @@ final class SystemSampler {
             }
         }
         var result: [ProcessRow] = []
-        if let dev, !devPids.isEmpty {
-            result.append(ProcessRow(id: -1, name: dev.label, cpuPerCore: devCPU, memBytes: devMem, isDevServer: true))
+        // One row per supervised server (always shown, even when momentarily idle).
+        for (i, d) in devs.enumerated() {
+            result.append(ProcessRow(id: d.id, name: d.label, cpuPerCore: devCPU[i],
+                                     memBytes: devMem[i], isDevServer: true))
         }
-        // The build always shows (like the server), even when momentarily idle.
         if let build, !buildPids.isEmpty {
             result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))
         }
@@ -234,14 +243,34 @@ final class SystemSampler {
             || name.allSatisfy { $0.isNumber || $0 == "." || $0 == "-" }
     }
 
-    private func enrichedName(pid: Int32, comm: String) -> String {
+    private func enrichedName(pid: Int32, comm: String) -> (name: String, ext: Bool) {
         if let cached = richNameCache[pid] { return cached }
         var buffer = [CChar](repeating: 0, count: 8192)
         let n = Int(dm_proc_args(pid, &buffer, 8192))
         let args = n > 0 ? String(cString: buffer) : ""
-        let result = Self.describe(comm: comm, args: args)
-        richNameCache[pid] = result
-        return result
+        // A dev server started OUTSIDE the app: identify it like the managed one
+        // ("MiddleSpace :3001") instead of a bare "node", and flag it external so the table can
+        // give it the same format in a different colour. It stays unsupervised (no probe/recycle).
+        if ResourceAdvisor.looksLikeDevServer(argv: args) {
+            let project = Self.projectName(fromArgs: args) ?? comm
+            let port = Int(dm_proc_listen_port(pid))
+            let entry = (name: project + (port > 0 ? " :\(port)" : ""), ext: true)
+            if port > 0 { richNameCache[pid] = entry }   // cache once the port binds (it can be late)
+            return entry
+        }
+        let entry = (name: Self.describe(comm: comm, args: args), ext: false)
+        richNameCache[pid] = entry
+        return entry
+    }
+
+    /// The project folder name from a dev-server argv: the directory just before `/node_modules/`
+    /// (e.g. ".../MiddleSpace/node_modules/.bin/nuxt" → "MiddleSpace"). nil if not derivable.
+    nonisolated static func projectName(fromArgs args: String) -> String? {
+        guard let r = args.range(of: "/node_modules/") else { return nil }
+        let before = args[..<r.lowerBound]
+        guard let slash = before.lastIndex(of: "/") else { return nil }
+        let name = String(before[before.index(after: slash)...])
+        return name.isEmpty ? nil : name
     }
 
     private static func describe(comm: String, args: String) -> String {
