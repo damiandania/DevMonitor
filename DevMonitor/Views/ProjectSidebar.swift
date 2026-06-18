@@ -14,22 +14,12 @@ struct ProjectSidebar: View {
             List(selection: $app.selectedProjectID) {
                 Section("Projects") {
                     ForEach(app.projects) { project in
-                        HStack(spacing: 8) {
-                            ProjectIconView(project: project, size: 16)
-                            Text(project.name).lineLimit(1)
-                            Spacer(minLength: 4)
-                            Button { settingsProject = project } label: {
-                                Image(systemName: "gearshape")
+                        ProjectRow(project: project) { settingsProject = project }
+                            .tag(project.id)
+                            .contextMenu {
+                                Button("Settings…") { settingsProject = project }
+                                Button("Remove", role: .destructive) { app.removeProject(project.id) }
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help("Project settings")
-                        }
-                        .tag(project.id)
-                        .contextMenu {
-                            Button("Settings…") { settingsProject = project }
-                            Button("Remove", role: .destructive) { app.removeProject(project.id) }
-                        }
                     }
                 }
             }
@@ -72,5 +62,30 @@ struct ProjectSidebar: View {
         .sheet(isPresented: $showAppSettings) {
             AppSettingsView().environment(app)
         }
+    }
+}
+
+/// A sidebar project row. The settings gear only appears on hover.
+private struct ProjectRow: View {
+    let project: Project
+    let onSettings: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProjectIconView(project: project, size: 16)
+            Text(project.name).lineLimit(1)
+            Spacer(minLength: 4)
+            Button(action: onSettings) {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Project settings")
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }

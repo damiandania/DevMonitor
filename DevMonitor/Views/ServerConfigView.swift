@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// Server configuration area at the bottom of the sidebar. Each setting has an **Auto** toggle on
-/// the right (on by default); turning it off reveals a manual control between the name and the
-/// toggle: a slider for memory, a field for the port, the package-manager options for the package.
+/// Server configuration: each setting has an **Auto** toggle on the right (on by default); turning
+/// it off reveals a manual control between the name and the toggle — a slider for memory, a field
+/// for the port, the package-manager picker for the package.
 struct ServerConfigView: View {
     @Environment(AppState.self) private var app
     let project: Project
 
+    /// Always read the live project from app state so the toggles/bindings reflect the latest value
+    /// (the passed-in `project` is a snapshot — it wouldn't update after a setter runs).
+    private var live: Project { app.projects.first { $0.id == project.id } ?? project }
     private var running: Bool { app.session(for: project)?.state.isActive ?? false }
 
     var body: some View {
@@ -23,7 +26,7 @@ struct ServerConfigView: View {
             packageRow
 
             if running {
-                Text("Locked while running — applies on next launch.")
+                Text("Changes apply on the next launch.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
         }
@@ -34,16 +37,16 @@ struct ServerConfigView: View {
     // MARK: rows
 
     private var memoryRow: some View {
-        let auto = Binding(get: { project.memoryAuto },
+        let auto = Binding(get: { live.memoryAuto },
                            set: { app.setMemoryAuto($0, for: project.id) })
         return row(icon: "memorychip", name: "Memory", auto: auto,
-                   autoValue: "\(Detector.defaultMemoryGB(for: project.framework)) GB") {
+                   autoValue: "\(Detector.defaultMemoryGB(for: live.framework)) GB") {
             HStack(spacing: 6) {
-                Slider(value: Binding(get: { Double(project.memoryGB) },
+                Slider(value: Binding(get: { Double(live.memoryGB) },
                                       set: { app.setMemoryGB(Int($0), for: project.id) }),
                        in: 1...16, step: 1)
                     .frame(width: 78)
-                Text("\(project.memoryGB) GB")
+                Text("\(live.memoryGB) GB")
                     .font(.caption.monospacedDigit())
                     .frame(width: 40, alignment: .trailing)
             }
@@ -51,10 +54,10 @@ struct ServerConfigView: View {
     }
 
     private var portRow: some View {
-        let auto = Binding(get: { project.port == nil },
-                           set: { isAuto in app.setPort(isAuto ? nil : (project.port ?? 3000), for: project.id) })
+        let auto = Binding(get: { live.port == nil },
+                           set: { isAuto in app.setPort(isAuto ? nil : (live.port ?? 3000), for: project.id) })
         return row(icon: "network", name: "Port", auto: auto, autoValue: "auto") {
-            TextField("3000", value: Binding(get: { project.port },
+            TextField("3000", value: Binding(get: { live.port },
                                              set: { app.setPort($0, for: project.id) }),
                       format: .number.grouping(.never))
                 .textFieldStyle(.roundedBorder)
@@ -63,11 +66,11 @@ struct ServerConfigView: View {
     }
 
     private var packageRow: some View {
-        let auto = Binding(get: { project.packageManagerAuto },
+        let auto = Binding(get: { live.packageManagerAuto },
                            set: { app.setPackageManagerAuto($0, for: project.id) })
         return row(icon: "shippingbox", name: "Package", auto: auto,
-                   autoValue: project.packageManager.rawValue) {
-            Picker("", selection: Binding(get: { project.packageManager },
+                   autoValue: live.packageManager.rawValue) {
+            Picker("", selection: Binding(get: { live.packageManager },
                                           set: { app.setPackageManager($0, for: project.id) })) {
                 ForEach(PackageManager.allCases, id: \.self) { pm in
                     Text(pm.rawValue).tag(pm)
@@ -105,6 +108,5 @@ struct ServerConfigView: View {
                 .help(auto.wrappedValue ? "Auto — using the detected value" : "Manual")
         }
         .controlSize(.small)
-        .disabled(running)
     }
 }
