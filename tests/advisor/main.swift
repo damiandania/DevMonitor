@@ -89,5 +89,20 @@ check(!ResourceAdvisor.looksLikeDevServer(argv: "/Applications/Google Chrome.app
       "orphan: does NOT match a Chrome renderer")
 check(!ResourceAdvisor.looksLikeDevServer(argv: "yes"), "orphan: does NOT match a bare command")
 
+// --- memorySnapshotText: RAM/swap lines + biggest consumer first ---
+let memProcs = [
+    ResourceAdvisor.Proc(pid: 1, name: "Small", cpuPerCore: 0, memMB: 100, managedDev: false),
+    ResourceAdvisor.Proc(pid: 2, name: "Chrome", cpuPerCore: 0, memMB: 3700, managedDev: false),
+    ResourceAdvisor.Proc(pid: 3, name: "Server", cpuPerCore: 0, memMB: 2000, managedDev: true),
+]
+let memSnap = ResourceAdvisor.memorySnapshotText(totalMemGB: 8, usedPercent: 80,
+                                                 swapUsedGB: 9.1, swapTotalGB: 10, procs: memProcs)
+check(memSnap.contains("Physical RAM: 8.0 GB, 80% used"), "memory: RAM line")
+check(memSnap.contains("Swap: 9.1 / 10.0 GB used"), "memory: swap line")
+let chromeIdx = memSnap.range(of: "Chrome").map { memSnap.distance(from: memSnap.startIndex, to: $0.lowerBound) } ?? -1
+let smallIdx = memSnap.range(of: "Small").map { memSnap.distance(from: memSnap.startIndex, to: $0.lowerBound) } ?? -1
+check(chromeIdx >= 0 && smallIdx >= 0 && chromeIdx < smallIdx, "memory: biggest consumer (Chrome) listed first")
+check(memSnap.contains("[dev server — managed]"), "memory: managed dev server tagged")
+
 print(fail == 0 ? "ALL ADVISOR TESTS PASSED" : "SOME ADVISOR TESTS FAILED")
 exit(Int32(fail))

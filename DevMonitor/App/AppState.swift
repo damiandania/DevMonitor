@@ -166,10 +166,8 @@ final class AppState {
     // Diagnostics (P7): a READ-ONLY Claude report about Dev Monitor itself.
     var diagnosticReport: ClaudeRunner.Report?
     var isGeneratingReport = false
-    var showReport = false
 
     func generateReport() {
-        showReport = true
         guard !isGeneratingReport else { return }
         isGeneratingReport = true
         diagnosticReport = nil
@@ -186,10 +184,8 @@ final class AppState {
     // may be stopped automatically; foreign processes are only closed after explicit confirmation.
     var advice: ResourceAdvisor.Advice?
     var isAdvising = false
-    var showAdvisor = false
 
     func generateAdvice() {
-        showAdvisor = true
         guard !isAdvising else { return }
         isAdvising = true
         advice = nil
@@ -209,6 +205,33 @@ final class AppState {
     }
 
     func persistSettings() { settingsStore.save(settings) }
+
+    // Doctor — Memory & RAM section: read-only AI analysis of how to free memory.
+    var memoryReport: ClaudeRunner.Report?
+    var isGeneratingMemoryReport = false
+
+    func generateMemoryReport() {
+        guard !isGeneratingMemoryReport else { return }
+        isGeneratingMemoryReport = true
+        memoryReport = nil
+        let s = systemSampler
+        let procs: [ResourceAdvisor.Proc] = s.processes.map {
+            .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
+                  memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer)
+        }
+        let totalGB = s.totalMem / 1_073_741_824
+        let usedPct = s.systemMemPercent
+        let swapUsedGB = s.systemSwapUsed / 1_073_741_824
+        let swapTotalGB = s.systemSwapTotal / 1_073_741_824
+        let model = settings.analysisModel
+        Task { [weak self] in
+            let r = await ResourceAdvisor.memoryAdvice(
+                totalMemGB: totalGB, usedPercent: usedPct,
+                swapUsedGB: swapUsedGB, swapTotalGB: swapTotalGB, procs: procs, model: model)
+            self?.memoryReport = r
+            self?.isGeneratingMemoryReport = false
+        }
+    }
 
     /// Apply a recommendation. Foreign-process closes MUST already be confirmed by the caller.
     func apply(_ r: ResourceAdvisor.Recommendation) {

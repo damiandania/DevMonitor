@@ -173,6 +173,47 @@ enum ResourceAdvisor {
             }
     }
 
+    /// Readable snapshot of memory pressure + the biggest memory consumers (for the RAM doctor).
+    static func memorySnapshotText(totalMemGB: Double, usedPercent: Double,
+                                   swapUsedGB: Double, swapTotalGB: Double, procs: [Proc]) -> String {
+        var lines = [
+            String(format: "Physical RAM: %.1f GB, %d%% used", totalMemGB, Int(usedPercent)),
+            String(format: "Swap: %.1f / %.1f GB used", swapUsedGB, swapTotalGB),
+            "",
+            "Biggest memory consumers:",
+        ]
+        let top = procs.sorted { $0.memMB > $1.memMB }.prefix(12)
+        if top.isEmpty { lines.append("  (none notable)") }
+        for p in top {
+            let tag = p.managedDev ? "  [dev server — managed]" : ""
+            lines.append(String(format: "  %@  %.0f MB%@", p.name, p.memMB, tag))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Read-only AI analysis of how to free RAM (and what can/can't be done about swap).
+    static func memoryAdvice(totalMemGB: Double, usedPercent: Double,
+                             swapUsedGB: Double, swapTotalGB: Double,
+                             procs: [Proc], model: String? = nil) async -> ClaudeRunner.Report {
+        let snapshot = memorySnapshotText(totalMemGB: totalMemGB, usedPercent: usedPercent,
+                                          swapUsedGB: swapUsedGB, swapTotalGB: swapTotalGB, procs: procs)
+        let prompt = """
+        This Mac is tight on memory. Below is a snapshot of physical RAM, swap, and the biggest memory
+        consumers. Explain concretely how to FREE RAM the best way:
+        - Which apps/processes to close or restart to reclaim the most memory, prioritized, and which
+          are safe vs risky (never tell the user to kill the editor, WindowServer, Finder, or system
+          daemons). Quick wins first (e.g. browser tabs, idle dev servers, leftover helpers).
+        - Whether the SWAP can be reduced: explain that macOS manages swap automatically — it shrinks
+          as memory pressure drops, purgeable/cached memory is reclaimed on demand, and only a reboot
+          fully clears swap; there is no safe way to "flush" swap directly. Be honest about this.
+        Be concise, prioritized and actionable (a short report). DO NOT run or modify anything.
+
+        --- memory snapshot ---
+        \(snapshot)
+        """
+        return await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(), model: model)
+    }
+
     /// Tolerant JSON extraction: claude may wrap the object in prose or code fences.
     static func parse(_ text: String, names: [Int32: String]) -> (summary: String, recs: [Recommendation]) {
         guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"),

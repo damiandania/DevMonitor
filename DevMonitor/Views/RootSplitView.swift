@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootSplitView: View {
     @Environment(AppState.self) private var app
+    @State private var showSettings = false
+    @State private var showDoctor = false
 
     var body: some View {
         @Bindable var app = app
@@ -22,23 +24,23 @@ struct RootSplitView: View {
         .navigationTitle("Dev Monitor")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { app.generateAdvice() } label: {
-                    Label("Advisor", systemImage: "gauge.with.dots.needle.67percent")
+                Button { showSettings = true } label: {
+                    Label("Settings", systemImage: "gearshape")
                 }
-                .help("Ask Claude what to do about heavy processes (read-only; confirms before closing anything foreign)")
+                .help("App settings")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { app.generateReport() } label: {
-                    Label("Diagnose", systemImage: "stethoscope")
+                Button { showDoctor = true } label: {
+                    Label("Doctor", systemImage: "stethoscope")
                 }
-                .help("Ask Claude to diagnose Dev Monitor itself (read-only)")
+                .help("Read-only AI: heavy processes, Dev Monitor diagnosis, and how to free RAM")
             }
         }
-        .sheet(isPresented: $app.showReport) {
-            ReportSheet().environment(app)
+        .sheet(isPresented: $showSettings) {
+            AppSettingsView().environment(app)
         }
-        .sheet(isPresented: $app.showAdvisor) {
-            AdvisorSheet().environment(app)
+        .sheet(isPresented: $showDoctor) {
+            DoctorSheet().environment(app)
         }
     }
 }

@@ -60,13 +60,23 @@ struct DashboardView: View {
 
     private var statusPill: some View {
         let state = session?.state ?? .idle
-        return Label(state.label, systemImage: "circle.fill")
+        return Label(statusText, systemImage: "circle.fill")
             .labelStyle(.titleAndIcon)
             .font(.caption.weight(.semibold))
             .foregroundStyle(state.tint)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(.quaternary, in: Capsule())
+    }
+
+    /// Status text including the package manager when the server is up, e.g. "Running · npm · :3000".
+    private var statusText: String {
+        let state = session?.state ?? .idle
+        if case .running(let port) = state {
+            let pm = project.packageManager.rawValue
+            return port.map { "Running · \(pm) · :\($0)" } ?? "Running · \(pm)"
+        }
+        return state.label
     }
 
     private var controlBar: some View {
@@ -77,15 +87,6 @@ struct DashboardView: View {
                 if running { app.stopActive() } else { app.launch(project) }
             }
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
-
-            // Package manager that will be used (configurable in the project's settings).
-            Label(project.packageManager.rawValue, systemImage: "shippingbox")
-                .font(.callout.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(.quaternary, in: Capsule())
-                .help("Package manager: \(project.packageManager.rawValue) (change it in project settings)")
 
             if running {
                 PillButton(title: "Restart", systemImage: "arrow.clockwise") {
