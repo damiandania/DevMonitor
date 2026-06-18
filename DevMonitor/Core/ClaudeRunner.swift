@@ -27,14 +27,16 @@ enum ClaudeRunner {
     }
 
     /// Runs `claude -p` read-only with `prompt` on stdin, in `cwd`, and parses the JSON result.
-    /// Read-only by construction: `--permission-mode plan` + disallowed write tools.
-    static func run(prompt: String, cwd: String) async -> Report {
+    /// Read-only by construction: `--permission-mode plan` + disallowed write tools. An optional
+    /// `model` (e.g. "claude-haiku-4-5") selects a faster/cheaper model for quick evaluations.
+    static func run(prompt: String, cwd: String, model: String? = nil) async -> Report {
         await withCheckedContinuation { (continuation: CheckedContinuation<Report, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                let modelFlag = model.map { " --model \($0)" } ?? ""
                 process.arguments = ["-lc",
-                    "claude -p --output-format json --permission-mode plan "
+                    "claude -p --output-format json --permission-mode plan\(modelFlag) "
                     + "--disallowed-tools 'Edit Write MultiEdit NotebookEdit' --no-session-persistence"]
                 process.currentDirectoryURL = URL(fileURLWithPath: cwd)
 

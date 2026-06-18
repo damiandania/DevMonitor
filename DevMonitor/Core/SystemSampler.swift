@@ -24,6 +24,16 @@ final class SystemSampler {
     private(set) var systemSwapTotal: Double = 0  // bytes
     var systemSwapPercent: Double { systemSwapTotal > 0 ? systemSwapUsed / systemSwapTotal * 100 : 0 }
 
+    // Pressure detection: the machine is "stuck" when CPU stays pinned, or memory is full and
+    // actively swapping, for a sustained window. Drives the auto kill-suggestions panel.
+    enum Pressure: Sendable { case normal, stuck }
+    private(set) var pressure: Pressure = .normal
+    private(set) var pressureReason = ""
+    /// Fired once when entering the stuck state (normal → stuck).
+    var onStuck: (() -> Void)?
+    private var hotSince: UInt64?
+    private let sustainSeconds = 8.0
+
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
     private var richNameCache: [Int32: String] = [:]
@@ -152,6 +162,28 @@ final class SystemSampler {
         }
         let liveIDs = Set(result.map { $0.id })
         richNameCache = richNameCache.filter { liveIDs.contains($0.key) }
+
+        updatePressure()
+    }
+
+    private func updatePressure() {
+        let cpuHot = systemCPU >= 90
+        let memHot = systemMemPercent >= 90 && systemSwapPercent >= 50
+        let now = DispatchTime.now().uptimeNanoseconds
+        if cpuHot || memHot {
+            if hotSince == nil { hotSince = now }
+            let elapsed = Double(now &- (hotSince ?? now)) / 1_000_000_000
+            if pressure == .normal, elapsed >= sustainSeconds {
+                pressure = .stuck
+                pressureReason = cpuHot
+                    ? "CPU pinned at \(Int(systemCPU))% for \(Int(elapsed))s"
+                    : "Memory \(Int(systemMemPercent))% full, swapping (\(Int(systemSwapPercent))%)"
+                onStuck?()
+            }
+        } else if systemCPU < 70, systemMemPercent < 85 {   // hysteresis: clear once it cools
+            hotSince = nil
+            pressure = .normal
+        }
     }
 
     private static func isGeneric(_ name: String) -> Bool {

@@ -31,11 +31,13 @@ struct PillButton: View {
         if let systemImage {
             Image(systemName: systemImage)
         } else if let assetImage {
+            // The brand SVGs are full-bleed; render a touch smaller than 16 so their optical size
+            // matches the SF Symbols used by the other preset buttons (which carry built-in padding).
             Image(assetImage)
                 .resizable()
                 .renderingMode(.template)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 16, height: 16)
+                .frame(width: 14, height: 14)
         }
     }
 }

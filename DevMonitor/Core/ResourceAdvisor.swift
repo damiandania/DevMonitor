@@ -103,6 +103,59 @@ enum ResourceAdvisor {
                       isError: report.isError, costUSD: report.costUSD)
     }
 
+    /// Never suggest killing these (the editor, the window server, core daemons, ourselves).
+    static let protectedNames = [
+        "WindowServer", "loginwindow", "kernel_task", "launchd", "Finder", "Dock",
+        "SystemUIServer", "coreaudiod", "WindowManager", "Spotlight", "mds", "mds_stores",
+        "Dev Monitor", "Visual Studio Code", "Cursor", "Terminal", "iTerm",
+    ]
+
+    private static func isProtected(_ name: String) -> Bool {
+        protectedNames.contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// Fast (Haiku) evaluation during a stall: which processes are safe to kill right now.
+    /// Returns only actionable kills (close a foreign process / stop the dev server).
+    static func pressureKills(systemCPU: Double, systemMemPercent: Double, systemSwapPercent: Double,
+                              coreCount: Int, procs: [Proc]) async -> [Recommendation] {
+        let snapshot = snapshotText(systemCPU: systemCPU, systemMemPercent: systemMemPercent,
+                                    coreCount: coreCount, procs: procs)
+            + "\nSwap: \(Int(systemSwapPercent))% used"
+        let prompt = """
+        The Mac is STUCK right now (sustained high load — it is stuttering). Snapshot below.
+        List the processes that are safe to kill to relieve it: orphaned or runaway dev-server
+        processes first, then heavy NON-essential foreign apps. NEVER suggest killing the user's
+        editor (VS Code/Cursor), Terminal, WindowServer, Finder, Dock, or core system daemons, and
+        never Dev Monitor itself. A [DEV SERVER — managed by Dev Monitor] entry uses "stop_dev_server".
+
+        Reply with ONLY JSON, no prose:
+        {"recommendations":[{"pid":<int,-1 for the dev-server tree>,
+          "action":"close_process|stop_dev_server","severity":"low|medium|high","reason":"short"}]}
+        Only include processes that really should be killed; return an empty list if nothing is safe.
+
+        --- snapshot ---
+        \(snapshot)
+        """
+        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(),
+                                            model: "claude-haiku-4-5")
+        let names = Dictionary(procs.map { ($0.pid, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return parse(report.text, names: names).recs
+            .filter { $0.action == .closeProcess || $0.action == .stopDevServer }
+            .filter { $0.id == -1 || !isProtected($0.name) }
+    }
+
+    /// Model-free fallback: heaviest foreign processes (and orphan dev servers), minus protected.
+    static func heuristicKills(procs: [Proc]) -> [Recommendation] {
+        procs
+            .filter { $0.pid > 0 && !$0.managedDev && !isProtected($0.name) }
+            .sorted { ($0.cpuPerCore + $0.memMB / 50) > ($1.cpuPerCore + $1.memMB / 50) }
+            .prefix(4)
+            .map { p in
+                Recommendation(id: p.pid, name: p.name, action: .closeProcess, severity: .medium,
+                               reason: String(format: "Heavy: %.0f%% CPU · %.0f MB", p.cpuPerCore, p.memMB))
+            }
+    }
+
     /// Tolerant JSON extraction: claude may wrap the object in prose or code fences.
     static func parse(_ text: String, names: [Int32: String]) -> (summary: String, recs: [Recommendation]) {
         guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"),

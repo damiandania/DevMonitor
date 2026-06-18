@@ -28,6 +28,7 @@ final class AppState {
             let label = session.project.name + (session.effectivePort.map { " :\($0)" } ?? "")
             return (pids, label)
         }
+        systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
     }
 
     var selectedProject: Project? {
@@ -189,6 +190,47 @@ final class AppState {
         case .keep, .investigate:
             break
         }
+    }
+
+    // Pressure-triggered kill suggestions (auto): when the machine is stuck, a fast Haiku eval
+    // proposes processes to kill, shown above the server config with a red skull button.
+    var killSuggestions: [ResourceAdvisor.Recommendation] = []
+    var isEvaluatingPressure = false
+
+    func evaluatePressure() {
+        guard !isEvaluatingPressure else { return }
+        isEvaluatingPressure = true
+        let s = systemSampler
+        let procs: [ResourceAdvisor.Proc] = s.processes.map {
+            .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
+                  memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer)
+        }
+        // Show heuristic candidates instantly; refine with Haiku when it returns.
+        killSuggestions = ResourceAdvisor.heuristicKills(procs: procs)
+        let cpu = s.systemCPU, mem = s.systemMemPercent, swap = s.systemSwapPercent, cores = s.coreCount
+        Task { [weak self] in
+            let recs = await ResourceAdvisor.pressureKills(
+                systemCPU: cpu, systemMemPercent: mem, systemSwapPercent: swap,
+                coreCount: cores, procs: procs)
+            if !recs.isEmpty { self?.killSuggestions = recs }
+            self?.isEvaluatingPressure = false
+        }
+    }
+
+    /// Kill a suggested process (red-skull button). The dev-server tree is stopped via the
+    /// supervisor; a foreign process gets SIGTERM, escalating to SIGKILL if still alive.
+    func killSuggestion(_ rec: ResourceAdvisor.Recommendation) {
+        if rec.action == .stopDevServer || rec.id == -1 {
+            stopActive()
+        } else if rec.id > 0 {
+            let pid = rec.id
+            kill(pid, SIGTERM)
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                if kill(pid, 0) == 0 { kill(pid, SIGKILL) }   // signal 0 = "are you still there?"
+            }
+        }
+        killSuggestions.removeAll { $0.id == rec.id }
     }
 
     func persist() {

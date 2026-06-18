@@ -57,5 +57,24 @@ check(r2.recs.first?.name == "node", "parse: name fallback from map")
 let r3 = ResourceAdvisor.parse("totally not json", names: [:])
 check(r3.recs.isEmpty, "parse: garbage yields no recs")
 
+// --- heuristicKills: excludes protected + managed, ranks by impact, caps at 4 ---
+let pool = [
+    ResourceAdvisor.Proc(pid: -1, name: "MiddleSpace :3000", cpuPerCore: 200, memMB: 900, managedDev: true),
+    ResourceAdvisor.Proc(pid: 10, name: "WindowServer", cpuPerCore: 150, memMB: 500, managedDev: false),
+    ResourceAdvisor.Proc(pid: 11, name: "Visual Studio Code Helper", cpuPerCore: 120, memMB: 800, managedDev: false),
+    ResourceAdvisor.Proc(pid: 12, name: "Google Chrome Helper", cpuPerCore: 90, memMB: 2000, managedDev: false),
+    ResourceAdvisor.Proc(pid: 13, name: "node (orphan)", cpuPerCore: 60, memMB: 1500, managedDev: false),
+    ResourceAdvisor.Proc(pid: 14, name: "some-daemon", cpuPerCore: 40, memMB: 300, managedDev: false),
+    ResourceAdvisor.Proc(pid: 15, name: "another", cpuPerCore: 30, memMB: 200, managedDev: false),
+]
+let kills = ResourceAdvisor.heuristicKills(procs: pool)
+let killIDs = Set(kills.map { $0.id })
+check(!killIDs.contains(-1), "heuristic: excludes managed dev tree")
+check(!killIDs.contains(10), "heuristic: excludes WindowServer")
+check(!killIDs.contains(11), "heuristic: excludes editor (VS Code)")
+check(kills.count <= 4, "heuristic: caps at 4")
+check(kills.first?.id == 12, "heuristic: heaviest first (Chrome)")
+check(kills.allSatisfy { $0.action == .closeProcess }, "heuristic: all close_process")
+
 print(fail == 0 ? "ALL ADVISOR TESTS PASSED" : "SOME ADVISOR TESTS FAILED")
 exit(Int32(fail))

@@ -35,6 +35,11 @@ struct ProjectSidebar: View {
                 }
             }
 
+            if app.systemSampler.pressure == .stuck {
+                Divider()
+                PressureSuggestionsView()
+            }
+
             if let project = app.selectedProject {
                 Divider()
                 ServerConfigView(project: project)
