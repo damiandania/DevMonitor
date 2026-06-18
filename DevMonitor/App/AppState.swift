@@ -16,6 +16,8 @@ final class AppState {
     var settings: AppSettings
     /// Browsers installed on this Mac (display names), for the "open in" picker.
     var installedBrowsers: [String] = []
+    /// Code editors installed on this Mac, for the "Code" button picker.
+    var installedEditors: [String] = []
 
     @ObservationIgnored private let store = ProjectStore()
     @ObservationIgnored private let settingsStore = SettingsStore()
@@ -26,6 +28,7 @@ final class AppState {
         settings = settingsStore.load()
         projects = store.load()
         installedBrowsers = BrowserList.installed()
+        installedEditors = EditorList.installed()
         selectedProjectID = projects.first?.id
         ipcServer.start(app: self)
         systemSampler.start()

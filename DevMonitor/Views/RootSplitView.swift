@@ -2,8 +2,7 @@ import SwiftUI
 
 struct RootSplitView: View {
     @Environment(AppState.self) private var app
-    @State private var showSettings = false
-    @State private var showDoctor = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var app = app
@@ -24,23 +23,17 @@ struct RootSplitView: View {
         .navigationTitle("Dev Monitor")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { showSettings = true } label: {
+                Button { openWindow(id: "settings") } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .help("App settings")
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { showDoctor = true } label: {
+                Button { openWindow(id: "doctor") } label: {
                     Label("Doctor", systemImage: "stethoscope")
                 }
                 .help("Read-only AI: heavy processes, Dev Monitor diagnosis, and how to free RAM")
             }
-        }
-        .sheet(isPresented: $showSettings) {
-            AppSettingsView().environment(app).interactiveDismissDisabled()
-        }
-        .sheet(isPresented: $showDoctor) {
-            DoctorSheet().environment(app).interactiveDismissDisabled()
         }
     }
 }

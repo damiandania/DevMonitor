@@ -4,7 +4,6 @@ import SwiftUI
 /// and a grouped-form detail pane on the right. Server config defaults to Auto.
 struct AppSettingsView: View {
     @Environment(AppState.self) private var app
-    @Environment(\.dismiss) private var dismiss
     @State private var selection: Item = .general
 
     enum Item: Hashable {
@@ -27,9 +26,6 @@ struct AppSettingsView: View {
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
         } detail: {
             detail
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) { Button("Done") { dismiss() } }
-                }
         }
         .frame(minWidth: 740, minHeight: 540)
     }
@@ -55,10 +51,19 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            Section("Browser") {
-                Picker("Open servers in", selection: browser) {
+            Section("Open in") {
+                Picker("Browser (Open)", selection: browser) {
                     Text("System default").tag(String?.none)
                     ForEach(app.installedBrowsers, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+                Picker("Editor (Code)", selection: editor) {
+                    Text(app.installedEditors.first ?? "Default").tag(String?.none)
+                    ForEach(app.installedEditors, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+            }
+            Section("Activity bars") {
+                ForEach(AppSettings.allBars) { bar in
+                    Toggle(bar.label, isOn: barBinding(bar.id))
                 }
             }
             Section("AI analysis") {
@@ -88,6 +93,19 @@ private struct GeneralSettings: View {
 
     private var browser: Binding<String?> {
         .init(get: { app.settings.browser }, set: { app.settings.browser = $0; app.persistSettings() })
+    }
+    private var editor: Binding<String?> {
+        .init(get: { app.settings.editor }, set: { app.settings.editor = $0; app.persistSettings() })
+    }
+    private func barBinding(_ id: String) -> Binding<Bool> {
+        .init(get: { app.settings.bars.contains(id) }, set: { on in
+            if on {
+                if !app.settings.bars.contains(id) { app.settings.bars.append(id) }
+            } else {
+                app.settings.bars.removeAll { $0 == id }
+            }
+            app.persistSettings()
+        })
     }
     private var model: Binding<String> {
         .init(get: { app.settings.analysisModel }, set: { app.settings.analysisModel = $0; app.persistSettings() })

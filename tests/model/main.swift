@@ -47,6 +47,8 @@ chk(defs.browser == nil, "settings: default browser = system default (nil)")
 chk(defs.analysisModel == AppSettings.defaultModel, "settings: default model = haiku", defs.analysisModel)
 chk(defs.autoCloseOrphans, "settings: auto-close orphans on by default")
 chk(defs.defaultMemoryGB == 4, "settings: default heap 4")
+chk(defs.editor == nil, "settings: default editor = first found (nil)")
+chk(defs.bars == AppSettings.defaultBars, "settings: default bars = cpu/memory/swap")
 
 let custom = AppSettings(browser: "Firefox", analysisModel: "claude-opus-4-8",
                          autoCloseOrphans: false, defaultMemoryGB: 8)

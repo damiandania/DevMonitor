@@ -24,6 +24,10 @@ final class SystemSampler {
     private(set) var systemSwapUsed: Double = 0   // bytes
     private(set) var systemSwapTotal: Double = 0  // bytes
     var systemSwapPercent: Double { systemSwapTotal > 0 ? systemSwapUsed / systemSwapTotal * 100 : 0 }
+    private(set) var loadAverage: Double = 0      // 1-minute load average
+    /// The managed dev-server tree's aggregated CPU% (per-core) and memory, for optional bars.
+    var devTreeCPU: Double { processes.first { $0.isDevServer }?.cpuPerCore ?? 0 }
+    var devTreeMem: Double { processes.first { $0.isDevServer }?.memBytes ?? 0 }
 
     // Pressure detection: the machine is "stuck" when CPU stays pinned, or memory is full and
     // actively swapping, for a sustained window. Drives the auto kill-suggestions panel.
@@ -83,6 +87,7 @@ final class SystemSampler {
             systemSwapUsed = Double(sysSwap.used)
             systemSwapTotal = Double(sysSwap.total)
         }
+        loadAverage = dm_load_avg()
 
         let now = DispatchTime.now().uptimeNanoseconds
         var pids = [pid_t](repeating: 0, count: 8192)

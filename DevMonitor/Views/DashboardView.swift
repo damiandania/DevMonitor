@@ -103,9 +103,9 @@ struct DashboardView: View {
             }
 
             PillButton(title: "Code", systemImage: "chevron.left.forwardslash.chevron.right") {
-                openInVSCode()
+                openInEditor()
             }
-            .help("Open the project in VS Code")
+            .help("Open the project in \(app.settings.editor ?? "your code editor")")
 
             Spacer()
             buildControls
@@ -127,30 +127,46 @@ struct DashboardView: View {
         }
     }
 
-    private func openInVSCode() {
+    private func openInEditor() {
+        let editor = app.settings.editor ?? app.installedEditors.first ?? "Visual Studio Code"
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-a", "Visual Studio Code", project.path]
+        task.arguments = ["-a", editor, project.path]
         do { try task.run() } catch { NSWorkspace.shared.open(URL(fileURLWithPath: project.path)) }
     }
 
     @ViewBuilder private var systemBars: some View {
-        let sampler = app.systemSampler
+        let s = app.systemSampler
+        let bars = app.settings.bars
+        let gb = 1_073_741_824.0
         HStack(spacing: 22) {
-            systemBar(title: "CPU", percent: sampler.systemCPU,
-                      detail: "\(Int(sampler.systemCPU))%", color: .blue)
-            systemBar(title: "Memory", percent: sampler.systemMemPercent,
-                      detail: String(format: "%.1f / %.0f GB",
-                                     sampler.systemMemUsed / 1_073_741_824,
-                                     sampler.totalMem / 1_073_741_824),
-                      color: .purple)
-            systemBar(title: "Swap", percent: sampler.systemSwapPercent,
-                      detail: sampler.systemSwapTotal > 0
-                        ? String(format: "%.1f / %.0f GB",
-                                 sampler.systemSwapUsed / 1_073_741_824,
-                                 sampler.systemSwapTotal / 1_073_741_824)
-                        : "off",
-                      color: .orange)
+            if bars.contains("cpu") {
+                systemBar(title: "CPU", percent: s.systemCPU, detail: "\(Int(s.systemCPU))%", color: .blue)
+            }
+            if bars.contains("memory") {
+                systemBar(title: "Memory", percent: s.systemMemPercent,
+                          detail: String(format: "%.1f / %.0f GB", s.systemMemUsed / gb, s.totalMem / gb),
+                          color: .purple)
+            }
+            if bars.contains("swap") {
+                systemBar(title: "Swap", percent: s.systemSwapPercent,
+                          detail: s.systemSwapTotal > 0
+                            ? String(format: "%.1f / %.0f GB", s.systemSwapUsed / gb, s.systemSwapTotal / gb)
+                            : "off",
+                          color: .orange)
+            }
+            if bars.contains("load") {
+                systemBar(title: "Load", percent: min(100, s.loadAverage / Double(s.coreCount) * 100),
+                          detail: String(format: "%.2f", s.loadAverage), color: .teal)
+            }
+            if bars.contains("devcpu") {
+                systemBar(title: "Dev CPU", percent: min(100, s.devTreeCPU / Double(s.coreCount)),
+                          detail: "\(Int(s.devTreeCPU))%", color: .green)
+            }
+            if bars.contains("devmem") {
+                systemBar(title: "Dev RAM", percent: s.totalMem > 0 ? s.devTreeMem / s.totalMem * 100 : 0,
+                          detail: String(format: "%.0f MB", s.devTreeMem / 1_048_576), color: .green)
+            }
         }
     }
 

@@ -5,31 +5,43 @@ import AppKit
 struct AppSettings: Codable, Sendable, Equatable {
     /// App display name of the browser used by "Open" (e.g. "Google Chrome"); nil = system default.
     var browser: String?
+    /// App display name of the editor used by "Code" (e.g. "Cursor"); nil = VS Code / first found.
+    var editor: String?
     /// Claude model used for Diagnose, the Resource Advisor, and pressure auto-analysis.
     var analysisModel: String
     /// Auto-close orphaned dev processes when the machine is under pressure.
     var autoCloseOrphans: Bool
     /// Heap (GB) applied to new projects whose framework has no specific default.
     var defaultMemoryGB: Int
+    /// Which activity bars to show on the dashboard (ids from `allBars`).
+    var bars: [String]
 
     init(browser: String? = nil,
+         editor: String? = nil,
          analysisModel: String = AppSettings.defaultModel,
          autoCloseOrphans: Bool = true,
-         defaultMemoryGB: Int = 4) {
+         defaultMemoryGB: Int = 4,
+         bars: [String] = AppSettings.defaultBars) {
         self.browser = browser
+        self.editor = editor
         self.analysisModel = analysisModel
         self.autoCloseOrphans = autoCloseOrphans
         self.defaultMemoryGB = defaultMemoryGB
+        self.bars = bars
     }
 
     // Tolerant decode so older settings.json (missing keys) still loads.
-    enum CodingKeys: String, CodingKey { case browser, analysisModel, autoCloseOrphans, defaultMemoryGB }
+    enum CodingKeys: String, CodingKey {
+        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         browser = try c.decodeIfPresent(String.self, forKey: .browser)
+        editor = try c.decodeIfPresent(String.self, forKey: .editor)
         analysisModel = try c.decodeIfPresent(String.self, forKey: .analysisModel) ?? AppSettings.defaultModel
         autoCloseOrphans = try c.decodeIfPresent(Bool.self, forKey: .autoCloseOrphans) ?? true
         defaultMemoryGB = try c.decodeIfPresent(Int.self, forKey: .defaultMemoryGB) ?? 4
+        bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
     }
 
     static let defaultModel = "claude-haiku-4-5"
@@ -40,6 +52,18 @@ struct AppSettings: Codable, Sendable, Equatable {
         .init(id: "claude-haiku-4-5", label: "Haiku 4.5 — fast (default)"),
         .init(id: "claude-sonnet-4-6", label: "Sonnet 4.6 — balanced"),
         .init(id: "claude-opus-4-8", label: "Opus 4.8 — deep"),
+    ]
+
+    /// Activity bars: CPU/Memory/Swap on by default; the rest are optional.
+    static let defaultBars = ["cpu", "memory", "swap"]
+    struct Bar: Identifiable, Sendable { let id: String; let label: String }
+    static let allBars: [Bar] = [
+        .init(id: "cpu", label: "CPU"),
+        .init(id: "memory", label: "Memory"),
+        .init(id: "swap", label: "Swap"),
+        .init(id: "load", label: "Load average"),
+        .init(id: "devcpu", label: "Dev server CPU"),
+        .init(id: "devmem", label: "Dev server memory"),
     ]
 }
 
@@ -83,5 +107,24 @@ enum BrowserList {
             if !name.isEmpty, !names.contains(name) { names.append(name) }
         }
         return names.sorted()
+    }
+}
+
+/// Code editors installed on this Mac, by app name (checked in /Applications and ~/Applications).
+enum EditorList {
+    static let known = [
+        "Visual Studio Code", "Cursor", "VSCodium", "Windsurf", "Zed", "Sublime Text", "Nova",
+        "Fleet", "WebStorm", "IntelliJ IDEA", "PyCharm", "PhpStorm", "GoLand", "RubyMine", "CLion",
+        "Atom", "BBEdit", "TextMate", "Xcode",
+    ]
+    static func installed() -> [String] {
+        let dirs = ["/Applications", NSHomeDirectory() + "/Applications"]
+        var found: [String] = []
+        for name in known {
+            if dirs.contains(where: { FileManager.default.fileExists(atPath: $0 + "/" + name + ".app") }) {
+                found.append(name)
+            }
+        }
+        return found
     }
 }

@@ -23,5 +23,16 @@ struct DevMonitorApp: App {
                 .environment(appState)
         }
         .menuBarExtraStyle(.window)
+
+        // Settings and Doctor are real windows (native title bar + traffic-light close button).
+        Window("Settings", id: "settings") {
+            AppSettingsView().environment(appState)
+        }
+        .windowResizability(.contentSize)
+
+        Window("Doctor", id: "doctor") {
+            DoctorSheet().environment(appState)
+        }
+        .windowResizability(.contentSize)
     }
 }
