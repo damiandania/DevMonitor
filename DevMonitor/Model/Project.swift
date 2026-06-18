@@ -2,7 +2,7 @@ import Foundation
 
 /// JS/TS package manager, detected from the project's lockfile.
 enum PackageManager: String, Codable, Sendable, CaseIterable {
-    case npm, pnpm, yarn, bun
+    case npm, pnpm, yarn, bun, deno
 
     /// The run prefix for a script (e.g. `npm run`, `pnpm`).
     var runScriptPrefix: String {
@@ -11,6 +11,7 @@ enum PackageManager: String, Codable, Sendable, CaseIterable {
         case .pnpm: return "pnpm"
         case .yarn: return "yarn"
         case .bun: return "bun run"
+        case .deno: return "deno task"
         }
     }
 }

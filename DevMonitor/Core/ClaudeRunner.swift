@@ -13,7 +13,7 @@ enum ClaudeRunner {
     /// Dev Monitor's own source tree (where the app is developed).
     static let sourcePath = NSHomeDirectory() + "/dev/DevMonitor"
 
-    static func diagnose(internalLog: String) async -> Report {
+    static func diagnose(internalLog: String, model: String? = nil) async -> Report {
         let prompt = """
         You are diagnosing **Dev Monitor**, a native macOS SwiftUI app whose source is the current
         working directory. Below is a tail of its internal event log. Identify the most likely root
@@ -23,7 +23,7 @@ enum ClaudeRunner {
         --- Dev Monitor internal log ---
         \(internalLog)
         """
-        return await run(prompt: prompt, cwd: sourcePath)
+        return await run(prompt: prompt, cwd: sourcePath, model: model)
     }
 
     /// Runs `claude -p` read-only with `prompt` on stdin, in `cwd`, and parses the JSON result.

@@ -66,7 +66,7 @@ enum ResourceAdvisor {
     }
 
     static func advise(systemCPU: Double, systemMemPercent: Double,
-                       coreCount: Int, procs: [Proc]) async -> Advice {
+                       coreCount: Int, procs: [Proc], model: String? = nil) async -> Advice {
         let snapshot = snapshotText(systemCPU: systemCPU, systemMemPercent: systemMemPercent,
                                     coreCount: coreCount, procs: procs)
         let prompt = """
@@ -96,7 +96,7 @@ enum ResourceAdvisor {
         \(snapshot)
         """
 
-        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory())
+        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(), model: model)
         let names = Dictionary(procs.map { ($0.pid, $0.name) }, uniquingKeysWith: { a, _ in a })
         let parsed = parse(report.text, names: names)
         return Advice(summary: parsed.summary, recommendations: parsed.recs,
@@ -134,7 +134,8 @@ enum ResourceAdvisor {
     /// Fast (Haiku) evaluation during a stall: which processes are safe to kill right now.
     /// Returns only actionable kills (close a foreign process / stop the dev server).
     static func pressureKills(systemCPU: Double, systemMemPercent: Double, systemSwapPercent: Double,
-                              coreCount: Int, procs: [Proc]) async -> [Recommendation] {
+                              coreCount: Int, procs: [Proc],
+                              model: String = "claude-haiku-4-5") async -> [Recommendation] {
         let snapshot = snapshotText(systemCPU: systemCPU, systemMemPercent: systemMemPercent,
                                     coreCount: coreCount, procs: procs)
             + "\nSwap: \(Int(systemSwapPercent))% used"
@@ -153,8 +154,7 @@ enum ResourceAdvisor {
         --- snapshot ---
         \(snapshot)
         """
-        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(),
-                                            model: "claude-haiku-4-5")
+        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(), model: model)
         let names = Dictionary(procs.map { ($0.pid, $0.name) }, uniquingKeysWith: { a, _ in a })
         return parse(report.text, names: names).recs
             .filter { $0.action == .closeProcess || $0.action == .stopDevServer }

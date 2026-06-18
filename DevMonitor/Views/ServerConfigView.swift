@@ -69,12 +69,13 @@ struct ServerConfigView: View {
                    autoValue: project.packageManager.rawValue) {
             Picker("", selection: Binding(get: { project.packageManager },
                                           set: { app.setPackageManager($0, for: project.id) })) {
-                Text("npm").tag(PackageManager.npm)
-                Text("pnpm").tag(PackageManager.pnpm)
+                ForEach(PackageManager.allCases, id: \.self) { pm in
+                    Text(pm.rawValue).tag(pm)
+                }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .labelsHidden()
-            .frame(width: 110)
+            .fixedSize()
         }
     }
 

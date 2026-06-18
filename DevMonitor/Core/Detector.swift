@@ -13,11 +13,13 @@ enum Detector {
     static func detect(path: String) -> Result {
         let fm = FileManager.default
 
-        // Package manager by lockfile.
+        // Package manager by lockfile / config (most common managers in use today).
         let pm: PackageManager
-        if fm.fileExists(atPath: path + "/pnpm-lock.yaml") { pm = .pnpm }
+        if fm.fileExists(atPath: path + "/bun.lockb") || fm.fileExists(atPath: path + "/bun.lock") { pm = .bun }
+        else if fm.fileExists(atPath: path + "/pnpm-lock.yaml") { pm = .pnpm }
         else if fm.fileExists(atPath: path + "/yarn.lock") { pm = .yarn }
-        else if fm.fileExists(atPath: path + "/bun.lockb") { pm = .bun }
+        else if fm.fileExists(atPath: path + "/deno.lock") || fm.fileExists(atPath: path + "/deno.json")
+                 || fm.fileExists(atPath: path + "/deno.jsonc") { pm = .deno }
         else { pm = .npm }
 
         // Parse package.json deps + scripts.

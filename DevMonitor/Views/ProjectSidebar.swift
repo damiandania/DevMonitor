@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 struct ProjectSidebar: View {
     @Environment(AppState.self) private var app
     @State private var importing = false
+    @State private var settingsProject: Project?
+    @State private var showAppSettings = false
 
     var body: some View {
         @Bindable var app = app
@@ -14,13 +16,19 @@ struct ProjectSidebar: View {
                     ForEach(app.projects) { project in
                         HStack(spacing: 8) {
                             ProjectIconView(project: project, size: 16)
-                            Text(project.name)
+                            Text(project.name).lineLimit(1)
+                            Spacer(minLength: 4)
+                            Button { settingsProject = project } label: {
+                                Image(systemName: "gearshape")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Project settings")
                         }
                         .tag(project.id)
                         .contextMenu {
-                            Button("Remove", role: .destructive) {
-                                app.removeProject(project.id)
-                            }
+                            Button("Settings…") { settingsProject = project }
+                            Button("Remove", role: .destructive) { app.removeProject(project.id) }
                         }
                     }
                 }
@@ -35,21 +43,18 @@ struct ProjectSidebar: View {
                 }
             }
 
-            if app.systemSampler.pressure == .stuck {
-                Divider()
-                PressureSuggestionsView()
+            Divider()
+            Button { showAppSettings = true } label: {
+                Label("App Settings", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            if let project = app.selectedProject {
-                Divider()
-                ServerConfigView(project: project)
-            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
         .toolbar {
             ToolbarItem {
-                Button {
-                    importing = true
-                } label: {
+                Button { importing = true } label: {
                     Label("Add Project", systemImage: "plus")
                 }
             }
@@ -60,6 +65,12 @@ struct ProjectSidebar: View {
                 app.addProject(path: url.path)
                 if access { url.stopAccessingSecurityScopedResource() }
             }
+        }
+        .sheet(item: $settingsProject) { project in
+            ProjectSettingsSheet(project: project).environment(app)
+        }
+        .sheet(isPresented: $showAppSettings) {
+            AppSettingsView().environment(app)
         }
     }
 }

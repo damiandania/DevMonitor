@@ -12,12 +12,20 @@ final class AppState {
     /// One active build at a time.
     var activeBuild: BuildRunner?
 
+    /// App-wide settings (browser, analysis model, …) — the gear at the bottom of the sidebar.
+    var settings: AppSettings
+    /// Browsers installed on this Mac (display names), for the "open in" picker.
+    var installedBrowsers: [String] = []
+
     @ObservationIgnored private let store = ProjectStore()
+    @ObservationIgnored private let settingsStore = SettingsStore()
     @ObservationIgnored private let ipcServer = IPCServer()
     let systemSampler = SystemSampler()
 
     init() {
+        settings = settingsStore.load()
         projects = store.load()
+        installedBrowsers = BrowserList.installed()
         selectedProjectID = projects.first?.id
         ipcServer.start(app: self)
         systemSampler.start()
@@ -166,8 +174,9 @@ final class AppState {
         isGeneratingReport = true
         diagnosticReport = nil
         let log = AppLog.shared.recent()
+        let model = settings.analysisModel
         Task { [weak self] in
-            let report = await ClaudeRunner.diagnose(internalLog: log)
+            let report = await ClaudeRunner.diagnose(internalLog: log, model: model)
             self?.diagnosticReport = report
             self?.isGeneratingReport = false
         }
@@ -190,13 +199,16 @@ final class AppState {
                   memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer)
         }
         let cpu = s.systemCPU, mem = s.systemMemPercent, cores = s.coreCount
+        let model = settings.analysisModel
         Task { [weak self] in
             let a = await ResourceAdvisor.advise(systemCPU: cpu, systemMemPercent: mem,
-                                                 coreCount: cores, procs: procs)
+                                                 coreCount: cores, procs: procs, model: model)
             self?.advice = a
             self?.isAdvising = false
         }
     }
+
+    func persistSettings() { settingsStore.save(settings) }
 
     /// Apply a recommendation. Foreign-process closes MUST already be confirmed by the caller.
     func apply(_ r: ResourceAdvisor.Recommendation) {
@@ -222,13 +234,13 @@ final class AppState {
 
         // 1) Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't in
         //    our managed tree (managed/build trees are aggregated out of `processes`). Editor helpers
-        //    and protected processes are excluded. Then notify what was closed.
-        let orphans = s.processes.filter { row in
+        //    and protected processes are excluded. Then notify what was closed. (Off-switchable.)
+        let orphans = settings.autoCloseOrphans ? s.processes.filter { row in
             row.id > 0
                 && !row.name.localizedCaseInsensitiveContains("Helper")
                 && !ResourceAdvisor.isProtected(row.name)
                 && ResourceAdvisor.looksLikeDevServer(argv: Self.argv(of: row.id))
-        }
+        } : []
         if !orphans.isEmpty {
             orphans.forEach { Self.killPid($0.id) }
             let names = orphans.map(\.name).joined(separator: ", ")
@@ -246,10 +258,11 @@ final class AppState {
                          memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer) }
         killSuggestions = ResourceAdvisor.heuristicKills(procs: procs)
         let cpu = s.systemCPU, mem = s.systemMemPercent, swap = s.systemSwapPercent, cores = s.coreCount
+        let model = settings.analysisModel
         Task { [weak self] in
             let recs = await ResourceAdvisor.pressureKills(
                 systemCPU: cpu, systemMemPercent: mem, systemSwapPercent: swap,
-                coreCount: cores, procs: procs)
+                coreCount: cores, procs: procs, model: model)
             if !recs.isEmpty { self?.killSuggestions = recs }
             self?.isEvaluatingPressure = false
         }

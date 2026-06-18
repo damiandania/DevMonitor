@@ -78,6 +78,15 @@ struct DashboardView: View {
             }
             .keyboardShortcut(running ? "." : "r", modifiers: .command)
 
+            // Package manager that will be used (configurable in the project's settings).
+            Label(project.packageManager.rawValue, systemImage: "shippingbox")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(.quaternary, in: Capsule())
+                .help("Package manager: \(project.packageManager.rawValue) (change it in project settings)")
+
             if running {
                 PillButton(title: "Restart", systemImage: "arrow.clockwise") {
                     session?.recycle()
@@ -89,7 +98,7 @@ struct DashboardView: View {
                 PillButton(title: "Open", systemImage: "globe") {
                     openInBrowser(port: port)
                 }
-                .help("Open http://localhost:\(port) in Chrome")
+                .help("Open http://localhost:\(port) in \(app.settings.browser ?? "your default browser")")
             }
 
             PillButton(title: "Code", systemImage: "chevron.left.forwardslash.chevron.right") {
@@ -106,10 +115,15 @@ struct DashboardView: View {
 
     private func openInBrowser(port: Int) {
         guard let url = URL(string: "http://localhost:\(port)/") else { return }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-a", "Google Chrome", url.absoluteString]
-        do { try task.run() } catch { NSWorkspace.shared.open(url) }
+        // Use the browser chosen in App Settings, else the system default.
+        if let browser = app.settings.browser, !browser.isEmpty {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            task.arguments = ["-a", browser, url.absoluteString]
+            do { try task.run() } catch { NSWorkspace.shared.open(url) }
+        } else {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func openInVSCode() {

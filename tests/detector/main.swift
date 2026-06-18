@@ -32,5 +32,17 @@ for (path, pm, fw) in cases {
 
 check("defaultMemoryGB Nuxt=8", Detector.defaultMemoryGB(for: .nuxt) == 8, "\(Detector.defaultMemoryGB(for: .nuxt))")
 
+// Package-manager detection by lockfile/config (temp dirs).
+func tmpProject(_ files: [String: String]) -> String {
+    let dir = NSTemporaryDirectory() + "dm-det-\(files.keys.sorted().joined().hashValue)"
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    for (f, c) in files { try? c.write(toFile: dir + "/" + f, atomically: true, encoding: .utf8) }
+    return dir
+}
+check("detect bun", Detector.detect(path: tmpProject(["bun.lockb": "", "package.json": "{}"])).packageManager == .bun, "bun.lockb")
+check("detect deno", Detector.detect(path: tmpProject(["deno.json": "{}"])).packageManager == .deno, "deno.json")
+let denoCmd = Detector.commands(path: tmpProject(["deno.json": "{\"tasks\":{}}", "package.json": "{\"scripts\":{\"dev\":\"x\"}}"]), packageManager: .deno)
+check("deno dev command", denoCmd.dev == "deno task dev", denoCmd.dev)
+
 print(failures == 0 ? "ALL DETECTOR TESTS PASSED" : "\(failures) DETECTOR TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

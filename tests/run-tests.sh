@@ -50,7 +50,8 @@ build_run() {
 build_run spawn    "$ROOT/tests/spawn/main.swift" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run metrics  "$ROOT/tests/metrics/main.swift" "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift"
-build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift"
+build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
+  "$SRC/Model/AppSettings.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \

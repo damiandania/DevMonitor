@@ -39,5 +39,22 @@ chk(back.memoryAuto == false && back.packageManagerAuto == false
     && back.port == 4321 && back.memoryGB == 5,
     "model: round-trip preserves flags / port / memory")
 
+// AppSettings: empty JSON → defaults; round trip preserves values.
+guard let defs = try? dec.decode(AppSettings.self, from: "{}".data(using: .utf8)!) else {
+    print("FAIL model: AppSettings '{}' failed to decode"); exit(1)
+}
+chk(defs.browser == nil, "settings: default browser = system default (nil)")
+chk(defs.analysisModel == AppSettings.defaultModel, "settings: default model = haiku", defs.analysisModel)
+chk(defs.autoCloseOrphans, "settings: auto-close orphans on by default")
+chk(defs.defaultMemoryGB == 4, "settings: default heap 4")
+
+let custom = AppSettings(browser: "Firefox", analysisModel: "claude-opus-4-8",
+                         autoCloseOrphans: false, defaultMemoryGB: 8)
+guard let sData = try? JSONEncoder().encode(custom),
+      let sBack = try? dec.decode(AppSettings.self, from: sData) else {
+    print("FAIL model: AppSettings round-trip failed"); exit(1)
+}
+chk(sBack == custom, "settings: round-trip preserves all fields")
+
 print(fail == 0 ? "ALL MODEL TESTS PASSED" : "SOME MODEL TESTS FAILED")
 exit(Int32(fail))
