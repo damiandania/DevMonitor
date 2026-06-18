@@ -191,27 +191,37 @@ enum ResourceAdvisor {
         return lines.joined(separator: "\n")
     }
 
-    /// Read-only AI analysis of how to free RAM (and what can/can't be done about swap).
+    /// Structured AI analysis of which processes to CLOSE to free the most RAM (actionable list).
     static func memoryAdvice(totalMemGB: Double, usedPercent: Double,
                              swapUsedGB: Double, swapTotalGB: Double,
-                             procs: [Proc], model: String? = nil) async -> ClaudeRunner.Report {
+                             procs: [Proc], model: String? = nil) async -> Advice {
         let snapshot = memorySnapshotText(totalMemGB: totalMemGB, usedPercent: usedPercent,
                                           swapUsedGB: swapUsedGB, swapTotalGB: swapTotalGB, procs: procs)
         let prompt = """
-        This Mac is tight on memory. Below is a snapshot of physical RAM, swap, and the biggest memory
-        consumers. Explain concretely how to FREE RAM the best way:
-        - Which apps/processes to close or restart to reclaim the most memory, prioritized, and which
-          are safe vs risky (never tell the user to kill the editor, WindowServer, Finder, or system
-          daemons). Quick wins first (e.g. browser tabs, idle dev servers, leftover helpers).
-        - Whether the SWAP can be reduced: explain that macOS manages swap automatically — it shrinks
-          as memory pressure drops, purgeable/cached memory is reclaimed on demand, and only a reboot
-          fully clears swap; there is no safe way to "flush" swap directly. Be honest about this.
-        Be concise, prioritized and actionable (a short report). DO NOT run or modify anything.
+        This Mac is tight on memory. Snapshot below (RAM, swap, biggest consumers). Recommend which
+        processes to CLOSE to free the most RAM, prioritized by how much they'd reclaim. Use action
+        "close_process" for foreign apps (the user confirms), "stop_dev_server" for a managed dev
+        server, "keep" for things that should stay. NEVER suggest the editor, WindowServer, Finder,
+        system daemons, or Dev Monitor itself. (Note: swap can't be flushed directly — macOS shrinks
+        it as pressure drops; only a reboot clears it.)
+
+        Reply with ONLY JSON, no prose:
+        {
+          "summary": "one line: memory health + roughly how much closing these frees",
+          "recommendations": [
+            {"pid": <int, -1 for the dev-server tree>, "action": "close_process|stop_dev_server|keep",
+             "severity": "low|medium|high", "reason": "e.g. 3.7 GB across many Chrome tabs"}
+          ]
+        }
 
         --- memory snapshot ---
         \(snapshot)
         """
-        return await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(), model: model)
+        let report = await ClaudeRunner.run(prompt: prompt, cwd: NSHomeDirectory(), model: model)
+        let names = Dictionary(procs.map { ($0.pid, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let parsed = parse(report.text, names: names)
+        return Advice(summary: parsed.summary, recommendations: parsed.recs,
+                      isError: report.isError, costUSD: report.costUSD)
     }
 
     /// Tolerant JSON extraction: claude may wrap the object in prose or code fences.

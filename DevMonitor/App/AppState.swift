@@ -219,18 +219,18 @@ final class AppState {
 
     func persistSettings() { settingsStore.save(settings) }
 
-    // Doctor — Memory & RAM section: read-only AI analysis of how to free memory.
-    var memoryReport: ClaudeRunner.Report?
-    var isGeneratingMemoryReport = false
+    // Doctor — Memory & RAM section: structured AI list of processes to close to free RAM.
+    var memoryAdvice: ResourceAdvisor.Advice?
+    var isGeneratingMemory = false
     @ObservationIgnored private var memoryTask: Task<Void, Never>?
 
-    func stopMemoryReport() { memoryTask?.cancel(); isGeneratingMemoryReport = false }
-    func resetMemoryReport() { stopMemoryReport(); memoryReport = nil }
+    func stopMemory() { memoryTask?.cancel(); isGeneratingMemory = false }
+    func resetMemory() { stopMemory(); memoryAdvice = nil }
 
-    func generateMemoryReport() {
-        guard !isGeneratingMemoryReport else { return }
-        isGeneratingMemoryReport = true
-        memoryReport = nil
+    func generateMemory() {
+        guard !isGeneratingMemory else { return }
+        isGeneratingMemory = true
+        memoryAdvice = nil
         let s = systemSampler
         let procs: [ResourceAdvisor.Proc] = s.processes.map {
             .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
@@ -242,12 +242,12 @@ final class AppState {
         let swapTotalGB = s.systemSwapTotal / 1_073_741_824
         let model = settings.analysisModel
         memoryTask = Task { [weak self] in
-            let r = await ResourceAdvisor.memoryAdvice(
+            let a = await ResourceAdvisor.memoryAdvice(
                 totalMemGB: totalGB, usedPercent: usedPct,
                 swapUsedGB: swapUsedGB, swapTotalGB: swapTotalGB, procs: procs, model: model)
             if Task.isCancelled { return }
-            self?.memoryReport = r
-            self?.isGeneratingMemoryReport = false
+            self?.memoryAdvice = a
+            self?.isGeneratingMemory = false
         }
     }
 
@@ -257,10 +257,16 @@ final class AppState {
         case .stopDevServer:
             stopActive()
         case .closeProcess:
-            if r.id > 0 { kill(r.id, SIGTERM) }   // foreign — caller has confirmed
+            if r.id > 0 { Self.killPid(r.id) }   // foreign — caller has confirmed
         case .keep, .investigate:
             break
         }
+    }
+
+    /// Apply every closeable recommendation (the "Free memory" / close-all button). The caller
+    /// confirms first; managed dev servers are stopped, foreign processes are SIGTERM→SIGKILLed.
+    func applyAll(_ recs: [ResourceAdvisor.Recommendation]) {
+        for r in recs where r.action == .closeProcess || r.action == .stopDevServer { apply(r) }
     }
 
     // Pressure-triggered kill suggestions (auto): when the machine is stuck, a fast Haiku eval

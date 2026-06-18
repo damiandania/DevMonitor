@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The "Doctor" window — sidebar with the three analyses; detail with a big circular Analyze button
-/// (top-right, switches to Stop while running) and the read-only AI result. Closed by the window's
-/// red traffic-light button. Nothing runs until you press Analyze.
+/// The "Doctor" window. Sidebar = the three analyses; detail = an Apple-style list of processes to
+/// close (Heavy / Memory) or a text diagnosis (Dev Monitor). The big circular Analyze button sits in
+/// the top-right corner and flips to a red Stop while running. Nothing runs until you press it.
 struct DoctorSheet: View {
     @Environment(AppState.self) private var app
     @State private var section: Section = .heavy
@@ -36,16 +36,50 @@ struct DoctorSheet: View {
             .navigationTitle("Doctor")
             .navigationSplitViewColumnWidth(min: 210, ideal: 230)
         } detail: {
-            detail.navigationTitle(section.title)
+            detail
+                .navigationTitle(section.title)
+                .overlay(alignment: .topTrailing) {
+                    CircleAction(busy: busy, start: start, stop: stop).padding()
+                }
         }
-        .frame(minWidth: 800, minHeight: 560)
+        .frame(minWidth: 820, minHeight: 580)
     }
 
     @ViewBuilder private var detail: some View {
         switch section {
-        case .heavy: HeavyDetail()
-        case .devMonitor: ReportDetail(kind: .devMonitor)
-        case .memory: ReportDetail(kind: .memory)
+        case .heavy:
+            AdviceList(advice: app.advice, busy: app.isAdvising,
+                       idle: "Analyze the machine's heaviest processes and what's safe to close.",
+                       freeAllTitle: nil)
+        case .devMonitor:
+            DiagnosisDetail()
+        case .memory:
+            AdviceList(advice: app.memoryAdvice, busy: app.isGeneratingMemory,
+                       idle: "Find the biggest memory hogs and what to close to free RAM.",
+                       freeAllTitle: "Free memory")
+        }
+    }
+
+    // Current section's analyze state/actions (drives the circular button).
+    private var busy: Bool {
+        switch section {
+        case .heavy: return app.isAdvising
+        case .devMonitor: return app.isGeneratingReport
+        case .memory: return app.isGeneratingMemory
+        }
+    }
+    private func start() {
+        switch section {
+        case .heavy: app.generateAdvice()
+        case .devMonitor: app.generateReport()
+        case .memory: app.generateMemory()
+        }
+    }
+    private func stop() {
+        switch section {
+        case .heavy: app.stopAdvice()
+        case .devMonitor: app.stopReport()
+        case .memory: app.stopMemory()
         }
     }
 
@@ -57,56 +91,69 @@ struct DoctorSheet: View {
     }
 }
 
-/// The big circular Analyze button (top-right); becomes a red Stop while running.
+/// Big circular Analyze button (top-right corner); becomes a red Stop while running.
 private struct CircleAction: View {
     let busy: Bool
     let start: () -> Void
     let stop: () -> Void
     var body: some View {
-        HStack {
-            Spacer()
-            Button { busy ? stop() : start() } label: {
-                Image(systemName: busy ? "stop.fill" : "sparkles")
-                    .font(.system(size: 22, weight: .bold))
-                    .frame(width: 54, height: 54)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.circle)
-            .tint(busy ? .red : .accentColor)
-            .help(busy ? "Stop analysis" : "Analyze")
+        Button { busy ? stop() : start() } label: {
+            Image(systemName: busy ? "stop.fill" : "play.fill")
+                .font(.system(size: 20, weight: .bold))
+                .frame(width: 52, height: 52)
         }
-        .padding([.top, .horizontal])
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .tint(busy ? .red : .accentColor)
+        .help(busy ? "Stop analysis" : "Analyze")
     }
 }
 
-// MARK: - Heavy Processes
+// MARK: - Advice list (Heavy Processes & Memory) — Apple-style grouped rows
 
-private struct HeavyDetail: View {
+private struct AdviceList: View {
     @Environment(AppState.self) private var app
+    let advice: ResourceAdvisor.Advice?
+    let busy: Bool
+    let idle: String
+    /// When set, shows a prominent button that closes every recommended process at once.
+    let freeAllTitle: String?
+
     @State private var pendingClose: ResourceAdvisor.Recommendation?
+    @State private var confirmAll = false
+
+    private var closeable: [ResourceAdvisor.Recommendation] {
+        (advice?.recommendations ?? []).filter { $0.action == .closeProcess || $0.action == .stopDevServer }
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            CircleAction(busy: app.isAdvising, start: { app.generateAdvice() }, stop: { app.stopAdvice() })
-            if app.isAdvising {
-                Loading("Claude is analyzing the machine…")
-            } else if let advice = app.advice {
+        Group {
+            if busy {
+                Loading("Asking Claude…")
+            } else if let advice {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         if !advice.summary.isEmpty {
                             Text(advice.summary).frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if advice.recommendations.isEmpty {
-                            Text("No actions recommended — the machine looks healthy.")
-                                .foregroundStyle(.secondary)
+                        if let freeAllTitle, !closeable.isEmpty {
+                            Button { confirmAll = true } label: {
+                                Label(freeAllTitle, systemImage: "sparkles").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
                         }
-                        ForEach(advice.recommendations) { row($0) }
+                        if closeable.isEmpty {
+                            Text("Nothing recommended to close — looks healthy.").foregroundStyle(.secondary)
+                        } else {
+                            list
+                        }
                     }
                     .padding()
+                    .padding(.top, 40)   // clear the circular button
                 }
                 CostFooter(isError: advice.isError, cost: advice.costUSD)
             } else {
-                Idle("Analyze the machine's heaviest processes and what's safe to close.")
+                Idle(idle)
             }
         }
         .confirmationDialog(
@@ -119,46 +166,65 @@ private struct HeavyDetail: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            if let rec = pendingClose {
-                Text("This sends SIGTERM to a process Dev Monitor does not manage.\n\n\(rec.reason)")
-            }
+            if let rec = pendingClose { Text(rec.reason) }
+        }
+        .confirmationDialog(
+            "Close \(closeable.count) process\(closeable.count == 1 ? "" : "es") to free memory?",
+            isPresented: $confirmAll, titleVisibility: .visible
+        ) {
+            Button("Close \(closeable.count) and free memory", role: .destructive) { app.applyAll(closeable) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(closeable.map(\.name).joined(separator: ", "))
         }
     }
 
+    private var list: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(closeable.enumerated()), id: \.element.id) { i, rec in
+                row(rec)
+                if i < closeable.count - 1 { Divider().padding(.leading, 14) }
+            }
+        }
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private func row(_ rec: ResourceAdvisor.Recommendation) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "circle.fill").font(.system(size: 9))
-                .foregroundStyle(color(rec.severity)).padding(.top, 5)
+        HStack(spacing: 12) {
+            Circle().fill(color(rec.severity)).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(rec.name).fontWeight(.semibold).lineLimit(1)
+                    Text(rec.name).fontWeight(.medium).lineLimit(1)
                     if rec.managed {
                         Text("managed").font(.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(.blue.opacity(0.15), in: Capsule())
                     }
                 }
-                Text(rec.reason).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(rec.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
-            Spacer()
-            action(rec)
+            Spacer(minLength: 8)
+            Menu {
+                if rec.action == .stopDevServer {
+                    Button { app.apply(rec) } label: { Label("Stop dev server", systemImage: "stop.fill") }
+                } else {
+                    Button(role: .destructive) { pendingClose = rec } label: {
+                        Label("Close \(rec.name)", systemImage: "xmark.circle")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().strokeBorder(.tertiary))
+                    .contentShape(Circle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    @ViewBuilder private func action(_ rec: ResourceAdvisor.Recommendation) -> some View {
-        switch rec.action {
-        case .stopDevServer:
-            Button("Stop", systemImage: "stop.fill") { app.apply(rec) }
-                .buttonStyle(.borderedProminent).controlSize(.small)
-        case .closeProcess:
-            Button("Close…", systemImage: "xmark.circle") { pendingClose = rec }
-                .controlSize(.small).tint(.red)
-        case .investigate: Text("investigate").foregroundStyle(.orange)
-        case .keep: Text("keep").foregroundStyle(.secondary)
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
     }
 
     private func color(_ s: ResourceAdvisor.Severity) -> Color {
@@ -166,36 +232,24 @@ private struct HeavyDetail: View {
     }
 }
 
-// MARK: - Dev Monitor diagnosis & Memory report
+// MARK: - Dev Monitor diagnosis (text report)
 
-private struct ReportDetail: View {
-    enum Kind { case devMonitor, memory }
+private struct DiagnosisDetail: View {
     @Environment(AppState.self) private var app
-    let kind: Kind
-
-    private var busy: Bool { kind == .devMonitor ? app.isGeneratingReport : app.isGeneratingMemoryReport }
-    private var report: ClaudeRunner.Report? { kind == .devMonitor ? app.diagnosticReport : app.memoryReport }
-    private func start() { if kind == .devMonitor { app.generateReport() } else { app.generateMemoryReport() } }
-    private func stop() { if kind == .devMonitor { app.stopReport() } else { app.stopMemoryReport() } }
-
     var body: some View {
-        VStack(spacing: 0) {
-            CircleAction(busy: busy, start: start, stop: stop)
-            if busy {
-                Loading("Asking Claude…")
-            } else if let report {
-                ScrollView {
-                    Text(DoctorSheet.markdown(report.text))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                }
-                CostFooter(isError: report.isError, cost: report.costUSD)
-            } else {
-                Idle(kind == .devMonitor
-                     ? "Diagnose Dev Monitor's own internal errors (read-only)."
-                     : "Analyze how to free up RAM (and what can be done about swap).")
+        if app.isGeneratingReport {
+            Loading("Asking Claude…")
+        } else if let report = app.diagnosticReport {
+            ScrollView {
+                Text(DoctorSheet.markdown(report.text))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .padding(.top, 40)
             }
+            CostFooter(isError: report.isError, cost: report.costUSD)
+        } else {
+            Idle("Diagnose Dev Monitor's own internal errors (read-only).")
         }
     }
 }
