@@ -30,7 +30,8 @@ with a Developer ID and notarize.
 
 ## Features (current)
 
-- **Auto-detects** package manager (pnpm/npm) and framework (Nuxt/Next/Astro/Express) per project.
+- **Auto-detects** package manager (npm/pnpm/yarn/bun/deno) and framework (Nuxt/Next/Astro/Vite/
+  Express) per project.
 - **Launches** the dev server with a chosen heap size (`--max-old-space-size`), streaming its log live.
 - **Live activity**: system **CPU / Memory / Swap** progress bars + an Activity-Monitor-style table
   of only the processes with real impact (heavy CPU or memory), with the dev-server tree aggregated
@@ -38,9 +39,14 @@ with a Developer ID and notarize.
   Monitor; the "% of machine" toggle re-expresses it as a share of total capacity. Generic helpers
   (`node`, "Code Helper") are named from the extension's own `package.json` `displayName` (resolving
   `%key%` via `package.nls.json`) — e.g. *Vue (Official)*, *ESLint*, *Tailwind CSS IntelliSense*.
-- **Server configuration** (bottom of the sidebar): per-project **Memory / Port / Package**, each
-  with an **Auto** toggle (on by default); turn it off to set a manual value (slider / field /
-  npm·pnpm picker). Auto memory follows the framework default; auto port is parsed from stdout.
+- **Per-project settings** (gear on each sidebar row → modal): **Memory / Port / Package**, each with
+  an **Auto** toggle (on by default); turn it off for a manual value (slider / field / package picker:
+  npm·pnpm·yarn·bun·deno). Auto memory follows the framework default; auto port is parsed from stdout.
+  The package manager in use is also shown as a chip next to the Launch button.
+- **App settings** (gear at the bottom of the sidebar → modal): the **browser** to open servers in
+  (auto-detected via LaunchServices — Chrome/Firefox/Safari/Chromium/…), the **Claude model** used for
+  Diagnose / Advisor / pressure analysis (Haiku/Sonnet/Opus), an orphan-auto-close toggle, and the
+  default heap for new projects. Persisted in `settings.json`.
 - **Hang detection + auto-recycle**: HTTP probes the server; after consecutive failures it kills the
   whole process tree (including orphans) and relaunches.
 - **Build runner**: runs the project's build script as a separate tracked tree. Its process tree
@@ -94,14 +100,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short:
 ```
 DevMonitor/
   App/        @main App (WindowGroup + MenuBarExtra), AppState (@Observable @MainActor)
-  Model/      Project, SessionState, MetricPoint, IPCProtocol
+  Model/      Project, AppSettings (+SettingsStore, BrowserList), SessionState, MetricPoint, IPCProtocol
   Store/      ProjectStore (Application Support JSON)
   Core/       Detector, DevSession (supervisor+metrics+health), ProcessTree, SystemSampler
               (+pressure detection), BuildRunner, IPCServer, Notifier, AppLog, ClaudeRunner,
               ResourceAdvisor (advise / pressureKills(Haiku) / heuristicKills)
   Sys/        spawn.c (posix_spawn SETSID), metrics.c (libproc/mach + swap), ipc.c + bridging header
   Views/      RootSplitView, ProjectSidebar, DashboardView, LogPaneView, MenuBarView, ServerConfigView,
-              PressureSuggestionsView, ReportSheet (P7), AdvisorSheet (P9), PillButton, SessionState+UI
+              ProjectSettingsSheet, AppSettingsView, PressureSuggestionsView, ReportSheet (P7),
+              AdvisorSheet (P9), PillButton, SessionState+UI
   Resources/  Assets.xcassets (AppIcon + monochrome github + skull), Info.plist
   tools/      make-icon.swift (Core Graphics app-icon generator)
 dev-monitor/  CLI target (IPC client — run/status/stop/restart/logs, auto-starts the app)
