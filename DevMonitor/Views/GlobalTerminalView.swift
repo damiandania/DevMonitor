@@ -76,6 +76,7 @@ struct GlobalTerminalView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { app.selectedTerminalID = tab.id }
+            .help("\(tab.isBuild ? "Build" : "Server") · \(tab.name)")
 
             Button {
                 if tab.isBuild { app.closeBuild(id: tab.projectID) } else { app.closeServer(id: tab.projectID) }

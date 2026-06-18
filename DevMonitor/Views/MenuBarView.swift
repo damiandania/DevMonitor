@@ -108,9 +108,9 @@ struct MenuBarView: View {
 
     private func externalRow(_ row: ProcessRow) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "server.rack").font(.caption).foregroundStyle(.purple)
+            Image(systemName: "server.rack").font(.caption).foregroundStyle(.indigo)
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.name).font(.subheadline.weight(.semibold)).foregroundStyle(.purple).lineLimit(1)
+                Text(row.name).font(.subheadline.weight(.semibold)).foregroundStyle(.indigo).lineLimit(1)
                 Text("external · not supervised").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()

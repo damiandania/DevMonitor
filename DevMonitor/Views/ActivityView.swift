@@ -38,6 +38,7 @@ struct ActivityView: View {
                     Text("% of machine").font(.caption).foregroundStyle(.secondary)
                 }
                 .toggleStyle(.switch).controlSize(.mini)
+                .help("Show each process's CPU as a share of the whole machine instead of per-core")
             }
         }
     }
@@ -59,6 +60,7 @@ struct ActivityView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(expanded ? "Hide the process list" : "Show the process list")
     }
 
     // MARK: - Meters
@@ -86,7 +88,7 @@ struct ActivityView: View {
                              detail: "\(Int(s.systemCPU))%", color: .blue, icon: "cpu")
             case "memory":
                 return Meter(id: id, title: "Memory", percent: s.systemMemPercent,
-                             detail: ratio(s.systemMemUsed, s.totalMem), color: .purple, icon: "memorychip")
+                             detail: ratio(s.systemMemUsed, s.totalMem), color: .indigo, icon: "memorychip")
             case "swap":
                 return Meter(id: id, title: "Swap", percent: s.systemSwapPercent,
                              detail: s.systemSwapTotal > 0 ? ratio(s.systemSwapUsed, s.systemSwapTotal) : "off",
@@ -106,27 +108,62 @@ struct ActivityView: View {
         }
     }
 
+    /// Adaptive grid: tiles keep a comfortable min width and wrap to more rows as the bar count
+    /// grows / the window narrows — instead of cramming everything onto one row and wrapping text.
     private var meterRow: some View {
-        HStack(spacing: 10) {
-            ForEach(meters) { meterTile($0) }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 10)], alignment: .leading, spacing: 10) {
+            ForEach(meters) { m in
+                MeterTile(title: m.title, detail: m.detail,
+                          fraction: min(max(m.percent / 100, 0), 1),
+                          color: m.color, icon: m.icon, help: meterHelp(m))
+            }
         }
     }
 
-    private func meterTile(_ m: Meter) -> some View {
+    /// Human description + live value for a meter tile, shown on hover.
+    private func meterHelp(_ m: Meter) -> String {
+        let desc: String
+        switch m.id {
+        case "cpu":    desc = "System CPU usage across all cores"
+        case "memory": desc = "System memory in use / total"
+        case "swap":   desc = "Swap space in use / total"
+        case "load":   desc = "1-minute load average"
+        case "devcpu": desc = "CPU used by the dev-server process tree"
+        case "devmem": desc = "Memory used by the dev-server process tree"
+        default:       desc = m.title
+        }
+        return "\(desc) — \(m.detail)"
+    }
+}
+
+/// One activity meter rendered as a tile (icon + title, the value, a capsule bar). Shared by EVERY
+/// meter so they all look identical — fixed type sizes, so a longer value like "12.4 / 14 GB" never
+/// renders at a different scale than a shorter one like "5.8 / 8 GB". The adaptive grid keeps each
+/// tile wide enough for the longest value, so `lineLimit(1)` alone prevents wrapping (no shrinking).
+private struct MeterTile: View {
+    let title: String
+    let detail: String
+    let fraction: Double   // 0…1
+    let color: Color
+    let icon: String
+    let help: String
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 5) {
-                Image(systemName: m.icon).font(.caption2).foregroundStyle(m.color)
-                Text(m.title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Image(systemName: icon).font(.caption2).foregroundStyle(color)
+                Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(m.detail)
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(m.color)
+                Text(detail).font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(color).lineLimit(1)
             }
-            MeterBar(value: min(max(m.percent / 100, 0), 1), color: m.color)
+            MeterBar(value: fraction, color: color)
         }
         .padding(.horizontal, 11).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(m.color.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+        .help(help)
     }
 }
 

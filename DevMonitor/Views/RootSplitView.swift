@@ -16,6 +16,12 @@ struct RootSplitView: View {
         .navigationTitle("Dev Monitor")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                ProjectOpenGroup()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                ProjectBuildButton()
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button { openWindow(id: "settings") } label: {
                     Label("Settings", systemImage: "gearshape")
                 }
@@ -25,7 +31,7 @@ struct RootSplitView: View {
                 Button { openWindow(id: "doctor") } label: {
                     Label("Doctor", systemImage: "stethoscope")
                 }
-                .help("Read-only AI: heavy processes, Dev Monitor diagnosis, and how to free RAM")
+                .help("Doctor Claude")
             }
         }
     }

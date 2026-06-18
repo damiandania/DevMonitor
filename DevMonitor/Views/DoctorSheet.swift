@@ -105,14 +105,6 @@ struct DoctorSheet: View {
         case .memory: app.stopMemory()
         }
     }
-    private func reset(_ s: Section) {
-        switch s {
-        case .heavy: app.resetAdvice()
-        case .devMonitor: app.resetReport()
-        case .memory: app.resetMemory()
-        }
-    }
-
     static func markdown(_ text: String) -> AttributedString {
         (try? AttributedString(
             markdown: text,

@@ -103,6 +103,17 @@ private struct ProcessRowView: View {
         .background(rowBackground, in: RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .help(rowHelp)
+    }
+
+    /// Full process name (it truncates in the middle) plus its category, shown on hover.
+    private var rowHelp: String {
+        let kind: String
+        if row.isDevServer { kind = " — supervised dev server" }
+        else if row.isExternalDev { kind = " — external dev server (not supervised)" }
+        else if row.isBuild { kind = " — build" }
+        else { kind = "" }
+        return "\(row.name)\(kind)\nCPU \(cpuText) · Memory \(memText)"
     }
 
     @ViewBuilder private var icon: some View {
@@ -110,7 +121,7 @@ private struct ProcessRowView: View {
             Image(systemName: "server.rack").foregroundStyle(.tint)
         } else if row.isExternalDev {
             // Same glyph as a managed server, but purple = running outside the app.
-            Image(systemName: "server.rack").foregroundStyle(Color.purple)
+            Image(systemName: "server.rack").foregroundStyle(Color.indigo)
         } else if row.isBuild {
             Image(systemName: "hammer.fill").foregroundStyle(.orange)
         } else {
@@ -122,7 +133,7 @@ private struct ProcessRowView: View {
 
     private var accent: Color {
         if row.isDevServer { return .accentColor }
-        if row.isExternalDev { return .purple }
+        if row.isExternalDev { return .indigo }
         if row.isBuild { return .orange }
         return .primary
     }
