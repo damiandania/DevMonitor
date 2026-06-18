@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Live, auto-scrolling log with an input field that writes to the dev server's stdin.
+/// Live, auto-scrolling terminal log. With `onSubmit` set it also shows an input field (used for
+/// the dev server's stdin); without it, it's a read-only viewer (used for the build log).
 struct LogPaneView: View {
-    let session: DevSession
+    let lines: [String]
+    var inputPlaceholder: String? = nil
+    var onSubmit: ((String) -> Void)? = nil
     @State private var input = ""
 
     var body: some View {
@@ -10,7 +13,7 @@ struct LogPaneView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(session.logLines.enumerated()), id: \.offset) { index, line in
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                             Text(ANSI.attributed(line.isEmpty ? " " : line))
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(Color(white: 0.85))
@@ -22,7 +25,7 @@ struct LogPaneView: View {
                     .padding(8)
                 }
                 .background(Color(white: 0.08))
-                .onChange(of: session.logLines.count) { _, count in
+                .onChange(of: lines.count) { _, count in
                     guard count > 0 else { return }
                     withAnimation(.linear(duration: 0.1)) {
                         proxy.scrollTo(count - 1, anchor: .bottom)
@@ -30,25 +33,26 @@ struct LogPaneView: View {
                 }
             }
 
-            Divider()
-
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.green)
-                TextField("Send input to the dev server (press Enter)…", text: $input)
-                    .textFieldStyle(.plain)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .onSubmit {
-                        guard !input.isEmpty else { return }
-                        session.sendInput(input)
-                        input = ""
-                    }
+            if let placeholder = inputPlaceholder, let onSubmit {
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.green)
+                    TextField(placeholder, text: $input)
+                        .textFieldStyle(.plain)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .onSubmit {
+                            guard !input.isEmpty else { return }
+                            onSubmit(input)
+                            input = ""
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color(white: 0.12))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color(white: 0.12))
         }
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(

@@ -3,11 +3,12 @@ import Observation
 
 /// One row in the system process table.
 struct ProcessRow: Identifiable, Sendable {
-    let id: Int32          // pid (-1 = aggregated dev-server row)
+    let id: Int32          // pid (-1 = aggregated dev-server row, -2 = aggregated build row)
     let name: String
     let cpuPerCore: Double // per-core % (can exceed 100)
     let memBytes: Double
     var isDevServer = false
+    var isBuild = false
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -44,6 +45,8 @@ final class SystemSampler {
     /// Supplies the active dev-server's pids + a readable label, so its whole tree shows as
     /// one clear, highlighted row (e.g. "MiddleSpace :3000") instead of a bare "node".
     var devServerInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
+    /// Same, for an in-progress build — its tree shows as one identified row (like the server).
+    var buildInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
 
     init() {
         coreCount = max(1, ProcessInfo.processInfo.processorCount)
@@ -130,13 +133,18 @@ final class SystemSampler {
 
         let dev = devServerInfo?()
         let devPids = dev?.pids ?? []
-        var devCPU = 0.0
-        var devMem = 0.0
+        let build = buildInfo?()
+        let buildPids = build?.pids ?? []
+        var devCPU = 0.0, devMem = 0.0
+        var buildCPU = 0.0, buildMem = 0.0
         var others: [ProcessRow] = []
         for row in rows {
             if !devPids.isEmpty, devPids.contains(row.id) {
                 devCPU += row.cpuPerCore
                 devMem += row.memBytes
+            } else if !buildPids.isEmpty, buildPids.contains(row.id) {
+                buildCPU += row.cpuPerCore
+                buildMem += row.memBytes
             } else {
                 others.append(row)
             }
@@ -145,6 +153,10 @@ final class SystemSampler {
         var result: [ProcessRow] = []
         if let dev, !devPids.isEmpty {
             result.append(ProcessRow(id: -1, name: dev.label, cpuPerCore: devCPU, memBytes: devMem, isDevServer: true))
+        }
+        // The build always shows (like the server), even when momentarily idle.
+        if let build, !buildPids.isEmpty {
+            result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))
         }
         result.append(contentsOf: others
             .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }

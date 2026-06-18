@@ -6,8 +6,8 @@ import AppKit
 struct DashboardView: View {
     @Environment(AppState.self) private var app
     let project: Project
-    @State private var showBuildLog = false
     @State private var percentOfMachine = false
+    @State private var logTab = 0   // 0 = server, 1 = build
 
     private var session: DevSession? { app.session(for: project) }
 
@@ -19,10 +19,9 @@ struct DashboardView: View {
             Divider()
             logArea
         }
-        .sheet(isPresented: $showBuildLog) {
-            if let build = app.build(for: project) {
-                BuildLogSheet(build: build)
-            }
+        // Surface the build terminal automatically when a build starts.
+        .onChange(of: app.build(for: project)?.isRunning) { _, running in
+            if running == true { logTab = 1 }
         }
     }
 
@@ -153,26 +152,33 @@ struct DashboardView: View {
 
     @ViewBuilder private var buildControls: some View {
         if project.buildCommand != nil {
-            if let build = app.build(for: project), build.isRunning || build.result != nil {
-                Button { showBuildLog = true } label: {
-                    if build.isRunning {
-                        Label("Building…", systemImage: "hammer.fill").foregroundStyle(.orange)
-                    } else if let r = build.result {
-                        Label(r == 0 ? "Built" : "Build failed", systemImage: "hammer.fill")
+            if let build = app.build(for: project), build.isRunning {
+                // While building, the Build button becomes a red Stop that kills the build.
+                PillButton(title: "Stop build", systemImage: "stop.fill", prominent: true) {
+                    build.stop()
+                }
+                .tint(.red)
+            } else {
+                if let r = app.build(for: project)?.result {
+                    Button { logTab = 1 } label: {
+                        Label(r == 0 ? "Built" : "Build failed",
+                              systemImage: r == 0 ? "checkmark.circle.fill" : "xmark.octagon.fill")
                             .foregroundStyle(r == 0 ? .green : .red)
                     }
+                    .buttonStyle(.plain)
+                    .help("Show the build log")
                 }
-                .buttonStyle(.plain)
+                PillButton(title: "Build", systemImage: "hammer.fill", prominent: true) {
+                    app.runBuild(project)
+                }
             }
-            PillButton(title: "Build", systemImage: "hammer.fill", prominent: true) {
-                app.runBuild(project)
-            }
-            .disabled(app.build(for: project)?.isRunning ?? false)
         }
     }
 
     @ViewBuilder private var logArea: some View {
-        if let session {
+        let build = app.build(for: project)
+        let buildShown = (build?.isRunning ?? false) || (build?.result != nil)
+        if session != nil || buildShown {
             HStack {
                 Label("Activity", systemImage: "cpu")
                     .font(.headline)
@@ -194,7 +200,7 @@ struct DashboardView: View {
 
             Divider()
 
-            LogPaneView(session: session)
+            terminals(build: buildShown ? build : nil)
                 .frame(maxHeight: .infinity)
                 .padding(8)
         } else {
@@ -205,5 +211,37 @@ struct DashboardView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Server and/or build terminals — tabbed when both are present.
+    @ViewBuilder private func terminals(build: BuildRunner?) -> some View {
+        if let session, let build {
+            VStack(spacing: 6) {
+                Picker("", selection: $logTab) {
+                    Text("Server").tag(0)
+                    Text("Build").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if logTab == 1 {
+                    LogPaneView(lines: build.logLines)
+                } else {
+                    serverLog(session)
+                }
+            }
+        } else if let session {
+            serverLog(session)
+        } else if let build {
+            LogPaneView(lines: build.logLines)
+        }
+    }
+
+    private func serverLog(_ session: DevSession) -> some View {
+        LogPaneView(lines: session.logLines,
+                    inputPlaceholder: "Send input to the dev server (press Enter)…",
+                    onSubmit: { session.sendInput($0) })
     }
 }

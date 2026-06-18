@@ -28,6 +28,12 @@ final class AppState {
             let label = session.project.name + (session.effectivePort.map { " :\($0)" } ?? "")
             return (pids, label)
         }
+        systemSampler.buildInfo = { [weak self] in
+            guard let build = self?.activeBuild, build.isRunning, build.pid > 0 else { return nil }
+            let pids = Set(ProcessTree.sessionMembers(of: build.pid))
+            guard !pids.isEmpty else { return nil }
+            return (pids, "Build · \(build.project.name)")
+        }
         systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
     }
 

@@ -11,10 +11,13 @@ struct ProcessTableView: View {
                 HStack(spacing: 6) {
                     if row.isDevServer {
                         Image(systemName: "server.rack").foregroundStyle(.tint)
+                    } else if row.isBuild {
+                        Image(systemName: "hammer.fill").foregroundStyle(.orange)
                     }
                     Text(row.name)
-                        .fontWeight(row.isDevServer ? .semibold : .regular)
-                        .foregroundStyle(row.isDevServer ? Color.accentColor : .primary)
+                        .fontWeight(row.isDevServer || row.isBuild ? .semibold : .regular)
+                        .foregroundStyle(row.isDevServer ? Color.accentColor
+                                         : (row.isBuild ? Color.orange : .primary))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }

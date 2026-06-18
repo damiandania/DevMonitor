@@ -12,7 +12,7 @@ final class BuildRunner {
     private(set) var logLines: [String] = []
     private(set) var result: Int32?   // nil while running; 0 = success, else failure
 
-    private var pid: pid_t = 0
+    private(set) var pid: pid_t = 0
     private var readSource: DispatchSourceRead?
     private var exitSource: DispatchSourceProcess?
     private var consumeTask: Task<Void, Never>?
