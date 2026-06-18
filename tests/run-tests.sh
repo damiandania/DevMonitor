@@ -53,6 +53,7 @@ build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" 
 build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
   "$SRC/Model/AppSettings.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
+  "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Model/Project.swift" "$SRC/Model/SessionState.swift" "$SRC/Model/MetricsSample.swift" \
@@ -62,6 +63,7 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run advisor "$ROOT/tests/advisor/main.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"
+build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/dev-monitor/ArgParse.swift"
 
 echo "────────────────────────────────────────────────"
 [ "$fail" = 0 ] && echo "✅ ALL CHECKS PASSED" || echo "❌ SOME CHECKS FAILED"

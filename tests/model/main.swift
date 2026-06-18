@@ -33,6 +33,28 @@ chk(back.memoryAuto == false && back.packageManagerAuto == false
     && back.port == 4321 && back.memoryGB == 5,
     "model: round-trip preserves flags / port / memory")
 
+// Effective heap — the deterministic rule behind the OOM fix:
+//   auto  → framework default (NOT the stored memoryGB, which may be a stale low value)
+//   manual → the explicit memoryGB, floored at minHeapGB
+//   always capped at physical RAM.
+let nuxtAuto = Project(name: "n", path: "/tmp/n", framework: .nuxt, memoryGB: 1, memoryAuto: true)
+chk(nuxtAuto.effectiveMemoryGB(systemGB: 64) == 8,
+    "effective: auto Nuxt → 8, ignores stale memoryGB=1", "\(nuxtAuto.effectiveMemoryGB(systemGB: 64))")
+let nodeAuto = Project(name: "x", path: "/tmp/x", framework: .node, memoryAuto: true)
+chk(nodeAuto.effectiveMemoryGB(systemGB: 64) == 2, "effective: auto node → 2")
+let manual = Project(name: "m", path: "/tmp/m", framework: .nuxt, memoryGB: 6, memoryAuto: false)
+chk(manual.effectiveMemoryGB(systemGB: 64) == 6, "effective: manual respects memoryGB=6")
+let lowManual = Project(name: "l", path: "/tmp/l", framework: .node, memoryGB: 1, memoryAuto: false)
+chk(lowManual.effectiveMemoryGB(systemGB: 64) == Project.minHeapGB, "effective: manual floored at minHeapGB")
+chk(nuxtAuto.effectiveMemoryGB(systemGB: 4) == 4, "effective: capped at system RAM (4)")
+
+// Per-project log path: stable, ends in .log, unique per id.
+let lp1 = Project(name: "Foo Bar", path: "/tmp/a", framework: .node)
+let lp2 = Project(name: "Foo Bar", path: "/tmp/b", framework: .node)
+chk(lp1.logFileURL.lastPathComponent.hasSuffix(".log"), "log: ends in .log", lp1.logFileURL.lastPathComponent)
+chk(lp1.logFileURL == lp1.logFileURL, "log: stable for a project")
+chk(lp1.logFileURL != lp2.logFileURL, "log: distinct per project (different id)")
+
 // AppSettings: empty JSON → defaults; round trip preserves values.
 guard let defs = try? dec.decode(AppSettings.self, from: "{}".data(using: .utf8)!) else {
     print("FAIL model: AppSettings '{}' failed to decode"); exit(1)
