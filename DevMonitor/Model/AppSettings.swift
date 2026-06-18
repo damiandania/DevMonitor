@@ -110,21 +110,47 @@ enum BrowserList {
     }
 }
 
-/// Code editors installed on this Mac, by app name (checked in /Applications and ~/Applications).
+/// Code editors / IDEs installed on this Mac. Detected dynamically as the apps that register to
+/// open a *folder* (editors/IDEs do; Finder and a few system utilities are filtered out), plus a
+/// known-name fallback — so new editors (Cursor, Antigravity, Zed, …) appear automatically.
 enum EditorList {
+    /// Fallback names for editors that may not register folder handling.
     static let known = [
-        "Visual Studio Code", "Cursor", "VSCodium", "Windsurf", "Zed", "Sublime Text", "Nova",
-        "Fleet", "WebStorm", "IntelliJ IDEA", "PyCharm", "PhpStorm", "GoLand", "RubyMine", "CLion",
-        "Atom", "BBEdit", "TextMate", "Xcode",
+        "Visual Studio Code", "Cursor", "Antigravity", "VSCodium", "Windsurf", "Trae", "PearAI",
+        "Void", "Zed", "Sublime Text", "Nova", "Fleet", "WebStorm", "IntelliJ IDEA", "PyCharm",
+        "PhpStorm", "GoLand", "RubyMine", "CLion", "Android Studio", "Atom", "BBEdit", "TextMate",
     ]
-    static func installed() -> [String] {
-        let dirs = ["/Applications", NSHomeDirectory() + "/Applications"]
-        var found: [String] = []
-        for name in known {
-            if dirs.contains(where: { FileManager.default.fileExists(atPath: $0 + "/" + name + ".app") }) {
-                found.append(name)
-            }
+    /// Apps returned by folder-open that aren't code editors.
+    private static let exclude: Set<String> = [
+        "Finder", "Dev Monitor", "Archive Utility", "DiskImageMounter", "Installer",
+        "Script Editor", "Automator", "Quick Look", "ColorSync Utility",
+    ]
+
+    @MainActor static func installed() -> [String] {
+        let ws = NSWorkspace.shared
+        let fm = FileManager.default
+        func names(for url: URL) -> Set<String> {
+            Set(ws.urlsForApplications(toOpen: url).map {
+                fm.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "")
+            })
         }
-        return found
+        // Editors register to open BOTH a folder and source files; Books/QuickTime open folders but
+        // not code, browsers open code but not folders — so the intersection is just the editors.
+        let folderOpeners = names(for: URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true))
+        var codeOpeners: Set<String> = []
+        // (avoid ".ts" — it's also an MPEG-TS video type, which would pull in media players)
+        for ext in ["js", "tsx", "jsx", "py", "swift", "go", "rs", "php", "rb"] {
+            let f = URL(fileURLWithPath: NSTemporaryDirectory() + "dm-probe." + ext)
+            try? "x".write(to: f, atomically: true, encoding: .utf8)
+            codeOpeners.formUnion(names(for: f))
+            try? fm.removeItem(at: f)
+        }
+        var result = folderOpeners.intersection(codeOpeners).subtracting(exclude)
+        let dirs = ["/Applications", NSHomeDirectory() + "/Applications"]
+        for name in known where !result.contains(name)
+            && dirs.contains(where: { fm.fileExists(atPath: $0 + "/" + name + ".app") }) {
+            result.insert(name)
+        }
+        return result.sorted()
     }
 }

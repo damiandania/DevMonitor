@@ -57,8 +57,7 @@ private struct GeneralSettings: View {
                     ForEach(app.installedBrowsers, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
                 Picker("Editor (Code)", selection: editor) {
-                    Text(app.installedEditors.first ?? "Default").tag(String?.none)
-                    ForEach(app.installedEditors, id: \.self) { Text($0).tag(String?.some($0)) }
+                    ForEach(app.installedEditors, id: \.self) { Text($0).tag($0) }
                 }
             }
             Section("Activity bars") {
@@ -94,8 +93,9 @@ private struct GeneralSettings: View {
     private var browser: Binding<String?> {
         .init(get: { app.settings.browser }, set: { app.settings.browser = $0; app.persistSettings() })
     }
-    private var editor: Binding<String?> {
-        .init(get: { app.settings.editor }, set: { app.settings.editor = $0; app.persistSettings() })
+    private var editor: Binding<String> {
+        .init(get: { app.settings.editor ?? app.installedEditors.first ?? "" },
+              set: { app.settings.editor = $0; app.persistSettings() })
     }
     private func barBinding(_ id: String) -> Binding<Bool> {
         .init(get: { app.settings.bars.contains(id) }, set: { on in
@@ -155,56 +155,52 @@ private struct ProjectSettings: View {
 
     private var memoryRow: some View {
         let auto = Binding(get: { live.memoryAuto }, set: { app.setMemoryAuto($0, for: project.id) })
-        return LabeledContent {
-            HStack(spacing: 12) {
-                if auto.wrappedValue {
-                    Text("\(Detector.defaultMemoryGB(for: live.framework)) GB").foregroundStyle(.secondary)
-                } else {
-                    Picker("", selection: Binding(get: { live.memoryGB },
-                                                  set: { app.setMemoryGB($0, for: project.id) })) {
-                        ForEach(1...max(systemMaxGB, live.memoryGB), id: \.self) { Text("\($0) GB").tag($0) }
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                autoToggle(auto)
+        return row(icon: "memorychip", name: "Memory", auto: auto) {
+            Text("\(Detector.defaultMemoryGB(for: live.framework)) GB").foregroundStyle(.secondary)
+        } manual: {
+            Picker("", selection: Binding(get: { live.memoryGB },
+                                          set: { app.setMemoryGB($0, for: project.id) })) {
+                ForEach(1...max(systemMaxGB, live.memoryGB), id: \.self) { Text("\($0) GB").tag($0) }
             }
-        } label: { Label("Memory", systemImage: "memorychip") }
+            .labelsHidden().fixedSize()
+        }
     }
 
     private var portRow: some View {
         let auto = Binding(get: { live.port == nil },
                            set: { isAuto in app.setPort(isAuto ? nil : (live.port ?? 3000), for: project.id) })
-        return LabeledContent {
-            HStack(spacing: 12) {
-                if auto.wrappedValue {
-                    Text("auto").foregroundStyle(.secondary)
-                } else {
-                    TextField("3000", value: Binding(get: { live.port }, set: { app.setPort($0, for: project.id) }),
-                              format: .number.grouping(.never))
-                        .textFieldStyle(.roundedBorder).frame(width: 74)
-                }
-                autoToggle(auto)
-            }
-        } label: { Label("Port", systemImage: "network") }
+        return row(icon: "network", name: "Port", auto: auto) {
+            Text("auto").foregroundStyle(.secondary)
+        } manual: {
+            TextField("3000", value: Binding(get: { live.port }, set: { app.setPort($0, for: project.id) }),
+                      format: .number.grouping(.never))
+                .textFieldStyle(.roundedBorder).frame(width: 74)
+        }
     }
 
     private var packageRow: some View {
         let auto = Binding(get: { live.packageManagerAuto }, set: { app.setPackageManagerAuto($0, for: project.id) })
-        return LabeledContent {
-            HStack(spacing: 12) {
-                Picker("", selection: Binding(get: { live.packageManager },
-                                              set: { app.setPackageManager($0, for: project.id) })) {
-                    ForEach(PackageManager.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .labelsHidden().fixedSize().disabled(auto.wrappedValue)
-                autoToggle(auto)
+        return row(icon: "shippingbox", name: "Package", auto: auto) {
+            Text(live.packageManager.rawValue).foregroundStyle(.secondary)
+        } manual: {
+            Picker("", selection: Binding(get: { live.packageManager },
+                                          set: { app.setPackageManager($0, for: project.id) })) {
+                ForEach(PackageManager.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-        } label: { Label("Package", systemImage: "shippingbox") }
+            .labelsHidden().fixedSize()
+        }
     }
 
-    private func autoToggle(_ auto: Binding<Bool>) -> some View {
-        HStack(spacing: 6) {
-            Text("Auto").foregroundStyle(.secondary)
+    /// A settings row: label (left), the auto value or the manual control (right), and the Auto
+    /// switch. The switch alone carries the "auto" meaning — the word isn't repeated.
+    @ViewBuilder private func row<AutoValue: View, Manual: View>(
+        icon: String, name: String, auto: Binding<Bool>,
+        @ViewBuilder autoValue: () -> AutoValue, @ViewBuilder manual: () -> Manual
+    ) -> some View {
+        HStack(spacing: 12) {
+            Label(name, systemImage: icon)
+            Spacer(minLength: 8)
+            if auto.wrappedValue { autoValue() } else { manual() }
             Toggle("", isOn: auto).labelsHidden().toggleStyle(.switch)
         }
     }
