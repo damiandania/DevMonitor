@@ -160,37 +160,54 @@ final class SystemSampler {
         return result
     }
 
-    private static let hints: [(String, String)] = [
-        ("tailwindserver", "Tailwind CSS"), ("vscode-tailwindcss", "Tailwind CSS"),
-        ("eslintserver", "ESLint"), ("vscode-eslint", "ESLint"),
-        ("volar", "Volar (Vue)"), ("vue-language", "Volar (Vue)"),
-        ("tsserver", "TypeScript"), ("typescript-language", "TypeScript"),
-        ("jsonservermain", "JSON LS"), ("cssservermain", "CSS LS"),
-        ("html-language", "HTML LS"), ("copilot", "Copilot"),
-        ("intelephense", "Intelephense (PHP)"), ("pylance", "Pylance"), ("pyright", "Pyright"),
-        ("rust-analyzer", "rust-analyzer"), ("gopls", "gopls"),
-        ("prettier", "Prettier"), ("emmet", "Emmet"), ("graphql", "GraphQL"),
-        ("astro", "Astro LS"), ("svelte", "Svelte LS"), ("markdown", "Markdown LS"),
-        ("github-actions", "GitHub Actions"), ("docker", "Docker"), ("prisma", "Prisma"),
-    ]
-
     private static func describe(comm: String, args: String) -> String {
-        let lower = args.lowercased()
-        for (needle, name) in hints where lower.contains(needle) {
-            return "\(name) — \(comm)"
+        // VS Code / Cursor language servers run from an extension folder referenced in their argv.
+        // Read that extension's own package.json so the name comes from the extension, never a
+        // hardcoded list. Falls back to the folder name, then to the bare process name.
+        guard let dir = extensionDir(inArgs: args) else { return comm }
+        return extensionDisplayName(dir: dir) ?? extensionFolderName(dir) ?? comm
+    }
+
+    /// The `…/extensions/<publisher>.<name>-<version>` directory referenced by an argv token.
+    private static func extensionDir(inArgs args: String) -> String? {
+        for token in args.split(separator: " ") {
+            guard let ext = token.range(of: "/extensions/"),
+                  let pathStart = token.firstIndex(of: "/")           // strip any `--flag=` prefix
+            else { continue }
+            let afterFolder = token[ext.upperBound...]
+            let folderEnd = afterFolder.firstIndex(of: "/") ?? token.endIndex
+            return String(token[pathStart..<folderEnd])
         }
-        // Fallback: VS Code extension folder like ".../extensions/publisher.name-1.2.3/..."
-        if let range = lower.range(of: "/extensions/") {
-            let rest = lower[range.upperBound...]
-            if let slash = rest.firstIndex(of: "/") {
-                let folder = String(rest[..<slash])
-                if let dot = folder.firstIndex(of: ".") {
-                    let after = folder[folder.index(after: dot)...]
-                    let ext = after.split(separator: "-").first.map(String.init) ?? folder
-                    if !ext.isEmpty { return "\(ext) — \(comm)" }
-                }
+        return nil
+    }
+
+    /// `displayName` from the extension's package.json, resolving `%key%` via package.nls.json.
+    private static func extensionDisplayName(dir: String) -> String? {
+        let base = URL(fileURLWithPath: dir)
+        guard let data = try? Data(contentsOf: base.appendingPathComponent("package.json")),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        var name = (obj["displayName"] as? String) ?? (obj["name"] as? String)
+        if let n = name, n.hasPrefix("%"), n.hasSuffix("%"), n.count > 2 {
+            let key = String(n.dropFirst().dropLast())
+            if let nlsData = try? Data(contentsOf: base.appendingPathComponent("package.nls.json")),
+               let nls = try? JSONSerialization.jsonObject(with: nlsData) as? [String: Any] {
+                name = (nls[key] as? String) ?? ((nls[key] as? [String: Any])?["message"] as? String) ?? n
             }
         }
-        return comm
+        guard let result = name, !result.isEmpty else { return nil }
+        return result
+    }
+
+    /// Last-resort readable name from the folder `publisher.name-version` → `name`.
+    private static func extensionFolderName(_ dir: String) -> String? {
+        let folder = (dir as NSString).lastPathComponent
+        let afterPublisher = folder.split(separator: ".").dropFirst().joined(separator: ".")
+        let base = afterPublisher.isEmpty ? folder : afterPublisher
+        // Drop a trailing -1.2.3 version.
+        let parts = base.split(separator: "-")
+        let nameParts = parts.prefix { !($0.first?.isNumber ?? false) }
+        let name = nameParts.joined(separator: "-")
+        return name.isEmpty ? nil : name
     }
 }
