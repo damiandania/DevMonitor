@@ -62,11 +62,6 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     /// When true, the package manager / dev command follow detection instead of `packageManager`.
     var packageManagerAuto: Bool
 
-    /// Heap actually used at launch: framework default when on auto, else the manual value.
-    var effectiveMemoryGB: Int {
-        memoryAuto ? Detector.defaultMemoryGB(for: framework) : memoryGB
-    }
-
     init(
         id: UUID = UUID(),
         name: String,

@@ -21,12 +21,6 @@ guard let old = try? dec.decode(Project.self, from: oldJSON) else {
 chk(old.memoryAuto, "model: missing memoryAuto defaults to true")
 chk(old.packageManagerAuto, "model: missing packageManagerAuto defaults to true")
 chk(old.port == nil, "model: missing port = nil (auto)")
-chk(old.effectiveMemoryGB == 8, "model: auto memory follows framework default (nuxt = 8)", "\(old.effectiveMemoryGB)")
-
-var manual = old
-manual.memoryAuto = false
-manual.memoryGB = 3
-chk(manual.effectiveMemoryGB == 3, "model: manual memory uses memoryGB (3)", "\(manual.effectiveMemoryGB)")
 
 // Round trip preserves the new fields.
 let p = Project(name: "RT", path: "/tmp/y", packageManager: .pnpm, framework: .astro,

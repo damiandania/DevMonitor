@@ -67,7 +67,7 @@ final class AppState {
             framework: d.framework,
             devCommand: d.devCommand,
             buildCommand: d.buildCommand,
-            memoryGB: Detector.defaultMemoryGB(for: d.framework),
+            memoryGB: settings.defaultMemoryGB,   // new projects inherit the default-heap setting
             port: d.port
         )
         projects.append(project)
@@ -128,7 +128,7 @@ final class AppState {
         let session = DevSession(project: project)
         session.onEvent = { event in Notifier.shared.notify(event) }
         activeSession = session
-        session.start(memoryGB: project.effectiveMemoryGB)
+        session.start(memoryGB: project.memoryGB)
     }
 
     func stopActive() {
