@@ -166,6 +166,7 @@ final class AppState {
     // Diagnostics (P7): a READ-ONLY Claude report about Dev Monitor itself.
     var diagnosticReport: ClaudeRunner.Report?
     var isGeneratingReport = false
+    @ObservationIgnored private var reportTask: Task<Void, Never>?
 
     func generateReport() {
         guard !isGeneratingReport else { return }
@@ -173,17 +174,21 @@ final class AppState {
         diagnosticReport = nil
         let log = AppLog.shared.recent()
         let model = settings.analysisModel
-        Task { [weak self] in
+        reportTask = Task { [weak self] in
             let report = await ClaudeRunner.diagnose(internalLog: log, model: model)
+            if Task.isCancelled { return }
             self?.diagnosticReport = report
             self?.isGeneratingReport = false
         }
     }
 
+    func stopReport() { reportTask?.cancel(); isGeneratingReport = false }
+
     // Resource advisor (P9): Claude recommends actions on heavy processes. Managed dev processes
     // may be stopped automatically; foreign processes are only closed after explicit confirmation.
     var advice: ResourceAdvisor.Advice?
     var isAdvising = false
+    @ObservationIgnored private var adviceTask: Task<Void, Never>?
 
     func generateAdvice() {
         guard !isAdvising else { return }
@@ -196,19 +201,25 @@ final class AppState {
         }
         let cpu = s.systemCPU, mem = s.systemMemPercent, cores = s.coreCount
         let model = settings.analysisModel
-        Task { [weak self] in
+        adviceTask = Task { [weak self] in
             let a = await ResourceAdvisor.advise(systemCPU: cpu, systemMemPercent: mem,
                                                  coreCount: cores, procs: procs, model: model)
+            if Task.isCancelled { return }
             self?.advice = a
             self?.isAdvising = false
         }
     }
+
+    func stopAdvice() { adviceTask?.cancel(); isAdvising = false }
 
     func persistSettings() { settingsStore.save(settings) }
 
     // Doctor — Memory & RAM section: read-only AI analysis of how to free memory.
     var memoryReport: ClaudeRunner.Report?
     var isGeneratingMemoryReport = false
+    @ObservationIgnored private var memoryTask: Task<Void, Never>?
+
+    func stopMemoryReport() { memoryTask?.cancel(); isGeneratingMemoryReport = false }
 
     func generateMemoryReport() {
         guard !isGeneratingMemoryReport else { return }
@@ -224,10 +235,11 @@ final class AppState {
         let swapUsedGB = s.systemSwapUsed / 1_073_741_824
         let swapTotalGB = s.systemSwapTotal / 1_073_741_824
         let model = settings.analysisModel
-        Task { [weak self] in
+        memoryTask = Task { [weak self] in
             let r = await ResourceAdvisor.memoryAdvice(
                 totalMemGB: totalGB, usedPercent: usedPct,
                 swapUsedGB: swapUsedGB, swapTotalGB: swapTotalGB, procs: procs, model: model)
+            if Task.isCancelled { return }
             self?.memoryReport = r
             self?.isGeneratingMemoryReport = false
         }

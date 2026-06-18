@@ -37,10 +37,10 @@ struct RootSplitView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            AppSettingsView().environment(app)
+            AppSettingsView().environment(app).interactiveDismissDisabled()
         }
         .sheet(isPresented: $showDoctor) {
-            DoctorSheet().environment(app)
+            DoctorSheet().environment(app).interactiveDismissDisabled()
         }
     }
 }

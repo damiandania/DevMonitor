@@ -1,112 +1,83 @@
 import SwiftUI
 
-/// The single Settings modal (toolbar gear), styled like macOS System Settings: a **General**
-/// section (browser / analysis model / behavior) followed by one section per project with its
-/// server configuration.
+/// Settings modal styled like macOS System Settings: a left sidebar (General + one row per project)
+/// and a grouped-form detail pane on the right. Server config defaults to Auto.
 struct AppSettingsView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @State private var selection: Item = .general
+
+    enum Item: Hashable {
+        case general
+        case project(Project.ID)
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Label("Settings", systemImage: "gearshape").font(.headline)
-                Spacer()
-                Button("Done") { dismiss() }
-            }
-            .padding()
-            Divider()
-
-            Form {
-                Section("General") {
-                    Picker("Open servers in", selection: browser) {
-                        Text("System default").tag(String?.none)
-                        ForEach(app.installedBrowsers, id: \.self) { name in
-                            Text(name).tag(String?.some(name))
-                        }
-                    }
-                    Picker("Analysis model", selection: model) {
-                        ForEach(AppSettings.models) { m in Text(m.label).tag(m.id) }
-                    }
-                    Toggle("Auto-close orphaned dev processes under pressure", isOn: autoClose)
-                    Stepper("Default heap for new projects: \(app.settings.defaultMemoryGB) GB",
-                            value: defaultMem, in: 1...32)
-                }
-
-                ForEach(app.projects) { project in
-                    Section(project.name) {
-                        memoryRow(project)
-                        portRow(project)
-                        packageRow(project)
-                        Button(role: .destructive) { app.removeProject(project.id) } label: {
-                            Label("Remove project", systemImage: "trash")
-                        }
+        NavigationSplitView {
+            List(selection: $selection) {
+                Label("General", systemImage: "gearshape").tag(Item.general)
+                Section("Projects") {
+                    ForEach(app.projects) { p in
+                        Label { Text(p.name) } icon: { ProjectIconView(project: p, size: 16) }
+                            .tag(Item.project(p.id))
                     }
                 }
             }
-            .formStyle(.grouped)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+        } detail: {
+            detail
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                }
         }
-        .frame(minWidth: 560, minHeight: 600)
+        .frame(minWidth: 740, minHeight: 540)
     }
 
-    // MARK: per-project server config rows (label left, control + Auto switch right)
-
-    private func memoryRow(_ p: Project) -> some View {
-        let auto = Binding(get: { p.memoryAuto }, set: { app.setMemoryAuto($0, for: p.id) })
-        return LabeledContent {
-            HStack(spacing: 10) {
-                if auto.wrappedValue {
-                    Text("\(Detector.defaultMemoryGB(for: p.framework)) GB").foregroundStyle(.secondary)
-                } else {
-                    Slider(value: Binding(get: { Double(p.memoryGB) },
-                                          set: { app.setMemoryGB(Int($0), for: p.id) }),
-                           in: 1...16, step: 1).frame(width: 120)
-                    Text("\(p.memoryGB) GB").monospacedDigit().frame(width: 46, alignment: .trailing)
-                }
-                autoToggle(auto)
+    @ViewBuilder private var detail: some View {
+        switch selection {
+        case .general:
+            GeneralSettings()
+        case .project(let id):
+            if let p = app.projects.first(where: { $0.id == id }) {
+                ProjectSettings(project: p) { selection = .general }
+            } else {
+                ContentUnavailableView("Project removed", systemImage: "folder.badge.minus")
             }
-        } label: { Label("Memory", systemImage: "memorychip") }
-    }
-
-    private func portRow(_ p: Project) -> some View {
-        let auto = Binding(get: { p.port == nil },
-                           set: { isAuto in app.setPort(isAuto ? nil : (p.port ?? 3000), for: p.id) })
-        return LabeledContent {
-            HStack(spacing: 10) {
-                if auto.wrappedValue {
-                    Text("auto").foregroundStyle(.secondary)
-                } else {
-                    TextField("3000", value: Binding(get: { p.port }, set: { app.setPort($0, for: p.id) }),
-                              format: .number.grouping(.never))
-                        .textFieldStyle(.roundedBorder).frame(width: 70)
-                }
-                autoToggle(auto)
-            }
-        } label: { Label("Port", systemImage: "network") }
-    }
-
-    private func packageRow(_ p: Project) -> some View {
-        let auto = Binding(get: { p.packageManagerAuto }, set: { app.setPackageManagerAuto($0, for: p.id) })
-        return LabeledContent {
-            HStack(spacing: 10) {
-                Picker("", selection: Binding(get: { p.packageManager },
-                                              set: { app.setPackageManager($0, for: p.id) })) {
-                    ForEach(PackageManager.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .labelsHidden().fixedSize().disabled(auto.wrappedValue)
-                autoToggle(auto)
-            }
-        } label: { Label("Package", systemImage: "shippingbox") }
-    }
-
-    private func autoToggle(_ auto: Binding<Bool>) -> some View {
-        HStack(spacing: 5) {
-            Text("Auto").font(.caption).foregroundStyle(.secondary)
-            Toggle("", isOn: auto).labelsHidden().toggleStyle(.switch).controlSize(.mini)
         }
     }
+}
 
-    // MARK: general bindings that persist on change
+// MARK: - General
+
+private struct GeneralSettings: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        Form {
+            Section("Browser") {
+                Picker("Open servers in", selection: browser) {
+                    Text("System default").tag(String?.none)
+                    ForEach(app.installedBrowsers, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+            }
+            Section("AI analysis") {
+                Picker("Model", selection: model) {
+                    ForEach(AppSettings.models) { Text($0.label).tag($0.id) }
+                }
+                LabeledContent("Used for") {
+                    Text("Doctor: heavy processes, Dev Monitor diagnosis, memory.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("Behavior") {
+                Toggle("Auto-close orphaned dev processes under pressure", isOn: autoClose)
+                Stepper("Default heap for new projects: \(app.settings.defaultMemoryGB) GB",
+                        value: defaultMem, in: 1...32)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("General")
+    }
 
     private var browser: Binding<String?> {
         .init(get: { app.settings.browser }, set: { app.settings.browser = $0; app.persistSettings() })
@@ -119,5 +90,93 @@ struct AppSettingsView: View {
     }
     private var defaultMem: Binding<Int> {
         .init(get: { app.settings.defaultMemoryGB }, set: { app.settings.defaultMemoryGB = $0; app.persistSettings() })
+    }
+}
+
+// MARK: - Per-project
+
+private struct ProjectSettings: View {
+    @Environment(AppState.self) private var app
+    let project: Project
+    let onRemoved: () -> Void
+
+    private var live: Project { app.projects.first { $0.id == project.id } ?? project }
+
+    var body: some View {
+        Form {
+            Section("Server") {
+                memoryRow
+                portRow
+                packageRow
+            }
+            Section {
+                LabeledContent("Folder") {
+                    Text(live.path).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
+                Button(role: .destructive) {
+                    app.removeProject(project.id); onRemoved()
+                } label: {
+                    Label("Remove project", systemImage: "trash")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(project.name)
+    }
+
+    private var memoryRow: some View {
+        let auto = Binding(get: { live.memoryAuto }, set: { app.setMemoryAuto($0, for: project.id) })
+        return LabeledContent {
+            HStack(spacing: 12) {
+                if auto.wrappedValue {
+                    Text("\(Detector.defaultMemoryGB(for: live.framework)) GB").foregroundStyle(.secondary)
+                } else {
+                    Slider(value: Binding(get: { Double(live.memoryGB) },
+                                          set: { app.setMemoryGB(Int($0), for: project.id) }),
+                           in: 1...16, step: 1).frame(width: 130)
+                    Text("\(live.memoryGB) GB").monospacedDigit().frame(width: 50, alignment: .trailing)
+                }
+                autoToggle(auto)
+            }
+        } label: { Label("Memory", systemImage: "memorychip") }
+    }
+
+    private var portRow: some View {
+        let auto = Binding(get: { live.port == nil },
+                           set: { isAuto in app.setPort(isAuto ? nil : (live.port ?? 3000), for: project.id) })
+        return LabeledContent {
+            HStack(spacing: 12) {
+                if auto.wrappedValue {
+                    Text("auto").foregroundStyle(.secondary)
+                } else {
+                    TextField("3000", value: Binding(get: { live.port }, set: { app.setPort($0, for: project.id) }),
+                              format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder).frame(width: 74)
+                }
+                autoToggle(auto)
+            }
+        } label: { Label("Port", systemImage: "network") }
+    }
+
+    private var packageRow: some View {
+        let auto = Binding(get: { live.packageManagerAuto }, set: { app.setPackageManagerAuto($0, for: project.id) })
+        return LabeledContent {
+            HStack(spacing: 12) {
+                Picker("", selection: Binding(get: { live.packageManager },
+                                              set: { app.setPackageManager($0, for: project.id) })) {
+                    ForEach(PackageManager.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().fixedSize().disabled(auto.wrappedValue)
+                autoToggle(auto)
+            }
+        } label: { Label("Package", systemImage: "shippingbox") }
+    }
+
+    private func autoToggle(_ auto: Binding<Bool>) -> some View {
+        HStack(spacing: 6) {
+            Text("Auto").foregroundStyle(.secondary)
+            Toggle("", isOn: auto).labelsHidden().toggleStyle(.switch)
+        }
     }
 }
