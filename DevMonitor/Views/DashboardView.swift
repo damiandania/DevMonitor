@@ -87,13 +87,13 @@ struct DashboardView: View {
             }
 
             if let port = session?.effectivePort {
-                PillButton(title: "Open", assetImage: "chrome") {
+                PillButton(title: "Open", systemImage: "globe") {
                     openInBrowser(port: port)
                 }
                 .help("Open http://localhost:\(port) in Chrome")
             }
 
-            PillButton(title: "Code", assetImage: "vscode") {
+            PillButton(title: "Code", systemImage: "chevron.left.forwardslash.chevron.right") {
                 openInVSCode()
             }
             .help("Open the project in VS Code")
