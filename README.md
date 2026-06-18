@@ -91,6 +91,22 @@ open "build/Build/Products/Debug/Dev Monitor.app"
 
 Add a project from the sidebar, hit **Launch**, and the server comes up supervised with live graphs. To drive it from a terminal instead, see the [CLI](#command-line-interface).
 
+### Download a release (no build needed)
+
+Grab the latest build from [GitHub Releases](https://github.com/damiandania/DevMonitor/releases):
+
+1. Download **`Dev Monitor-<version>.dmg`**, open it, and drag **Dev Monitor** into **Applications**.
+2. The app is **unsigned** (no Apple Developer ID yet), so Gatekeeper blocks the first launch. Either **right-click the app → Open → Open**, or clear the quarantine flag once:
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Dev Monitor.app"
+   ```
+3. Install the CLI from **`dev-monitor-<version>.zip`**:
+   ```bash
+   unzip dev-monitor-<version>.zip && mkdir -p ~/.local/bin && cp dev-monitor ~/.local/bin/ && chmod +x ~/.local/bin/dev-monitor
+   ```
+
+**Requires macOS 26 or later** (the UI uses SwiftUI / Liquid Glass). The CLI auto-starts the app when the hub isn't already running.
+
 ### Install a release build
 
 A Release build installs the app to `/Applications` and the `dev-monitor` CLI to `~/.local/bin`:

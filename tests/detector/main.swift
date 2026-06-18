@@ -7,11 +7,16 @@ func check(_ label: String, _ cond: Bool, _ detail: String) {
     if !cond { failures += 1 }
 }
 
-// MiddleSpace: npm + Nuxt
-let ms = Detector.detect(path: "/Users/damiandania/Metasense/MiddleSpace")
-check("MiddleSpace",
-      ms.packageManager == .npm && ms.framework == .nuxt && ms.devCommand == "npm run dev",
-      "pm=\(ms.packageManager) fw=\(ms.framework) dev=\(ms.devCommand) build=\(ms.buildCommand ?? "nil")")
+// MiddleSpace: npm + Nuxt (only assert if the folder exists — portable to CI / other machines).
+let msPath = "/Users/damiandania/Metasense/MiddleSpace"
+if FileManager.default.fileExists(atPath: msPath + "/package.json") {
+    let ms = Detector.detect(path: msPath)
+    check("MiddleSpace",
+          ms.packageManager == .npm && ms.framework == .nuxt && ms.devCommand == "npm run dev",
+          "pm=\(ms.packageManager) fw=\(ms.framework) dev=\(ms.devCommand) build=\(ms.buildCommand ?? "nil")")
+} else {
+    print("SKIP MiddleSpace — no package.json")
+}
 
 // A few ~/dev projects (best-effort; only assert if folder exists).
 let cases: [(String, PackageManager?, Framework?)] = [

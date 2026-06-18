@@ -4,6 +4,7 @@
 # Build output
 build/
 DerivedData/
+dist/
 
 # macOS
 .DS_Store
