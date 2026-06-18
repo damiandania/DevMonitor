@@ -379,7 +379,9 @@ final class DevSession {
     }
 
     private static func probe(port: Int, timeout: TimeInterval) async -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return false }
+        // Use "localhost" (not 127.0.0.1): many dev servers bind IPv6 [::1] only, so an IPv4-only
+        // probe gets "connection refused" and the server appears stuck in "Launching" forever.
+        guard let url = URL(string: "http://localhost:\(port)/") else { return false }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
         req.httpMethod = "GET"

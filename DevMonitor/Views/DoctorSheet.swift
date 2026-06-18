@@ -37,22 +37,20 @@ struct DoctorSheet: View {
             .navigationSplitViewColumnWidth(min: 210, ideal: 230)
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            detail
-                .navigationTitle(section.title)
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button { busy ? stop() : start() } label: {
-                            Image(systemName: busy ? "stop.fill"
-                                  : (hasResult ? "arrow.clockwise" : "play.fill"))
-                                .font(.system(size: 14, weight: .bold))
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
-                        .tint(busy ? .red : .accentColor)
-                        .help(busy ? "Stop analysis" : (hasResult ? "Re-analyze" : "Analyze"))
-                    }
+            detail.navigationTitle(section.title)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { busy ? stop() : start() } label: {
+                    Image(systemName: busy ? "stop.fill" : (hasResult ? "arrow.clockwise" : "play.fill"))
+                        .font(.system(size: 14, weight: .bold))
+                        .frame(width: 30, height: 30)
                 }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .tint(busy ? .red : .accentColor)
+                .help(busy ? "Stop analysis" : (hasResult ? "Re-analyze" : "Analyze"))
+            }
         }
         .frame(minWidth: 820, minHeight: 580)
     }

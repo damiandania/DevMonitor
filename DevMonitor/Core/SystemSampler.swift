@@ -230,6 +230,8 @@ final class SystemSampler {
 
     private static func isGeneric(_ name: String) -> Bool {
         name.contains("Helper") || name == "node" || name == "Electron"
+            || (name.first?.isNumber ?? false)                       // version-like ("2.1.179")
+            || name.allSatisfy { $0.isNumber || $0 == "." || $0 == "-" }
     }
 
     private func enrichedName(pid: Int32, comm: String) -> String {
@@ -245,9 +247,23 @@ final class SystemSampler {
     private static func describe(comm: String, args: String) -> String {
         // VS Code / Cursor language servers run from an extension folder referenced in their argv.
         // Read that extension's own package.json so the name comes from the extension, never a
-        // hardcoded list. Falls back to the folder name, then to the bare process name.
-        guard let dir = extensionDir(inArgs: args) else { return comm }
-        return extensionDisplayName(dir: dir) ?? extensionFolderName(dir) ?? comm
+        // hardcoded list. Falls back to the folder name, then the .app bundle, then the bare name.
+        if let dir = extensionDir(inArgs: args),
+           let name = extensionDisplayName(dir: dir) ?? extensionFolderName(dir) {
+            return name
+        }
+        // Otherwise identify the owning app from the bundle path in argv
+        // (e.g. ".../Claude.app/Contents/Helpers/.../2.1.179" → "Claude").
+        return appBundleName(inArgs: args) ?? comm
+    }
+
+    /// The `<Name>` of the first `…/<Name>.app/…` bundle referenced in argv.
+    private static func appBundleName(inArgs args: String) -> String? {
+        guard let r = args.range(of: ".app/") else { return nil }
+        let before = args[..<r.lowerBound]
+        guard let slash = before.lastIndex(of: "/") else { return nil }
+        let name = String(before[before.index(after: slash)...])
+        return name.isEmpty ? nil : name
     }
 
     /// The `…/extensions/<publisher>.<name>-<version>` directory referenced by an argv token.
