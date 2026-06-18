@@ -185,8 +185,9 @@ enum ResourceAdvisor {
         let top = procs.sorted { $0.memMB > $1.memMB }.prefix(12)
         if top.isEmpty { lines.append("  (none notable)") }
         for p in top {
+            let pidStr = p.pid >= 0 ? "pid \(p.pid)" : "tree"
             let tag = p.managedDev ? "  [dev server — managed]" : ""
-            lines.append(String(format: "  %@  %.0f MB%@", p.name, p.memMB, tag))
+            lines.append(String(format: "  %@  %@  %.0f MB%@", pidStr, p.name, p.memMB, tag))
         }
         return lines.joined(separator: "\n")
     }
