@@ -110,8 +110,25 @@ enum ResourceAdvisor {
         "Dev Monitor", "Visual Studio Code", "Cursor", "Terminal", "iTerm",
     ]
 
-    private static func isProtected(_ name: String) -> Bool {
+    static func isProtected(_ name: String) -> Bool {
         protectedNames.contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// Argv fragments that unambiguously identify a JS/TS dev server (its actual binary), used to
+    /// detect *orphaned* dev processes (a dev server not in Dev Monitor's managed tree) for safe
+    /// automatic closing. Kept specific (the binary path / `<fw> dev`) to avoid false positives
+    /// like editor language servers that merely mention a framework.
+    static let orphanDevPatterns = [
+        "nuxt dev", "/.bin/nuxt", "nuxt/bin/nuxt",
+        "next dev", "/.bin/next", "next/dist/bin/next",
+        "vite/bin/vite", "/.bin/vite",
+        "astro dev", "/.bin/astro",
+        "ng serve", "webpack-dev-server", "remix vite:dev",
+    ]
+
+    static func looksLikeDevServer(argv: String) -> Bool {
+        let a = argv.lowercased()
+        return orphanDevPatterns.contains { a.contains($0) }
     }
 
     /// Fast (Haiku) evaluation during a stall: which processes are safe to kill right now.

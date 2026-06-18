@@ -219,11 +219,31 @@ final class AppState {
         guard !isEvaluatingPressure else { return }
         isEvaluatingPressure = true
         let s = systemSampler
-        let procs: [ResourceAdvisor.Proc] = s.processes.map {
-            .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
-                  memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer)
+
+        // 1) Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't in
+        //    our managed tree (managed/build trees are aggregated out of `processes`). Editor helpers
+        //    and protected processes are excluded. Then notify what was closed.
+        let orphans = s.processes.filter { row in
+            row.id > 0
+                && !row.name.localizedCaseInsensitiveContains("Helper")
+                && !ResourceAdvisor.isProtected(row.name)
+                && ResourceAdvisor.looksLikeDevServer(argv: Self.argv(of: row.id))
         }
-        // Show heuristic candidates instantly; refine with Haiku when it returns.
+        if !orphans.isEmpty {
+            orphans.forEach { Self.killPid($0.id) }
+            let names = orphans.map(\.name).joined(separator: ", ")
+            Notifier.shared.notify(
+                title: "Closed orphaned dev process\(orphans.count > 1 ? "es" : "")",
+                body: "Auto-closed \(orphans.count) to relieve pressure: \(names)")
+            AppLog.shared.event("Pressure: auto-closed \(orphans.count) orphan(s): \(names)")
+        }
+        let orphanIDs = Set(orphans.map(\.id))
+
+        // 2) Suggest the rest (heuristic instantly, refined by Haiku) for the manual skull button.
+        let procs: [ResourceAdvisor.Proc] = s.processes
+            .filter { !orphanIDs.contains($0.id) }
+            .map { .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
+                         memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer) }
         killSuggestions = ResourceAdvisor.heuristicKills(procs: procs)
         let cpu = s.systemCPU, mem = s.systemMemPercent, swap = s.systemSwapPercent, cores = s.coreCount
         Task { [weak self] in
@@ -235,18 +255,30 @@ final class AppState {
         }
     }
 
+    /// argv of a pid (joined), via KERN_PROCARGS2 — used for orphan dev-server detection.
+    static func argv(of pid: Int32) -> String {
+        var buf = [CChar](repeating: 0, count: 8192)
+        let n = Int(dm_proc_args(pid, &buf, 8192))
+        return n > 0 ? String(cString: buf) : ""
+    }
+
+    /// SIGTERM a pid, escalating to SIGKILL if it's still alive shortly after.
+    static func killPid(_ pid: Int32) {
+        guard pid > 0 else { return }
+        kill(pid, SIGTERM)
+        Task.detached {
+            try? await Task.sleep(for: .seconds(2))
+            if kill(pid, 0) == 0 { kill(pid, SIGKILL) }   // signal 0 = "are you still there?"
+        }
+    }
+
     /// Kill a suggested process (red-skull button). The dev-server tree is stopped via the
     /// supervisor; a foreign process gets SIGTERM, escalating to SIGKILL if still alive.
     func killSuggestion(_ rec: ResourceAdvisor.Recommendation) {
         if rec.action == .stopDevServer || rec.id == -1 {
             stopActive()
         } else if rec.id > 0 {
-            let pid = rec.id
-            kill(pid, SIGTERM)
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                if kill(pid, 0) == 0 { kill(pid, SIGKILL) }   // signal 0 = "are you still there?"
-            }
+            Self.killPid(rec.id)
         }
         killSuggestions.removeAll { $0.id == rec.id }
     }

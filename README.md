@@ -22,7 +22,7 @@ central IPC hub other terminals route through, and Claude-generated self-error r
 | P7 — Claude reports | ✅ | Read-only "Diagnose" report about Dev Monitor itself |
 | P8 — Polish & dist | ✅ | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (signing: ad-hoc¹) |
 | P9 — Resource advisor | ✅ | Claude-recommended actions on heavy processes; auto-stop managed dev, **confirm before closing foreign** |
-| P9b — Pressure auto-kill | ✅ | Detects a stuck machine (sustained CPU, or memory full + swapping) → fast **Haiku** eval of which orphan/heavy processes to kill, surfaced in the sidebar with a red **skull** button |
+| P9b — Pressure auto-kill | ✅ | Detects a stuck machine (sustained CPU, or memory full + swapping) → **auto-closes orphaned dev processes** (+notify); other heavy processes are surfaced with a fast **Haiku** eval and a red **skull** button (manual) |
 
 ¹ Signed ad-hoc (`CODE_SIGN_IDENTITY = -`): no Apple Developer ID identity is installed on this
 machine. Local notifications and the menu-bar item work; for distribution outside this Mac, sign
@@ -48,10 +48,16 @@ with a Developer ID and notarize.
   **pill tabs** (Server / Build, each closable with an ✕) and auto-switches to Build on start, and the
   Build button turns into a red **Stop build** while running.
 - **Pressure auto-kill**: when the machine is detected as *stuck* (CPU pinned, or memory full and
-  swapping, for a sustained window), the sidebar surfaces a panel — a fast **Haiku** evaluation of
-  which orphan/heavy processes are safe to kill — each with a red **skull** button (SIGTERM →
-  SIGKILL). Critical processes (the editor, WindowServer, Finder, daemons, Dev Monitor itself) are
-  never suggested. A heuristic list shows instantly while Haiku refines it.
+  swapping, for a sustained window):
+  - **Orphaned dev processes auto-close.** A dev server (detected by its actual binary in argv —
+    `…/.bin/nuxt`, `vite/bin/vite`, `next dev`, …) that isn't in Dev Monitor's managed tree is killed
+    automatically (SIGTERM → SIGKILL) and a **notification** lists what was closed. The managed dev
+    server (and the editor/system) are excluded.
+  - **Everything else stays a suggestion.** The sidebar surfaces a panel — a fast **Haiku**
+    evaluation of which other heavy processes are worth killing — each with a red **skull** button
+    (foreign processes are only closed when *you* press it). A heuristic list shows instantly while
+    Haiku refines it. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself)
+    are never suggested or auto-closed.
 - **Menu-bar item** (`MenuBarExtra`): active-server status, live uptime, Launch/Stop/Restart, and a
   system CPU/memory snapshot without opening the main window.
 - **Central hub + CLI**: run servers from any terminal through the app with `dev-monitor run`
@@ -148,8 +154,9 @@ no Xcode host, no GUI):
 - **sampler** — `SystemSampler.aggregate` (dev/build identified rows + impact filter) and
   `evaluatePressure` (the stuck-machine state machine: sustain, hysteresis, reasons).
 - **session** — `DevSession` launch → port parse → HTTP-ready → stop, recycle, build success/failure.
-- **advisor** — `ResourceAdvisor` snapshot rendering, tolerant JSON parsing of Claude's reply, and
-  the heuristic kill list (protected-process exclusion, impact ranking).
+- **advisor** — `ResourceAdvisor` snapshot rendering, tolerant JSON parsing of Claude's reply, the
+  heuristic kill list (protected-process exclusion, impact ranking), and orphan dev-server detection
+  (`looksLikeDevServer`: matches real `nuxt/vite/next` servers, rejects editor servers / Chrome).
 
 When you add a feature, prefer extracting its decision logic into a pure (ideally `nonisolated
 static`) function so it can be unit-tested here, and add or extend a suite. The Claude integrations

@@ -76,5 +76,18 @@ check(kills.count <= 4, "heuristic: caps at 4")
 check(kills.first?.id == 12, "heuristic: heaviest first (Chrome)")
 check(kills.allSatisfy { $0.action == .closeProcess }, "heuristic: all close_process")
 
+// --- looksLikeDevServer: orphan dev-server detection (for auto-close) ---
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/nuxt dev"),
+      "orphan: matches a real nuxt dev server")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/vite/bin/vite.js"),
+      "orphan: matches a vite dev server")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/.bin/next dev -p 3001"),
+      "orphan: matches a next dev server")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Plugin).app … extensions/vue.volar/server.js"),
+      "orphan: does NOT match an editor language server")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "/Applications/Google Chrome.app/… Google Chrome Helper --type=renderer"),
+      "orphan: does NOT match a Chrome renderer")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "yes"), "orphan: does NOT match a bare command")
+
 print(fail == 0 ? "ALL ADVISOR TESTS PASSED" : "SOME ADVISOR TESTS FAILED")
 exit(Int32(fail))
