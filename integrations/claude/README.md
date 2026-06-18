@@ -22,8 +22,12 @@ agent env vars), Nuxt's dev-lock never fires for app-spawned servers.
 
 | Raw command (blocked) | Use instead |
 |---|---|
-| `npm/pnpm/yarn/bun run dev`, `nuxt/next/astro/vinxi dev`, `vite`, `ng serve`, `webpack serve`, … | `dev-monitor run "<dir>"` |
+| `npm/pnpm/yarn/bun run dev`, `nuxt/next/astro/vinxi dev`, `vite`, `ng serve`, `webpack serve`, … | `dev-monitor up "<dir>" --wait` (blocks until ready, prints the URL) |
 | `npm/pnpm/yarn/bun run build`, `nuxt/next/astro/vite build`, … | `dev-monitor build "<dir>"` |
+
+The block message also points to `dev-monitor status --json` (per-project `ready`/`url`/`pid`/
+`exitCode`/`lastError`) and `dev-monitor --help` for the full surface, so an agent can operate and
+self-diagnose without curling the port or reading internal files.
 
 It deliberately does **not** touch `xcodebuild`, `go build`, `cargo build`, `docker build`,
 `make`, `npm install`, `npm test`, `npm run dev:<variant>`, or any command that already calls

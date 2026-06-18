@@ -20,8 +20,9 @@ DEV_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?dev([^[:alnum:]_:
 BUILD_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?build([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|ng|vite|vinxi)[[:space:]]+build([^[:alnum:]_-]|$)"
 if printf '%s' "$cmd" | grep -qE "$DEV_RE"; then
   echo "BLOCKED — dev servers on this machine run through DevMonitor (one supervised server per project)." >&2
-  echo "Do not start a dev server directly. Instead run:  dev-monitor run '$cwd'" >&2
-  echo "See what is already running with: dev-monitor status   (bypass once with DM_RAW=1)" >&2
+  echo "Do not start a dev server directly. Instead run:  dev-monitor up '$cwd' --wait   (blocks until ready, prints the URL)" >&2
+  echo "Inspect with: dev-monitor status --json   (ready/url/pid/exitCode/lastError per project)" >&2
+  echo "Full surface: dev-monitor --help          (bypass this hook once with DM_RAW=1)" >&2
   exit 2
 fi
 if printf '%s' "$cmd" | grep -qE "$BUILD_RE"; then
