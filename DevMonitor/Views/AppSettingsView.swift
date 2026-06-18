@@ -27,7 +27,7 @@ struct AppSettingsView: View {
         } detail: {
             detail
                 .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .primaryAction) { Button("Done") { dismiss() } }
                 }
         }
         .frame(minWidth: 740, minHeight: 540)
@@ -71,13 +71,19 @@ private struct GeneralSettings: View {
             }
             Section("Behavior") {
                 Toggle("Auto-close orphaned dev processes under pressure", isOn: autoClose)
-                Stepper("Default heap for new projects: \(app.settings.defaultMemoryGB) GB",
-                        value: defaultMem, in: 1...32)
+                Picker("Default heap for new projects", selection: defaultMem) {
+                    ForEach(1...max(systemMaxGB, app.settings.defaultMemoryGB), id: \.self) {
+                        Text("\($0) GB").tag($0)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("General")
     }
+
+    /// Heap options cap at the machine's physical RAM.
+    private var systemMaxGB: Int { max(1, Int((app.systemSampler.totalMem / 1_073_741_824).rounded())) }
 
     private var browser: Binding<String?> {
         .init(get: { app.settings.browser }, set: { app.settings.browser = $0; app.persistSettings() })
@@ -125,6 +131,9 @@ private struct ProjectSettings: View {
         .navigationTitle(project.name)
     }
 
+    /// Heap options cap at the machine's physical RAM (always include the current value).
+    private var systemMaxGB: Int { max(1, Int((app.systemSampler.totalMem / 1_073_741_824).rounded())) }
+
     private var memoryRow: some View {
         let auto = Binding(get: { live.memoryAuto }, set: { app.setMemoryAuto($0, for: project.id) })
         return LabeledContent {
@@ -132,10 +141,11 @@ private struct ProjectSettings: View {
                 if auto.wrappedValue {
                     Text("\(Detector.defaultMemoryGB(for: live.framework)) GB").foregroundStyle(.secondary)
                 } else {
-                    Slider(value: Binding(get: { Double(live.memoryGB) },
-                                          set: { app.setMemoryGB(Int($0), for: project.id) }),
-                           in: 1...16, step: 1).frame(width: 130)
-                    Text("\(live.memoryGB) GB").monospacedDigit().frame(width: 50, alignment: .trailing)
+                    Picker("", selection: Binding(get: { live.memoryGB },
+                                                  set: { app.setMemoryGB($0, for: project.id) })) {
+                        ForEach(1...max(systemMaxGB, live.memoryGB), id: \.self) { Text("\($0) GB").tag($0) }
+                    }
+                    .labelsHidden().fixedSize()
                 }
                 autoToggle(auto)
             }
