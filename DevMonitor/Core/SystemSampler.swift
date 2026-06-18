@@ -20,6 +20,9 @@ final class SystemSampler {
     private(set) var systemCPU: Double = 0        // 0…100
     private(set) var systemMemUsed: Double = 0    // bytes
     var systemMemPercent: Double { totalMem > 0 ? systemMemUsed / totalMem * 100 : 0 }
+    private(set) var systemSwapUsed: Double = 0   // bytes
+    private(set) var systemSwapTotal: Double = 0  // bytes
+    var systemSwapPercent: Double { systemSwapTotal > 0 ? systemSwapUsed / systemSwapTotal * 100 : 0 }
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
@@ -62,6 +65,11 @@ final class SystemSampler {
         var sysMem = dm_mem_info()
         _ = dm_system_mem(&sysMem)
         systemMemUsed = Double(sysMem.used)
+        var sysSwap = dm_mem_info()
+        if dm_system_swap(&sysSwap) == 0 {
+            systemSwapUsed = Double(sysSwap.used)
+            systemSwapTotal = Double(sysSwap.total)
+        }
 
         let now = DispatchTime.now().uptimeNanoseconds
         var pids = [pid_t](repeating: 0, count: 8192)

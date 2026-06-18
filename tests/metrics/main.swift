@@ -25,6 +25,11 @@ var m = dm_mem_info(); _ = dm_system_mem(&m)
 chk("system mem sane", m.used > 0 && m.used < m.total && m.total > 1_000_000_000,
     "used=\(m.used / 1_048_576)MB / total=\(m.total / 1_048_576)MB")
 
+// 3b) swap usage (total can be 0 if swap is disabled; used must never exceed total)
+var sw = dm_mem_info(); let swrc = dm_system_swap(&sw)
+chk("swap read ok", swrc == 0 && sw.used <= sw.total,
+    "used=\(sw.used / 1_048_576)MB / total=\(sw.total / 1_048_576)MB")
+
 // 4) load average
 let la = dm_load_avg()
 chk("load avg > 0", la > 0, "\(la)")

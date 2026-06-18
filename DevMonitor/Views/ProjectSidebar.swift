@@ -8,29 +8,36 @@ struct ProjectSidebar: View {
     var body: some View {
         @Bindable var app = app
 
-        List(selection: $app.selectedProjectID) {
-            Section("Projects") {
-                ForEach(app.projects) { project in
-                    HStack(spacing: 8) {
-                        ProjectIconView(project: project, size: 16)
-                        Text(project.name)
-                    }
-                    .tag(project.id)
-                    .contextMenu {
-                        Button("Remove", role: .destructive) {
-                            app.removeProject(project.id)
+        VStack(spacing: 0) {
+            List(selection: $app.selectedProjectID) {
+                Section("Projects") {
+                    ForEach(app.projects) { project in
+                        HStack(spacing: 8) {
+                            ProjectIconView(project: project, size: 16)
+                            Text(project.name)
+                        }
+                        .tag(project.id)
+                        .contextMenu {
+                            Button("Remove", role: .destructive) {
+                                app.removeProject(project.id)
+                            }
                         }
                     }
                 }
             }
-        }
-        .overlay {
-            if app.projects.isEmpty {
-                ContentUnavailableView(
-                    "No Projects",
-                    systemImage: "folder.badge.plus",
-                    description: Text("Click + to add a project folder.")
-                )
+            .overlay {
+                if app.projects.isEmpty {
+                    ContentUnavailableView(
+                        "No Projects",
+                        systemImage: "folder.badge.plus",
+                        description: Text("Click + to add a project folder.")
+                    )
+                }
+            }
+
+            if let project = app.selectedProject {
+                Divider()
+                ServerConfigView(project: project)
             }
         }
         .toolbar {

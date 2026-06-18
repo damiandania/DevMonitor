@@ -52,10 +52,19 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     var devCommand: String?
     /// Optional override for the build command; `nil` = auto-derived.
     var buildCommand: String?
-    /// Heap size in GB injected as `--max-old-space-size`.
+    /// Heap size in GB injected as `--max-old-space-size` (used when `memoryAuto` is false).
     var memoryGB: Int
-    /// Optional port override; `nil` = parse from stdout, fallback 3000.
+    /// When true, the heap follows the framework default instead of `memoryGB`.
+    var memoryAuto: Bool
+    /// Optional port override; `nil` = parse from stdout, fallback 3000 (i.e. "auto").
     var port: Int?
+    /// When true, the package manager / dev command follow detection instead of `packageManager`.
+    var packageManagerAuto: Bool
+
+    /// Heap actually used at launch: framework default when on auto, else the manual value.
+    var effectiveMemoryGB: Int {
+        memoryAuto ? Detector.defaultMemoryGB(for: framework) : memoryGB
+    }
 
     init(
         id: UUID = UUID(),
@@ -66,7 +75,9 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         devCommand: String? = nil,
         buildCommand: String? = nil,
         memoryGB: Int = 4,
-        port: Int? = nil
+        memoryAuto: Bool = true,
+        port: Int? = nil,
+        packageManagerAuto: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -76,6 +87,29 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.devCommand = devCommand
         self.buildCommand = buildCommand
         self.memoryGB = memoryGB
+        self.memoryAuto = memoryAuto
         self.port = port
+        self.packageManagerAuto = packageManagerAuto
+    }
+
+    // Custom decoding so projects.json written before the auto flags still loads (defaults to auto).
+    enum CodingKeys: String, CodingKey {
+        case id, name, path, packageManager, framework, devCommand, buildCommand
+        case memoryGB, memoryAuto, port, packageManagerAuto
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        path = try c.decode(String.self, forKey: .path)
+        packageManager = try c.decode(PackageManager.self, forKey: .packageManager)
+        framework = try c.decode(Framework.self, forKey: .framework)
+        devCommand = try c.decodeIfPresent(String.self, forKey: .devCommand)
+        buildCommand = try c.decodeIfPresent(String.self, forKey: .buildCommand)
+        memoryGB = try c.decode(Int.self, forKey: .memoryGB)
+        memoryAuto = try c.decodeIfPresent(Bool.self, forKey: .memoryAuto) ?? true
+        port = try c.decodeIfPresent(Int.self, forKey: .port)
+        packageManagerAuto = try c.decodeIfPresent(Bool.self, forKey: .packageManagerAuto) ?? true
     }
 }

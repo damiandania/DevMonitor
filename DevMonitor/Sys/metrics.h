@@ -35,6 +35,9 @@ typedef struct {
 /// Fills `out` with used/total memory. Returns 0 on success, -1 on failure.
 int dm_system_mem(dm_mem_info *out);
 
+/// Fills `out` with swap used/total (bytes), from `vm.swapusage`. Returns 0 on success, -1 on failure.
+int dm_system_swap(dm_mem_info *out);
+
 /// Fills `out` (capacity `cap`) with the direct child pids of `ppid`.
 /// Returns the number of children written (>= 0), or -1 on error.
 int dm_child_pids(pid_t ppid, pid_t *out, int cap);

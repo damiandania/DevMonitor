@@ -70,9 +70,38 @@ final class AppState {
         persist()
     }
 
+    func setMemoryAuto(_ auto: Bool, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].memoryAuto = auto
+        persist()
+    }
+
     func setPort(_ port: Int?, for id: Project.ID) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         projects[i].port = (port ?? 0) > 0 ? port : nil
+        persist()
+    }
+
+    /// Manually override the package manager → regenerate the dev/build commands for it.
+    func setPackageManager(_ pm: PackageManager, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        let c = Detector.commands(path: projects[i].path, packageManager: pm)
+        projects[i].packageManager = pm
+        projects[i].devCommand = c.dev
+        projects[i].buildCommand = c.build
+        persist()
+    }
+
+    /// Toggle package-manager auto. Turning it back on re-detects and restores the commands.
+    func setPackageManagerAuto(_ auto: Bool, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        if auto {
+            let d = Detector.detect(path: projects[i].path)
+            projects[i].packageManager = d.packageManager
+            projects[i].devCommand = d.devCommand
+            projects[i].buildCommand = d.buildCommand
+        }
+        projects[i].packageManagerAuto = auto
         persist()
     }
 
@@ -81,7 +110,7 @@ final class AppState {
         let session = DevSession(project: project)
         session.onEvent = { event in Notifier.shared.notify(event) }
         activeSession = session
-        session.start(memoryGB: project.memoryGB)
+        session.start(memoryGB: project.effectiveMemoryGB)
     }
 
     func stopActive() {

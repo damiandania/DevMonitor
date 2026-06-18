@@ -85,6 +85,18 @@ int dm_system_mem(dm_mem_info *out) {
     return 0;
 }
 
+int dm_system_swap(dm_mem_info *out) {
+    struct xsw_usage swap;
+    size_t len = sizeof(swap);
+    int mib[2] = { CTL_VM, VM_SWAPUSAGE };
+    if (sysctl(mib, 2, &swap, &len, NULL, 0) != 0) {
+        return -1;
+    }
+    out->used = (uint64_t)swap.xsu_used;
+    out->total = (uint64_t)swap.xsu_total;
+    return 0;
+}
+
 int dm_child_pids(pid_t ppid, pid_t *out, int cap) {
     for (int i = 0; i < cap; i++) {
         out[i] = 0;

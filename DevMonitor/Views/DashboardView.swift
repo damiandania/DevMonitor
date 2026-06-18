@@ -98,33 +98,6 @@ struct DashboardView: View {
             }
             .help("Open the project in VS Code")
 
-            Divider().frame(height: 20)
-
-            HStack(spacing: 6) {
-                Image(systemName: "memorychip").foregroundStyle(.secondary)
-                Stepper("\(project.memoryGB) GB",
-                        value: Binding(get: { project.memoryGB },
-                                       set: { app.setMemoryGB($0, for: project.id) }),
-                        in: 1...32)
-                    .fixedSize()
-                    .disabled(running)
-            }
-
-            HStack(spacing: 5) {
-                Image(systemName: "network").foregroundStyle(.secondary)
-                TextField("auto", value: Binding(
-                    get: { project.port },
-                    set: { app.setPort($0, for: project.id) }
-                ), format: .number.grouping(.never))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 58)
-                    .disabled(running)
-                    .help("Port to run on (blank = framework default)")
-            }
-
-            Label(project.packageManager.rawValue, systemImage: "shippingbox")
-                .foregroundStyle(.secondary)
-
             Spacer()
             buildControls
         }
@@ -157,6 +130,13 @@ struct DashboardView: View {
                                      sampler.systemMemUsed / 1_073_741_824,
                                      sampler.totalMem / 1_073_741_824),
                       color: .purple)
+            systemBar(title: "Swap", percent: sampler.systemSwapPercent,
+                      detail: sampler.systemSwapTotal > 0
+                        ? String(format: "%.1f / %.0f GB",
+                                 sampler.systemSwapUsed / 1_073_741_824,
+                                 sampler.systemSwapTotal / 1_073_741_824)
+                        : "off",
+                      color: .orange)
         }
     }
 

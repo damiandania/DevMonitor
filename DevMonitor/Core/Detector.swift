@@ -53,6 +53,21 @@ enum Detector {
                       devCommand: devCommand, buildCommand: buildCommand, port: nil)
     }
 
+    /// Dev/build commands for an explicit package manager, preserving the project's scripts.
+    /// Used when the user overrides the package manager in the server config.
+    static func commands(path: String, packageManager pm: PackageManager) -> (dev: String, build: String?) {
+        var scripts: [String: String] = [:]
+        if let data = FileManager.default.contents(atPath: path + "/package.json"),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let s = json["scripts"] as? [String: String] { scripts = s }
+        let dev: String
+        if scripts["dev"] != nil { dev = "\(pm.runScriptPrefix) dev" }
+        else if scripts["start"] != nil { dev = "\(pm.runScriptPrefix) start" }
+        else { dev = "\(pm.runScriptPrefix) dev" }
+        let build = scripts["build"] != nil ? "\(pm.runScriptPrefix) build" : nil
+        return (dev, build)
+    }
+
     /// Reasonable default heap (GB) for a framework's dev server.
     static func defaultMemoryGB(for framework: Framework) -> Int {
         switch framework {
