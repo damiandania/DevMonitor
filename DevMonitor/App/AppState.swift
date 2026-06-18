@@ -11,6 +11,8 @@ final class AppState {
     var sessions: [Project.ID: DevSession] = [:]
     /// One build per project, keyed by project id.
     var builds: [Project.ID: BuildRunner] = [:]
+    /// Selected tab in the GLOBAL terminal panel: "s:<projectID>" (server) or "b:<projectID>" (build).
+    var selectedTerminalID: String?
 
     /// App-wide settings (browser, analysis model, …) — the gear at the bottom of the sidebar.
     var settings: AppSettings
@@ -137,9 +139,10 @@ final class AppState {
         persist()
     }
 
-    /// Launch (or no-op if already running) the supervised server for `project`. Idempotent:
-    /// other projects' servers are left alone — one server per project, several at once.
+    /// Launch (or no-op if already running) the supervised server for `project`, and select its
+    /// tab in the global terminal. Idempotent; other projects' servers are left alone.
     func launch(_ project: Project) {
+        selectedTerminalID = "s:\(project.id)"
         if let existing = sessions[project.id], existing.state.isActive { return }
         let session = DevSession(project: project)
         session.onEvent = { event in Notifier.shared.notify(event) }
@@ -153,46 +156,30 @@ final class AppState {
     /// Stop every supervised server (pressure relief / Doctor "stop dev servers").
     func stopAllSessions() { for s in sessions.values { s.stop() } }
 
-    /// Close the server terminal+tab: stop the dev server and drop it from the dashboard.
-    func closeServer(_ project: Project) {
-        sessions[project.id]?.stop()
-        sessions[project.id] = nil
+    /// Close a server tab in the global terminal: stop the dev server and drop it.
+    func closeServer(id: Project.ID) {
+        sessions[id]?.stop()
+        sessions[id] = nil
     }
 
-    /// Close the build terminal+tab: stop the build if running and drop it.
-    func closeBuild(_ project: Project) {
-        builds[project.id]?.stop()
-        builds[project.id] = nil
+    /// Close a build tab in the global terminal: stop the build if running and drop it.
+    func closeBuild(id: Project.ID) {
+        builds[id]?.stop()
+        builds[id] = nil
     }
 
     /// The supervised session for `project`, if any.
     func session(for project: Project) -> DevSession? { sessions[project.id] }
 
-    /// Build a project. If its dev server is running, stop it first (so dev & build don't fight
-    /// over the same build dir — e.g. Nuxt's `.nuxt`), wait for it to exit, run the build, then
-    /// relaunch the server when the build finishes.
+    /// Build a project ALONGSIDE its dev server (the running server is left untouched), adding a
+    /// build tab to the global terminal and selecting it.
     func runBuild(_ project: Project) {
+        selectedTerminalID = "b:\(project.id)"
         if let existing = builds[project.id], existing.isRunning { return }
-        let session = sessions[project.id]
-        let restartAfter = session?.state.isActive ?? false
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if restartAfter {
-                session?.stop()
-                for _ in 0..<25 {                       // ≤5s: wait for the tree to actually exit
-                    if (session?.pid ?? 0) == 0 { break }
-                    try? await Task.sleep(for: .milliseconds(200))
-                }
-                self.sessions[project.id] = nil
-            }
-            let build = BuildRunner(project: project)
-            build.onEvent = { event in Notifier.shared.notify(event) }
-            build.onFinish = { [weak self] _ in
-                if restartAfter { self?.launch(project) }   // relaunch regardless of build result
-            }
-            self.builds[project.id] = build
-            build.start()
-        }
+        let build = BuildRunner(project: project)
+        build.onEvent = { event in Notifier.shared.notify(event) }
+        builds[project.id] = build
+        build.start()
     }
 
     /// The active build if it belongs to `project`, else nil.

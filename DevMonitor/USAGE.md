@@ -9,7 +9,7 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 | Command | What it does |
 |---------|--------------|
 | `dev-monitor up [path] [--gb N]` | Start + supervise a project (default: cwd) through the app. **Idempotent** — a no-op that reports the port if that project's server is already running. Auto-detects pnpm/npm + framework; optional heap override. (`run` is an alias.) |
-| `dev-monitor build [path]` | Build the project. If its dev server is running, **stops it first** (so dev & build don't fight over the same build dir, e.g. Nuxt's `.nuxt`), runs the build, then **relaunches** the server. |
+| `dev-monitor build [path]` | Build the project **alongside** its dev server (the running server is left untouched). Adds a build tab to the global terminal. (Note: Nuxt's dev & build share `.nuxt`, so a build while the dev server runs can collide — stop the server first if you hit that.) |
 | `dev-monitor status [--json]` | List **every** supervised server (name, state, port). `--json` prints a machine-readable array for scripts/agents. |
 | `dev-monitor stop [path] [--all]` | Stop one project's server (default: cwd), or `--all` of them. |
 | `dev-monitor restart [path]` | Recycle (kill the tree + relaunch) the project's server (default: cwd). |
@@ -38,7 +38,7 @@ Route dev servers and JS builds through the app instead of running them directly
 
 ```bash
 dev-monitor up          # instead of `npm run dev` / `pnpm dev` / `nuxt dev`
-dev-monitor build       # instead of `npm run build` (stops the server, builds, relaunches)
+dev-monitor build       # instead of `npm run build` (runs alongside the server)
 dev-monitor status      # what's already running (add --json to parse)
 ```
 

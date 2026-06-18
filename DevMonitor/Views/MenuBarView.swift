@@ -42,13 +42,17 @@ struct MenuBarView: View {
             .filter { $0.state.isActive }
             .sorted { $0.project.name < $1.project.name }
         let external = app.systemSampler.processes.filter { $0.isExternalDev }
+        let builds = app.builds.values
+            .filter { $0.isRunning || $0.result != nil }
+            .sorted { $0.project.name < $1.project.name }
 
         TimelineView(.periodic(from: Date(), by: 1)) { _ in
             VStack(alignment: .leading, spacing: 10) {
-                if managed.isEmpty && external.isEmpty {
+                if managed.isEmpty && external.isEmpty && builds.isEmpty {
                     Text("No servers running").font(.subheadline).foregroundStyle(.secondary)
                 } else {
                     ForEach(managed, id: \.project.id) { managedRow($0) }
+                    ForEach(builds, id: \.project.id) { buildRow($0) }
                     ForEach(external) { externalRow($0) }
                 }
                 if let p = app.selectedProject, app.sessions[p.id]?.state.isActive != true {
@@ -79,6 +83,26 @@ struct MenuBarView: View {
                 Button { s.recycle() } label: { Image(systemName: "arrow.clockwise") }.help("Restart")
             }
             .buttonStyle(.borderless).controlSize(.small)
+        }
+    }
+
+    private func buildRow(_ b: BuildRunner) -> some View {
+        let label = b.isRunning ? "Building…" : (b.result == 0 ? "Built" : "Build failed")
+        let tint: Color = b.isRunning ? .orange : (b.result == 0 ? .green : .red)
+        return HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Image(systemName: "hammer.fill").font(.caption2).foregroundStyle(.secondary)
+                    Text(b.project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                }
+                Label(label, systemImage: "circle.fill")
+                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(tint)
+            }
+            Spacer()
+            if b.isRunning {
+                Button { b.stop() } label: { Image(systemName: "stop.fill") }.help("Stop build")
+                    .buttonStyle(.borderless).controlSize(.small)
+            }
         }
     }
 

@@ -6,9 +6,27 @@ struct LogPaneView: View {
     let lines: [String]
     var inputPlaceholder: String? = nil
     var onSubmit: ((String) -> Void)? = nil
+    /// Terminal appearance: "app" (follow the app theme), "dark", or "light".
+    var terminalTheme: String = "dark"
     @State private var input = ""
+    @Environment(\.colorScheme) private var appScheme
+
+    /// Resolve the effective terminal scheme — "app" follows the app's appearance.
+    private var dark: Bool {
+        switch terminalTheme {
+        case "light": return false
+        case "dark": return true
+        default: return appScheme == .dark
+        }
+    }
 
     var body: some View {
+        let textColor = dark ? Color(white: 0.85) : Color(white: 0.18)
+        let bgColor = dark ? Color(white: 0.08) : Color(white: 0.98)
+        let inputText = dark ? Color.white : Color.black
+        let inputBg = dark ? Color(white: 0.12) : Color(white: 0.94)
+        let border = (dark ? Color.white : Color.black).opacity(0.08)
+
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -16,7 +34,7 @@ struct LogPaneView: View {
                         ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                             Text(ANSI.attributed(line.isEmpty ? " " : line))
                                 .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(Color(white: 0.85))
+                                .foregroundStyle(textColor)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(index)
@@ -24,7 +42,8 @@ struct LogPaneView: View {
                     }
                     .padding(8)
                 }
-                .background(Color(white: 0.08))
+                .scrollIndicators(.hidden)   // no scroll bar in the terminal
+                .background(bgColor)
                 .onChange(of: lines.count) { _, count in
                     guard count > 0 else { return }
                     withAnimation(.linear(duration: 0.1)) {
@@ -42,7 +61,7 @@ struct LogPaneView: View {
                     TextField(placeholder, text: $input)
                         .textFieldStyle(.plain)
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(inputText)
                         .onSubmit {
                             guard !input.isEmpty else { return }
                             onSubmit(input)
@@ -51,14 +70,11 @@ struct LogPaneView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(Color(white: 0.12))
+                .background(inputBg)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(Color.white.opacity(0.08))
-        )
-        .environment(\.colorScheme, .dark)   // dark terminal → light placeholder/cursor
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(border))
+        .environment(\.colorScheme, dark ? .dark : .light)
     }
 }

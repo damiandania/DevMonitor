@@ -9,7 +9,9 @@ struct DevMonitorApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        // Single main window (not a WindowGroup): "Open Window" focuses the existing one
+        // instead of spawning duplicates.
+        Window("Dev Monitor", id: "main") {
             RootSplitView()
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)

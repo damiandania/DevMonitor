@@ -23,7 +23,7 @@ central IPC hub other terminals route through, and Claude-generated self-error r
 | P8 — Polish & dist | ✅ | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (signing: ad-hoc¹) |
 | P9 — Resource advisor | ✅ | Claude-recommended actions on heavy processes; auto-stop managed dev, **confirm before closing foreign** |
 | P9b — Pressure auto-kill | ✅ | Detects a stuck machine (sustained CPU, or memory full + swapping) → **auto-closes orphaned dev processes** (+notify); other heavy processes are surfaced with a fast **Haiku** eval and a red **skull** button (manual) |
-| P10 — Multi-session orchestrator | ✅ | **One supervised server per project** (concurrent, each its own table row), idempotent `dev-monitor up`, `build` orchestration (stop→build→relaunch), `status --json`, sidebar running indicator, **external dev servers identified** in the table & menu (*project :port*, purple), the menu-bar item lists **all** online servers, a global **Claude Code hook** that routes raw `npm run dev`/builds through the CLI, and `NUXT_IGNORE_LOCK=1` + a CLOEXEC fd fix so cold launches don't hang |
+| P10 — Multi-session orchestrator | ✅ | **One supervised server per project** (concurrent), a **global terminal** (one tab per server/build across projects) and **global Activity**, idempotent `dev-monitor up`, `build` that **runs alongside** the server, `status --json`, **external dev servers identified** (*project :port*, purple) in the table & menu, a single main **Window** (focuses, never duplicates), **Theme + terminal-theme** settings, a global **Claude Code hook** routing raw `npm run dev`/builds through the CLI, and `NUXT_IGNORE_LOCK=1` + a CLOEXEC fd fix so cold launches don't hang |
 
 ¹ Signed ad-hoc (`CODE_SIGN_IDENTITY = -`): no Apple Developer ID identity is installed on this
 machine. Local notifications and the menu-bar item work; for distribution outside this Mac, sign
@@ -53,10 +53,17 @@ with a Developer ID and notarize.
   default heap for new projects. Persisted in `settings.json`.
 - **Hang detection + auto-recycle**: HTTP probes the server; after consecutive failures it kills the
   whole process tree (including orphans) and relaunches.
-- **Build runner**: runs the project's build script as a separate tracked tree. Its process tree
-  shows as one identified row in the activity table (just like the dev server), the log area becomes
-  **pill tabs** (Server / Build, each closable with an ✕) and auto-switches to Build on start, and the
-  Build button turns into a red **Stop build** while running.
+- **Build runner**: runs the project's build script as a separate tracked tree **alongside** the dev
+  server (it does *not* stop the server). It gets its own identified row in the Activity table and
+  its own tab in the global terminal; the Build button turns into a red **Stop build** while running.
+- **Global terminal**: a single panel (resizable, at the bottom of the detail pane) with **one tab
+  per running server and per build across all projects** — *icon (server/build) + project name + ✕*.
+  Launching another project's server adds a tab; a build adds its own next to the server.
+- **Global Activity**: the CPU/Memory/Swap meters + the process list aren't tied to the selected
+  project — they always reflect the whole machine (collapsible "Show processes"). Each supervised
+  server is its own row; external dev servers are identified in purple.
+- **Appearance** (in Settings → General): **Theme** (System / Light / Dark, applied app-wide) and a
+  separate **Terminal** theme (Match app / Light / Dark) for the log panes.
 - **Pressure auto-kill**: when the machine is detected as *stuck* (CPU pinned, or memory full and
   swapping, for a sustained window):
   - **Orphaned dev processes auto-close.** A dev server (detected by its actual binary in argv —
@@ -68,12 +75,13 @@ with a Developer ID and notarize.
     (foreign processes are only closed when *you* press it). A heuristic list shows instantly while
     Haiku refines it. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself)
     are never suggested or auto-closed.
-- **Menu-bar item** (`MenuBarExtra`): lists **every online server** — each supervised one with live
-  status/uptime and Stop/Restart, plus any **external** dev servers (purple, display-only) — a Launch
-  button for the selected idle project, and a system CPU/memory snapshot, without opening the window.
+- **Menu-bar item** (`MenuBarExtra`): lists **every online server** (supervised, with live
+  status/uptime + Stop/Restart), every **build** in progress (hammer + Building…/Built/Failed), and
+  any **external** dev servers (purple, display-only) — plus a Launch button for the selected idle
+  project and a system CPU/memory snapshot, without opening the window.
 - **Central hub + CLI**: run servers from any terminal through the app — **one supervised server
-  per project**, several concurrently. `dev-monitor up` (idempotent), `build` (stops the project's
-  server, builds, relaunches), `status [--json]`, `stop [path]/--all`, `restart [path]`, `logs -f`;
+  per project**, several concurrently. `dev-monitor up` (idempotent), `build` (runs alongside the
+  server — doesn't stop it), `status [--json]`, `stop [path]/--all`, `restart [path]`, `logs -f`;
   auto-starts the app if needed. The sidebar shows a small **status dot** on each project whose
   server is live. See [DevMonitor/USAGE.md](DevMonitor/USAGE.md).
 - **Routes other Claude Code sessions through the app**: a global PreToolUse hook hard-blocks raw

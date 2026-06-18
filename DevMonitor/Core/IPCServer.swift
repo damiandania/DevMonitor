@@ -67,10 +67,8 @@ final class IPCServer {
         case "build":
             guard let project = resolveProject(req, app: app, client: client) else { return }
             app.selectedProjectID = project.id
-            let willRestart = app.sessions[project.id]?.state.isActive ?? false
-            app.runBuild(project)
-            let note = willRestart ? " (stopping the running server first; will relaunch after)" : ""
-            IPCIO.write(client, IPCMessage(type: "ok", message: "building \(project.name)\(note)"))
+            app.runBuild(project)   // runs alongside the dev server (doesn't stop it)
+            IPCIO.write(client, IPCMessage(type: "ok", message: "building \(project.name)"))
 
         case "stop":
             if req.all == true {

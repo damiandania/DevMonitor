@@ -55,9 +55,15 @@ private struct GeneralSettings: View {
             ClaudeHookSection()
             Section("Appearance") {
                 Picker("Theme", selection: theme) {
-                    ForEach(AppSettings.themes) { Text($0.label).tag($0.id) }
+                    ForEach(AppSettings.themes) { t in
+                        Label(t.label, systemImage: t.icon).tag(t.id)
+                    }
                 }
-                .pickerStyle(.segmented)
+                Picker("Terminal", selection: terminalTheme) {
+                    ForEach(AppSettings.terminalThemes) { t in
+                        Label(t.label, systemImage: t.icon).tag(t.id)
+                    }
+                }
             }
             Section("Open in") {
                 Picker("Browser (Open)", selection: browser) {
@@ -129,6 +135,9 @@ private struct GeneralSettings: View {
             app.settings.theme = $0; app.persistSettings(); AppSettings.applyAppearance($0)
         })
     }
+    private var terminalTheme: Binding<String> {
+        .init(get: { app.settings.terminalTheme }, set: { app.settings.terminalTheme = $0; app.persistSettings() })
+    }
 }
 
 // MARK: - Claude Code hook (install / uninstall)
@@ -151,15 +160,18 @@ private struct ClaudeHookSection: View {
                  + "builds directly and told to use `dev-monitor`, so every server is supervised here. "
                  + "Adds a PreToolUse hook to ~/.claude/settings.json.")
                 .font(.caption).foregroundStyle(.secondary)
-            if installed {
-                Button(role: .destructive) { run(ClaudeHookInstaller.uninstall) } label: {
-                    Label("Uninstall hook", systemImage: "trash")
+            HStack {
+                Spacer()
+                if installed {
+                    Button(role: .destructive) { run(ClaudeHookInstaller.uninstall) } label: {
+                        Label("Uninstall hook", systemImage: "trash")
+                    }
+                } else {
+                    Button { run(ClaudeHookInstaller.install) } label: {
+                        Label("Install hook", systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-            } else {
-                Button { run(ClaudeHookInstaller.install) } label: {
-                    Label("Install hook", systemImage: "checkmark.shield")
-                }
-                .buttonStyle(.borderedProminent)
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle")

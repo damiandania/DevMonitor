@@ -17,6 +17,8 @@ struct AppSettings: Codable, Sendable, Equatable {
     var bars: [String]
     /// UI appearance: "system" (follow macOS), "light", or "dark".
     var theme: String
+    /// Terminal/log appearance: "app" (follow the app theme), "dark", or "light".
+    var terminalTheme: String
 
     init(browser: String? = nil,
          editor: String? = nil,
@@ -24,7 +26,8 @@ struct AppSettings: Codable, Sendable, Equatable {
          autoCloseOrphans: Bool = true,
          defaultMemoryGB: Int = 4,
          bars: [String] = AppSettings.defaultBars,
-         theme: String = "system") {
+         theme: String = "system",
+         terminalTheme: String = "dark") {
         self.browser = browser
         self.editor = editor
         self.analysisModel = analysisModel
@@ -32,11 +35,12 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.defaultMemoryGB = defaultMemoryGB
         self.bars = bars
         self.theme = theme
+        self.terminalTheme = terminalTheme
     }
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
-        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme
+        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme, terminalTheme
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,16 +51,23 @@ struct AppSettings: Codable, Sendable, Equatable {
         defaultMemoryGB = try c.decodeIfPresent(Int.self, forKey: .defaultMemoryGB) ?? 4
         bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
+        terminalTheme = try c.decodeIfPresent(String.self, forKey: .terminalTheme) ?? "dark"
     }
 
     static let defaultModel = "claude-haiku-4-5"
 
     /// Appearance options for the theme picker.
-    struct ThemeOption: Identifiable, Sendable { let id: String; let label: String }
+    struct ThemeOption: Identifiable, Sendable { let id: String; let label: String; let icon: String }
     static let themes: [ThemeOption] = [
-        .init(id: "system", label: "System"),
-        .init(id: "light", label: "Light"),
-        .init(id: "dark", label: "Dark"),
+        .init(id: "system", label: "System", icon: "circle.lefthalf.filled"),
+        .init(id: "light", label: "Light", icon: "sun.max.fill"),
+        .init(id: "dark", label: "Dark", icon: "moon.fill"),
+    ]
+    /// Terminal/log appearance options ("app" follows the app theme).
+    static let terminalThemes: [ThemeOption] = [
+        .init(id: "app", label: "Match app", icon: "circle.lefthalf.filled"),
+        .init(id: "light", label: "Light", icon: "sun.max.fill"),
+        .init(id: "dark", label: "Dark", icon: "moon.fill"),
     ]
 
     /// Apply a theme to the whole app (all windows, modals and the menu-bar panel).
