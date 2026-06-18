@@ -22,6 +22,7 @@ final class ProjectStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(projects) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        do { try data.write(to: fileURL, options: .atomic) }
+        catch { AppLog.shared.event("ProjectStore: failed to save projects.json — \(error.localizedDescription)") }
     }
 }

@@ -124,6 +124,8 @@ func waitUntilReady(_ path: String, timeoutSeconds: Double = 180) {
         if let s = fetchServers().first(where: { $0.path == path }) {
             if s.ready == true { print("ready: \(s.url ?? "(running)")"); return }
             if s.state.hasPrefix("Failed") { die("failed: \(s.lastError ?? s.state)") }
+            // A clean Stop while we wait means something stopped it elsewhere — terminal, don't hang.
+            if s.state.hasPrefix("Stopped") { die("stopped while waiting (the server was stopped elsewhere)") }
         }
         usleep(400_000)
     }

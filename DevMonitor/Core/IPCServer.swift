@@ -77,7 +77,9 @@ final class IPCServer {
                 IPCIO.write(client, IPCMessage(type: "ok", message: "\(project.name) already running\(port)"))
                 return
             }
-            let toLaunch = app.projects.first { $0.id == project.id }!
+            guard let toLaunch = app.projects.first(where: { $0.id == project.id }) else {
+                IPCIO.write(client, IPCMessage(type: "error", message: "project vanished before launch")); return
+            }
             app.launch(toLaunch)
             // Surface when the requested/auto heap was capped to physical RAM, so an explicit
             // `--gb 99` on an 8 GB machine reports "8 GB (capped …)" instead of silently shrinking.

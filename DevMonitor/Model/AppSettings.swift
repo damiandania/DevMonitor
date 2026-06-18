@@ -126,7 +126,8 @@ final class SettingsStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(settings) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        do { try data.write(to: fileURL, options: .atomic) }
+        catch { AppLog.shared.event("SettingsStore: failed to save settings.json — \(error.localizedDescription)") }
     }
 }
 

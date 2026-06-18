@@ -218,7 +218,7 @@ final class DevSession {
                 && devTokens.contains { args.contains($0) }
             guard portVictim || projectVictim else { continue }
             let pgid = getpgid(p)
-            append(line: "cleanup: reaping leftover pid \(p) (\(comm))\(onPort ? " on port \(pinnedPort!)" : "")")
+            append(line: "cleanup: reaping leftover pid \(p) (\(comm))\(onPort ? " on port \(pinnedPort.map(String.init) ?? "")" : "")")
             if pgid > 1 { killpg(pgid, SIGKILL) }
             kill(p, SIGKILL)
         }
@@ -305,6 +305,7 @@ final class DevSession {
             fm.createFile(atPath: url.path, contents: Data())   // fresh start (new file or rotated)
         }
         logFile = try? FileHandle(forWritingTo: url)
+        if logFile == nil { AppLog.shared.event("DevSession: could not open log file for \(project.name) at \(url.path)") }
         logFile?.seekToEndOfFile()
         if let header = "\n===== \(project.name) — new run =====\n".data(using: .utf8) {
             logFile?.write(header)

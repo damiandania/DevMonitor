@@ -66,7 +66,7 @@ final class AppState {
             var pids = Set<Int32>()
             for b in live { pids.formUnion(ProcessTree.sessionMembers(of: b.pid)) }
             guard !pids.isEmpty else { return nil }
-            let label = live.count == 1 ? "Build · \(live.first!.project.name)" : "\(live.count) builds"
+            let label = live.count == 1 ? "Build · \(live.first?.project.name ?? "build")" : "\(live.count) builds"
             return (pids, label)
         }
         systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
