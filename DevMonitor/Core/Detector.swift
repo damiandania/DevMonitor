@@ -49,6 +49,13 @@ enum Detector {
         if deps.keys.contains(where: { $0 == "nuxt" || $0.hasPrefix("@nuxt/") }) { framework = .nuxt }
         else if deps.keys.contains("next") { framework = .next }
         else if deps.keys.contains("astro") { framework = .astro }
+        else if deps.keys.contains("@sveltejs/kit") { framework = .sveltekit }
+        else if deps.keys.contains(where: { $0.hasPrefix("@remix-run/") }) { framework = .remix }
+        else if deps.keys.contains(where: { $0 == "@solidjs/start" || $0 == "solid-start" }) { framework = .solid }
+        else if deps.keys.contains(where: { $0.hasPrefix("@angular/") }) { framework = .angular }
+        else if deps.keys.contains(where: { $0.hasPrefix("@builder.io/qwik") }) { framework = .qwik }
+        // SvelteKit / Remix / SolidStart / Qwik run on top of Vite, so they MUST be matched before
+        // the generic `vite` check below (their package.json also depends on vite).
         else if deps.keys.contains("vite") { framework = .vite }
         else if deps.keys.contains("express") { framework = .express }
         else if scripts["dev"] != nil || scripts["start"] != nil { framework = .node }
@@ -84,8 +91,8 @@ enum Detector {
     /// Reasonable default heap (GB) for a framework's dev server.
     static func defaultMemoryGB(for framework: Framework) -> Int {
         switch framework {
-        case .nuxt, .next: return 8
-        case .astro, .vite: return 4
+        case .nuxt, .next, .angular: return 8
+        case .astro, .vite, .sveltekit, .remix, .solid, .qwik: return 4
         case .express, .node, .unknown: return 2
         }
     }

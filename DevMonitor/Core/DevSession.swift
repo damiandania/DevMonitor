@@ -127,8 +127,11 @@ final class DevSession {
         reapLeftovers(pinnedPort: pinnedPort)
         // NUXT_IGNORE_LOCK=1: Dev Monitor is the single authority that supervises one server per
         // project, so Nuxt's own dev-lock would only get in the way — e.g. a stale `nuxt.lock`
-        // left behind by a SIGKILLed run would block the relaunch. We dedupe ourselves.
-        let command = "NUXT_IGNORE_LOCK=1 NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
+        // left behind by a SIGKILLed run would block the relaunch. We dedupe ourselves. Only Nuxt
+        // reads this var, so inject it ONLY for Nuxt projects rather than polluting every
+        // framework's environment with it.
+        let nuxtEnv = project.framework == .nuxt ? "NUXT_IGNORE_LOCK=1 " : ""
+        let command = "\(nuxtEnv)NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         var fd: Int32 = -1

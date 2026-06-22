@@ -18,13 +18,18 @@ enum PackageManager: String, Codable, Sendable, CaseIterable {
 
 /// Detected web framework, drives the default dev command, port and ready-signal.
 enum Framework: String, Codable, Sendable, CaseIterable {
-    case nuxt, next, astro, vite, express, node, unknown
+    case nuxt, next, astro, sveltekit, remix, solid, angular, qwik, vite, express, node, unknown
 
     var displayName: String {
         switch self {
         case .nuxt: return "Nuxt"
         case .next: return "Next.js"
         case .astro: return "Astro"
+        case .sveltekit: return "SvelteKit"
+        case .remix: return "Remix"
+        case .solid: return "SolidStart"
+        case .angular: return "Angular"
+        case .qwik: return "Qwik"
         case .vite: return "Vite"
         case .express: return "Express"
         case .node: return "Node"
@@ -34,7 +39,7 @@ enum Framework: String, Codable, Sendable, CaseIterable {
 
     var symbolName: String {
         switch self {
-        case .nuxt, .next, .astro, .vite: return "globe"
+        case .nuxt, .next, .astro, .sveltekit, .remix, .solid, .angular, .qwik, .vite: return "globe"
         case .express, .node: return "server.rack"
         case .unknown: return "questionmark.circle"
         }
