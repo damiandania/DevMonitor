@@ -10,7 +10,12 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
 - **`spawn.c`** — `dm_spawn_session(command, cwd, &fd)`: `posix_spawn` of `/bin/zsh -lc <command>`
   with `POSIX_SPAWN_SETSID` (own session/pgid → `killpg` reaps the whole tree) and stdout+stderr
   merged into one pipe. The dev command is built as `… exec <devcmd>` so the spawned process
-  *becomes* the dev server (the session leader), not a parent shell.
+  *becomes* the dev server (the session leader), not a parent shell. `-lc` is login but
+  **non-interactive** (no `.zshrc`), so the Node version-manager `PATH` (fnm/nvm) is supplied by
+  `ShellEnvironment` (see Core/) rather than by the shell itself.
+- **`ipc.c`** — Unix-socket hub primitives (`dm_ipc_listen`/`accept`/`connect`). `listen` probes for
+  a live hub before reclaiming a socket, so a second instance can't steal it from a running one;
+  only a stale socket is unlinked.
 - **`metrics.c`** — `libproc`/`mach` shims:
   - `dm_proc_stat_for(pid)` → cumulative CPU ns (via `proc_pid_rusage`, scaled by
     `mach_timebase_info` because rusage CPU is in mach units on Apple Silicon) + `ri_phys_footprint`.
@@ -21,7 +26,12 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
 
 ### Core/
 - **`Detector`** — reads the lockfile + `package.json` to infer package manager, framework, dev/build
-  commands and default heap. Pure, headless-testable.
+  commands and default heap. Pure, headless-testable. Frameworks: Nuxt · Next · Astro · SvelteKit ·
+  Remix · SolidStart · Angular · Qwik · Vite · Express · Node (the Vite-based ones are matched first).
+- **`ShellEnvironment`** — resolves the user's login+interactive shell `$PATH` (where fnm/nvm/asdf
+  install their shims) and exports it into the process before each launch, so the non-interactive
+  spawn shell can still find `node`/`npm`. Resolved fresh per launch (fnm's per-shell dir is
+  ephemeral), with a short cache and a timeout.
 - **`ProcessTree`** — `sessionMembers(of:)` enumerates the supervised tree by session id.
 - **`DevSession`** — the heart. Per project it:
   1. **Launches** via `dm_spawn_session`; streams the merged pipe through a `DispatchSource` →

@@ -35,7 +35,7 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 ## Features
 
 ### 🚀 Detect &amp; launch
-- **Auto-detects** the package manager (npm · pnpm · yarn · bun · deno) and framework (Nuxt · Next · Astro · Vite · Express) per project.
+- **Auto-detects** the package manager (npm · pnpm · yarn · bun · deno) and framework (Nuxt · Next · Astro · SvelteKit · Remix · SolidStart · Angular · Qwik · Vite · Express) per project — and launches **any** project that has a `dev` script regardless. Framework-specific env (e.g. `NUXT_IGNORE_LOCK`) is applied only where it belongs.
 - **Launches** the dev server with a deterministic heap size (`--max-old-space-size`), streaming its log live.
 - **Per-project settings** (gear on each sidebar row): **Memory / Port / Package**, each with an **Auto** toggle (on by default) — flip it off for a manual value via slider, field, or package picker.
 

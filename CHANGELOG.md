@@ -3,6 +3,32 @@
 Notable changes to Dev Monitor. Loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions use [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Dev servers managed by fnm/nvm no longer fail with `command not found` (exit 127).** The spawn
+  shell (`zsh -lc`) is login but non-interactive, so it never sourced `~/.zshrc` where Node version
+  managers put their shims — a GUI launch from launchd then had no `node`/`npm` on `PATH`. A new
+  `ShellEnvironment` resolves the user's login+interactive `PATH` and exports it before each launch
+  (re-resolved per launch, because fnm's per-shell dir is ephemeral).
+- **The hub no longer dies when a `dev-monitor` client disconnects.** It now ignores `SIGPIPE`
+  (as the CLI already did), so writing a reply to a client that has already exited can't terminate
+  the whole app right after handling an `up`/`status`.
+- **A second instance can no longer steal the IPC socket** from a running hub — the listener probes
+  for a live owner before reclaiming a stale socket, instead of unlinking it unconditionally.
+- **Claude hook regex** no longer blocks read-only commands that merely *mention* a dev server
+  (e.g. `pgrep 'nuxt dev'`), and no longer misses path-qualified launches
+  (`./node_modules/.bin/nuxt dev`). The embedded and on-disk copies of the script are back in sync.
+
+### Added
+- **More frameworks detected** — SvelteKit, Remix, SolidStart, Angular and Qwik, in addition to
+  Nuxt, Next, Astro, Vite and Express, each with a tuned default heap. (Any project with a `dev`
+  script already launched; this just names/sizes them properly.)
+
+### Changed
+- `NUXT_IGNORE_LOCK=1` is now injected **only for Nuxt projects**, instead of into every spawned
+  server's environment.
+
 ## [0.1.0] — 2026-06-18
 
 First public release — a native macOS app that launches, supervises, and auto-recycles JS/TS dev
