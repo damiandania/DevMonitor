@@ -48,9 +48,12 @@ pid_t dm_spawn_session(const char *command, const char *cwd, int *out_fd, int *i
     // read() until the server dies (the connection never sees EOF).
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT);
 
-    // Login (not interactive): loads the user's PATH/fnm via .zprofile without the
-    // interactive .zshrc, which on some setups (p10k/fnm hooks) reparents the real
-    // shell out of our process group and prints session-restore noise.
+    // Login, NON-interactive (`-lc`): we deliberately skip the interactive `.zshrc` because on some
+    // setups (p10k / fnm hooks) it reparents the real shell out of our process group and prints
+    // session-restore noise into the dev-server log. The catch: Node version managers (fnm/nvm) are
+    // usually initialized in `.zshrc`, so `-lc` ALONE would not put node/npm on PATH. We solve that
+    // app-side: ShellEnvironment resolves the user's login+interactive PATH (off the spawn path) and
+    // exports it into our process, so the environment inherited here already carries the Node shims.
     char *argv[] = { (char *)"/bin/zsh", (char *)"-lc", (char *)command, NULL };
 
     pid_t pid = 0;

@@ -34,6 +34,20 @@ int dm_ipc_listen(const char *path) {
         close(fd);
         return -1;
     }
+    // Before removing the socket file, probe whether a LIVE hub already owns it. A blind unlink
+    // (the previous behavior) let a second instance steal the socket from a running one — leaving
+    // two half-wired hubs and the races that made instances appear to "die" on launch. If a connect
+    // succeeds, another instance is listening: don't clobber it — return -2 so the caller can stand
+    // down (single-instance). Only when the socket is stale (nobody answers) do we unlink and bind.
+    int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (probe >= 0) {
+        int live = (connect(probe, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+        close(probe);
+        if (live) {
+            close(fd);
+            return -2;
+        }
+    }
     unlink(path);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         close(fd);

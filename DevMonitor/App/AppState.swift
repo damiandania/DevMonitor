@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import AppKit
+import Darwin
 
 /// Root observable app state. Owns the project list, selection and the active session.
 @MainActor
@@ -28,6 +29,13 @@ final class AppState {
     let systemSampler = SystemSampler()
 
     init() {
+        // The IPC hub writes responses to `dev-monitor` clients that may have already closed the
+        // socket (a CLI reads its reply and exits). Without ignoring SIGPIPE, that write delivers
+        // the signal whose default action TERMINATES the whole app — which is exactly why the app
+        // appeared to "die" right after handling an `up`/`status` command (the dev server it had
+        // already spawned survives, since it runs in its own session). The CLI guards against this;
+        // the hub side must too. Set before IPCServer.start() below begins accepting/writing.
+        signal(SIGPIPE, SIG_IGN)
         settings = settingsStore.load()
         // Apply the saved theme once the run loop is up — NSApp is nil during SwiftUI App.init.
         let theme = settings.theme
@@ -390,6 +398,19 @@ final class AppState {
         Task.detached {
             try? await Task.sleep(for: .seconds(2))
             if kill(pid, 0) == 0 { kill(pid, SIGKILL) }   // signal 0 = "are you still there?"
+        }
+    }
+
+    /// Kill the process behind a table row (the hover ✕ button). A managed server (synthetic
+    /// id = -pid) is stopped through its supervisor; the aggregated build row stops every running
+    /// build; any real process (external dev server, foreign helper) gets SIGTERM→SIGKILL.
+    func killProcessRow(_ row: ProcessRow) {
+        if row.isBuild {
+            for b in builds.values where b.isRunning { b.stop() }
+        } else if row.isDevServer {
+            sessions.values.first { $0.pid == -row.id }?.stop()
+        } else if row.id > 0 {
+            Self.killPid(row.id)
         }
     }
 

@@ -3,10 +3,12 @@
 
 #include <sys/types.h>
 
-/// Spawn `/bin/zsh -lic <command>` in a NEW session (so the child is its own
+/// Spawn `/bin/zsh -lc <command>` in a NEW session (so the child is its own
 /// session/pgid leader and the whole tree can be reaped with killpg). The command
-/// runs with `cwd` as working directory and inherits the current environment
-/// (a login-interactive zsh resolves fnm/PATH). stdout and stderr are merged into
+/// runs with `cwd` as working directory and inherits the current environment.
+/// NOTE: `-lc` is login but NON-interactive (it does NOT source `.zshrc`), so Node version-manager
+/// shims (fnm/nvm) are on PATH only because ShellEnvironment resolves the user's login+interactive
+/// PATH and exports it into this process before each launch. stdout and stderr are merged into
 /// a single pipe whose read end is returned via `out_fd`.
 ///
 /// stdout and stderr are merged into a single pipe whose read end is returned via `out_fd`.

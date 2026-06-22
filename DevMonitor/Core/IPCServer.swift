@@ -14,7 +14,15 @@ final class IPCServer {
         let dir = (IPCSocket.path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let fd = dm_ipc_listen(IPCSocket.path)
-        guard fd >= 0 else { return }
+        guard fd >= 0 else {
+            // -2: another Dev Monitor instance already owns the hub socket. Don't steal it (that
+            // races two hubs against each other). This instance simply runs without a hub; in normal
+            // use macOS keeps a single instance, so this only guards against a launch race.
+            if fd == -2 {
+                AppLog.shared.event("IPCServer: a Dev Monitor hub is already listening — not taking over the socket")
+            }
+            return
+        }
         listenFD = fd
 
         let queue = DispatchQueue(label: "ipc.accept")

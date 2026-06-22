@@ -102,6 +102,16 @@ final class DevSession {
         startedAt = Date()
         openLogFile()
 
+        // Resolve the user's real PATH (fnm/nvm/Homebrew live in the interactive rc file) and export
+        // it into our environment BEFORE spawning, so the non-interactive `zsh -lc` server inherits a
+        // PATH that can find node/npm. Without this, a GUI launch from launchd gets the minimal
+        // launchd PATH and the server dies with `command not found: npm` (exit 127). Done here (not
+        // once at startup) so it covers auto-restarts/recycles too, and so fnm's ephemeral per-shell
+        // PATH dir is freshly resolved rather than stale. See ShellEnvironment.
+        if ShellEnvironment.applyResolvedPATH() == nil {
+            AppLog.shared.event("DevSession: could not resolve the user shell PATH for \(project.name) — using inherited PATH")
+        }
+
         let baseCommand = project.devCommand ?? Detector.detect(path: project.path).devCommand
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
         // REPLACES the shell — making it the session leader we spawned, so the whole tree

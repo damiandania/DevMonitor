@@ -15,7 +15,18 @@ cwd=$(printf '%s' "$input" | /usr/bin/plutil -extract cwd raw -o - - 2>/dev/null
 [ -z "$cmd" ] && exit 0
 printf '%s' "$cmd" | grep -q 'dev-monitor' && exit 0
 printf '%s' "$cmd" | grep -q 'DM_RAW=1' && exit 0
-sep='(^|[^[:alnum:]_/.-])'
+
+# Read-only / inspection commands that merely MENTION a dev server (e.g. `pgrep -fl 'nuxt dev'`,
+# `grep "vite" file`, `ps aux | grep next`) must NOT be blocked. If the command's first real word —
+# after any leading VAR=val assignments and an optional path prefix — is a known inspection tool,
+# let it through. (This closes the false-positive that blocked plain `pgrep 'nuxt dev'`.)
+INSPECT_RE='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=([^[:space:]"'"'"']*|"[^"]*"|'"'"'[^'"'"']*'"'"')[[:space:]]+)*([^[:space:]]*/)?(pgrep|pkill|kill|grep|egrep|fgrep|rg|ag|ack|ps|echo|printf|cat|bat|less|more|head|tail|ls|find|fd|which|type|command|whereis|whatis|man|lsof|awk|sed|tr|cut|sort|uniq|wc|jq|yq|stat|file|dirname|basename|realpath|readlink|true|false|test|tmux|history)([[:space:]]|$)'
+printf '%s' "$cmd" | grep -qE "$INSPECT_RE" && exit 0
+
+# Match a real launch. `sep` no longer excludes '/', so a path-qualified launch
+# (`./node_modules/.bin/nuxt dev`, `/usr/local/bin/next dev`, `node_modules/.bin/vite`) is caught
+# too — that hole is how a launch could previously slip past this hook.
+sep='(^|[^[:alnum:]_.-])'
 DEV_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?dev([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|vinxi)[[:space:]]+dev([^[:alnum:]_-]|$)|${sep}vite([[:space:]]+(dev|serve|--)|[[:space:]]*$)|${sep}ng[[:space:]]+serve([^[:alnum:]_-]|$)|${sep}(webpack[[:space:]]+serve|webpack-dev-server)|${sep}remix[[:space:]]+vite:dev"
 BUILD_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?build([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|ng|vite|vinxi)[[:space:]]+build([^[:alnum:]_-]|$)"
 if printf '%s' "$cmd" | grep -qE "$DEV_RE"; then
