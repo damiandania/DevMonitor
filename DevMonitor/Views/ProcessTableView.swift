@@ -4,6 +4,7 @@ import SwiftUI
 /// native `Table`) so it sits flush on the card with hover highlighting, tinted dev-server rows
 /// and right-aligned monospaced metrics.
 struct ProcessTableView: View {
+    @Environment(AppState.self) private var app
     let sampler: SystemSampler
     @Binding var percentOfMachine: Bool
 
@@ -21,7 +22,8 @@ struct ProcessTableView: View {
                                        cpuText: cpuText(row.cpuPerCore),
                                        cpuColor: cpuColor(row.cpuPerCore),
                                        memText: memText(row.memBytes),
-                                       cpuWidth: cpuWidth, memWidth: memWidth)
+                                       cpuWidth: cpuWidth, memWidth: memWidth,
+                                       onKill: { app.killProcessRow(row) })
                     }
                 }
                 .padding(.vertical, 5)
@@ -77,6 +79,7 @@ private struct ProcessRowView: View {
     let memText: String
     let cpuWidth: CGFloat
     let memWidth: CGFloat
+    let onKill: () -> Void
 
     @State private var hovering = false
 
@@ -89,6 +92,9 @@ private struct ProcessRowView: View {
                     .foregroundStyle(nameColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if killable, hovering {
+                    killButton.transition(.opacity)   // appears right after the name on hover
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -103,7 +109,33 @@ private struct ProcessRowView: View {
         .background(rowBackground, in: RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.12), value: hovering)
         .help(rowHelp)
+    }
+
+    /// A managed server / build is stopped through its supervisor; an external dev server or any
+    /// other real process is killed by pid. Critical system processes and the editor (anything
+    /// `ResourceAdvisor` protects) get no button, so a stray hover-click can't take down the session.
+    private var killable: Bool {
+        if row.isDevServer || row.isBuild || row.isExternalDev { return true }
+        return row.id > 0 && !ResourceAdvisor.isProtected(row.name)
+    }
+
+    private var killButton: some View {
+        Button(action: onKill) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 13))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
+        .help(killHelp)
+    }
+
+    private var killHelp: String {
+        if row.isDevServer { return "Stop \(row.name)" }
+        if row.isBuild { return "Stop the build" }
+        return "Kill \(row.name) (pid \(row.id))"
     }
 
     /// Full process name (it truncates in the middle) plus its category, shown on hover.
@@ -112,6 +144,7 @@ private struct ProcessRowView: View {
         if row.isDevServer { kind = " — supervised dev server" }
         else if row.isExternalDev { kind = " — external dev server (not supervised)" }
         else if row.isBuild { kind = " — build" }
+        else if row.isExtension { kind = " — VS Code extension" }
         else { kind = "" }
         return "\(row.name)\(kind)\nCPU \(cpuText) · Memory \(memText)"
     }
@@ -124,6 +157,10 @@ private struct ProcessRowView: View {
             Image(systemName: "server.rack").foregroundStyle(Color.indigo)
         } else if row.isBuild {
             Image(systemName: "hammer.fill").foregroundStyle(.orange)
+        } else if row.isExtension {
+            // A generic "extension" glyph — marks the row as a VS Code/Cursor extension, not the
+            // tech's own logo. Distinguishes it from a plain helper's gray dot.
+            Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.secondary)
         } else {
             Image(systemName: "circle.fill").font(.system(size: 4)).foregroundStyle(.tertiary)
         }

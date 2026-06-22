@@ -10,6 +10,7 @@ struct ProcessRow: Identifiable, Sendable {
     var isDevServer = false      // a server SUPERVISED by the app (managed tree)
     var isBuild = false
     var isExternalDev = false    // a dev server running OUTSIDE the app (identified, not supervised)
+    var isExtension = false      // a VS Code / Cursor extension language-server helper
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -42,7 +43,7 @@ final class SystemSampler {
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
-    private var richNameCache: [Int32: (name: String, ext: Bool)] = [:]
+    private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool)] = [:]
     private var prevSysTicks: dm_cpu_ticks?
     private var task: Task<Void, Never>?
     private let topN = 40
@@ -138,10 +139,11 @@ final class SystemSampler {
         processes = result.map { row in
             guard row.id > 0, Self.isGeneric(row.name) else { return row }
             let e = self.enrichedName(pid: row.id, comm: row.name)
-            if !e.ext && e.name == row.name { return row }
+            if !e.ext && !e.isExtension && e.name == row.name { return row }
             return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
                               memBytes: row.memBytes, isDevServer: row.isDevServer,
-                              isBuild: row.isBuild, isExternalDev: e.ext)
+                              isBuild: row.isBuild, isExternalDev: e.ext,
+                              isExtension: e.isExtension)
         }
         let liveIDs = Set(result.map { $0.id })
         richNameCache = richNameCache.filter { liveIDs.contains($0.key) }
@@ -243,7 +245,7 @@ final class SystemSampler {
             || name.allSatisfy { $0.isNumber || $0 == "." || $0 == "-" }
     }
 
-    private func enrichedName(pid: Int32, comm: String) -> (name: String, ext: Bool) {
+    private func enrichedName(pid: Int32, comm: String) -> (name: String, ext: Bool, isExtension: Bool) {
         if let cached = richNameCache[pid] { return cached }
         var buffer = [CChar](repeating: 0, count: 8192)
         let n = Int(dm_proc_args(pid, &buffer, 8192))
@@ -254,11 +256,12 @@ final class SystemSampler {
         if ResourceAdvisor.looksLikeDevServer(argv: args) {
             let project = Self.projectName(fromArgs: args) ?? comm
             let port = Int(dm_proc_listen_port(pid))
-            let entry = (name: project + (port > 0 ? " :\(port)" : ""), ext: true)
+            let entry = (name: project + (port > 0 ? " :\(port)" : ""), ext: true, isExtension: false)
             if port > 0 { richNameCache[pid] = entry }   // cache once the port binds (it can be late)
             return entry
         }
-        let entry = (name: Self.describe(comm: comm, args: args), ext: false)
+        let d = Self.describe(comm: comm, args: args)
+        let entry = (name: d.name, ext: false, isExtension: d.isExtension)
         richNameCache[pid] = entry
         return entry
     }
@@ -273,17 +276,17 @@ final class SystemSampler {
         return name.isEmpty ? nil : name
     }
 
-    private static func describe(comm: String, args: String) -> String {
+    private static func describe(comm: String, args: String) -> (name: String, isExtension: Bool) {
         // VS Code / Cursor language servers run from an extension folder referenced in their argv.
         // Read that extension's own package.json so the name comes from the extension, never a
         // hardcoded list. Falls back to the folder name, then the .app bundle, then the bare name.
         if let dir = extensionDir(inArgs: args),
            let name = extensionDisplayName(dir: dir) ?? extensionFolderName(dir) {
-            return name
+            return (name, true)
         }
         // Otherwise identify the owning app from the bundle path in argv
         // (e.g. ".../Claude.app/Contents/Helpers/.../2.1.179" → "Claude").
-        return appBundleName(inArgs: args) ?? comm
+        return (appBundleName(inArgs: args) ?? comm, false)
     }
 
     /// The `<Name>` of the first `…/<Name>.app/…` bundle referenced in argv.

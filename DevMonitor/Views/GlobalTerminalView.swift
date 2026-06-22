@@ -39,7 +39,16 @@ struct GlobalTerminalView: View {
         VStack(spacing: 10) {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
-                    ForEach(tabs) { tab in tabPill(tab, selected: tab.id == sel) }
+                    ForEach(tabs) { tab in
+                        TabPill(tab: tab,
+                                selected: tab.id == sel,
+                                tint: statusColor(tab),
+                                onSelect: { app.selectedTerminalID = tab.id },
+                                onClose: {
+                                    if tab.isBuild { app.closeBuild(id: tab.projectID) }
+                                    else { app.closeServer(id: tab.projectID) }
+                                })
+                    }
                 }
                 .padding(.horizontal, 2).padding(.vertical, 1)
             }
@@ -64,32 +73,65 @@ struct GlobalTerminalView: View {
         }
     }
 
-    /// A tab pill: icon + project name (tap to select) + an ✕ that closes it.
-    private func tabPill(_ tab: Tab, selected: Bool) -> some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: tab.isBuild ? "hammer.fill" : "server.rack")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(tab.name)
-                    .font(.callout.weight(selected ? .semibold : .regular))
-                    .lineLimit(1)
+    /// Status colour for a tab's dot: a build's outcome (running orange, built green, failed red) or
+    /// the server's live state (running green, launching orange, failed red, idle/stopped gray).
+    private func statusColor(_ tab: Tab) -> Color {
+        if tab.isBuild {
+            guard let b = app.builds[tab.projectID] else { return .secondary }
+            if b.isRunning { return .orange }
+            switch b.result {
+            case .some(0): return .green
+            case .some:    return .red
+            default:       return .secondary
             }
-            .contentShape(Rectangle())
-            .onTapGesture { app.selectedTerminalID = tab.id }
-            .help("\(tab.isBuild ? "Build" : "Server") · \(tab.name)")
-
-            Button {
-                if tab.isBuild { app.closeBuild(id: tab.projectID) } else { app.closeServer(id: tab.projectID) }
-            } label: {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).opacity(0.7)
-            }
-            .buttonStyle(.plain)
-            .help("Close \(tab.isBuild ? "build" : "server") · \(tab.name)")
         }
-        .foregroundStyle(selected ? Color.white : Color.primary)
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(selected ? AnyShapeStyle(Color.accentColor)
-                             : AnyShapeStyle(Color(.quaternaryLabelColor)),
-                    in: Capsule())
+        return (app.sessions[tab.projectID]?.state ?? .idle).tint
+    }
+
+    /// A tab pill: icon + project name (tap to select). The trailing control is a small status dot
+    /// coloured by the server/build state, swapping to the ✕ close button on hover.
+    private struct TabPill: View {
+        let tab: Tab
+        let selected: Bool
+        let tint: Color
+        let onSelect: () -> Void
+        let onClose: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            HStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: tab.isBuild ? "hammer.fill" : "server.rack")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(tab.name)
+                        .font(.callout.weight(selected ? .semibold : .regular))
+                        .lineLimit(1)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onSelect)
+                .help("\(tab.isBuild ? "Build" : "Server") · \(tab.name)")
+
+                trailing.frame(width: 14, height: 14)   // fixed slot so dot↔✕ never shifts layout
+            }
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(selected ? AnyShapeStyle(Color.accentColor)
+                                 : AnyShapeStyle(Color(.quaternaryLabelColor)),
+                        in: Capsule())
+            .onHover { hovering = $0 }
+            .animation(.easeInOut(duration: 0.12), value: hovering)
+        }
+
+        @ViewBuilder private var trailing: some View {
+            if hovering {
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).opacity(0.7)
+                }
+                .buttonStyle(.plain)
+                .help("Close \(tab.isBuild ? "build" : "server") · \(tab.name)")
+            } else {
+                Circle().fill(tint).frame(width: 8, height: 8)
+            }
+        }
     }
 }

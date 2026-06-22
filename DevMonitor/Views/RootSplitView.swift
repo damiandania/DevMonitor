@@ -15,11 +15,13 @@ struct RootSplitView: View {
         }
         .navigationTitle("Dev Monitor")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                ProjectOpenGroup()
-            }
+            // Build sits at the left of the trailing toolbar group (before Open), separated from
+            // the open/settings/doctor cluster.
             ToolbarItem(placement: .primaryAction) {
                 ProjectBuildButton()
+            }
+            ToolbarItem(placement: .primaryAction) {
+                ProjectOpenGroup()
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { openWindow(id: "settings") } label: {

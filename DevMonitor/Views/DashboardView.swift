@@ -167,8 +167,14 @@ struct ProjectBuildButton: View {
     var body: some View {
         if let project = app.selectedProject, project.buildCommand != nil {
             if let build = app.build(for: project), build.isRunning {
-                Button { build.stop() } label: { Label("Stop build", systemImage: "stop.fill") }
-                    .help("Stop build")
+                Button { build.stop() } label: {
+                    Label {
+                        Text("Stop build")
+                    } icon: {
+                        Image(systemName: "stop.fill").foregroundStyle(.red)
+                    }
+                }
+                .help("Stop build")
             } else {
                 Button { app.runBuild(project) } label: { Label("Build", systemImage: "hammer.fill") }
                     .help(buildHelp(project))
