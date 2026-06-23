@@ -28,6 +28,8 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
 - **`Detector`** — reads the lockfile + `package.json` to infer package manager, framework, dev/build
   commands and default heap. Pure, headless-testable. Frameworks: Nuxt · Next · Astro · SvelteKit ·
   Remix · SolidStart · Angular · Qwik · Vite · Express · Node (the Vite-based ones are matched first).
+- **`HeapScaling`** — pure heap-autoscale policy: the **4 → 6 → 8** ladder + OOM detection, shared by
+  the dev server and the build. See **`docs/HEAP-AND-BUILD.md`** for the whole heap/build story.
 - **`ShellEnvironment`** — resolves the user's login+interactive shell `$PATH` (where fnm/nvm/asdf
   install their shims) and exports it into the process before each launch, so the non-interactive
   spawn shell can still find `node`/`npm`. Resolved fresh per launch (fnm's per-shell dir is
@@ -41,6 +43,10 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   3. **Probes health** (HTTP GET, configurable interval/strikes): on consecutive failures →
      `recycle()` (kill tree via `killpg`, relaunch with the same heap). Distinguishes a manual
      `stop()` (→ Stopped) from a crash (→ Failed) from a recycle.
+  4. **Autoscales the heap** on an out-of-memory exit: relaunches one rung up the 4 → 6 → 8 ladder
+     (`HeapScaling`), and in auto mode persists the learned level so the next launch starts there.
+     The build has the same autoscaler, driven from `AppState.runBuildAndWait`. See
+     `docs/HEAP-AND-BUILD.md`.
 
 ### Model/ · Store/
 - `Project` (Codable, persisted to Application Support), `SessionState` (state machine),

@@ -9,7 +9,7 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 | Command | What it does |
 |---------|--------------|
 | `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent** — a no-op that reports the port if already running. Auto-detects pnpm/npm + framework. `--gb N` overrides the heap (and pins it). `--wait` blocks until the server is HTTP-ready and prints its URL (or exits non-zero with the failure cause). (`run` is an alias.) |
-| `dev-monitor build [path]` | Build the project **alongside** its dev server (the running server is left untouched). Adds a build tab to the global terminal. |
+| `dev-monitor build [path]` | Build the project. **Pauses all active dev servers while building** (to free RAM) and relaunches them after. **Synchronous** — waits for the build, prints the tail of its output + a `✅`/`❌` verdict, and exits non-zero on failure. In auto mode the build heap autoscales **4 → 6 → 8** on OOM (independent from the dev server; learned level persisted). See `docs/HEAP-AND-BUILD.md`. |
 | `dev-monitor status [--json]` | List **every known** project (idle or running) with state + port. `--json` adds a machine-readable array with `ready`, `url`, `pid`, `exitCode`, `lastError`, `logPath` — everything an agent needs to operate and diagnose. |
 | `dev-monitor stop [path] [--all]` | Stop one project's server (default: cwd), or `--all` of them. |
 | `dev-monitor restart [path]` | Relaunch the project's server. Works from **any** state — including `Failed`/`Idle` (relaunches), not just a live server. |

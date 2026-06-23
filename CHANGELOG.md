@@ -5,7 +5,21 @@ versions use [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`dev-monitor build` is now synchronous.** It waits for the build to finish, then prints the tail
+  of the build output and a success/failure verdict — exiting non-zero on failure — instead of
+  returning immediately with "building …". A caller (or an agent) gets the real result, not a
+  fire-and-forget acknowledgement. Hub-side only: the existing CLI already reads the socket to EOF,
+  so no CLI reinstall is needed.
+- **Heap autoscaling now climbs in fixed steps and is remembered per project.** In auto mode the
+  heap starts at 4 GB and, on an out-of-memory, climbs **4 → 6 → 8** (was: doubled once, then gave
+  up). The learned level is persisted to `projects.json`, so the next launch starts there instead of
+  replaying the OOMs. Policy centralised in `Core/HeapScaling.swift`. See `docs/HEAP-AND-BUILD.md`.
+
 ### Fixed
+- **Builds no longer OOM (exit 6) on memory-heavy projects.** `dev-monitor build` (and the Build
+  button) now inject the same `NODE_OPTIONS=--max-old-space-size` heap as the dev server, instead of
+  running a bare `npm run build` with Node's small default heap.
 - **Dev servers managed by fnm/nvm no longer fail with `command not found` (exit 127).** The spawn
   shell (`zsh -lc`) is login but non-interactive, so it never sourced `~/.zshrc` where Node version
   managers put their shims — a GUI launch from launchd then had no `node`/`npm` on `PATH`. A new
@@ -21,6 +35,20 @@ versions use [SemVer](https://semver.org/).
   (`./node_modules/.bin/nuxt dev`). The embedded and on-disk copies of the script are back in sync.
 
 ### Added
+- **Independent build heap, with its own autoscaler and a "Build memory" setting.** The build now
+  has a heap **separate** from the dev server (a production build is usually heavier), with the same
+  4 → 6 → 8 OOM autoscaler and a learned level remembered per project. A new **"Build memory"** row
+  sits next to "Memory" in each project's settings. See `docs/HEAP-AND-BUILD.md`.
+- **The build now pauses all active dev servers while it runs** (relaunching them after). On a
+  RAM-starved Mac, building alongside a multi-GB dev server got the build SIGKILLed by the kernel
+  before V8 could OOM — failing the build and bypassing the autoscaler. Pausing the servers frees the
+  RAM, so the build completes (or surfaces a clean V8 OOM the autoscaler can act on).
+- **Aggressive RAM relief around builds** (this app targets 8 GB Macs, where a heavy build's final
+  Nitro prerender gets jetsam-SIGKILLed once swap fills). The build now: `purge`s inactive/cached
+  system memory before starting (and again mid-build under pressure); surfaces the resource advisor
+  to close heavy non-essential apps (user-confirmed); watches `systemMemPercent` during the build to
+  act **before** the kernel jetsam; and injects `--optimize-for-size` into Node so V8 favours
+  footprint over speed. See `docs/HEAP-AND-BUILD.md`.
 - **More frameworks detected** — SvelteKit, Remix, SolidStart, Angular and Qwik, in addition to
   Nuxt, Next, Astro, Vite and Express, each with a tuned default heap. (Any project with a `dev`
   script already launched; this just names/sizes them properly.)

@@ -24,6 +24,8 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 
 > **Why it exists.** A doubled `npm` wrapper once left an orphaned Nuxt process listening on `:3000` but unresponsive — pinning a CPU core and dragging the whole Mac down, with nothing obvious to kill. Dev Monitor does that supervision properly and *visibly*, so it can't happen quietly again.
 
+> **Built for small Macs.** Dev Monitor is tuned for machines where **RAM is the bottleneck** — an 8 GB Mac juggling a dev server, a production build, an editor and a browser. It actively manages that scarcity instead of leaving you to babysit Activity Monitor: heap that **autoscales** to what each project actually needs (and remembers it), dev servers **paused** to make room for a build, inactive memory **purged** before the kernel runs out of swap, and a **pressure system** that frees RAM *before* the machine grinds to a halt or the kernel starts SIGKILLing your build.
+
 <div align="center">
   <img src="docs/screenshots/dashboard.png" alt="Dev Monitor — a supervised dev server with live CPU / memory / swap meters and an integrated terminal" width="760" />
   <br />
@@ -48,16 +50,20 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 ### 🩺 Health, recovery &amp; resilience
 - **Hang detection + auto-recycle** — HTTP-probes the server; after consecutive failures it kills the whole process tree (orphans included) and relaunches.
 - **Crash auto-revive** — a server that *was* healthy then dies restarts with bounded backoff (1s → 2s → 4s, capped at 3 tries per stable run), with the **port pinned** so it doesn't drift.
-- **OOM recovery** — a crash that looks like a V8 out-of-memory retries once with a bigger heap; if it still won't fit, it's left `Failed` with a clear remedy.
+- **OOM autoscaling** — in **auto** mode the heap starts at 4 GB and climbs **4 → 6 → 8** on each V8 out-of-memory, and the learned level is **remembered per project** so the next launch starts there instead of replaying the crashes. The dev server and the build keep **separate** learned levels. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
 - **Crash-proof supervision** — a managed server (or even the notification subsystem) failing can never take the app down with it.
 
 ### 🧯 Pressure response
-When the machine is detected as *stuck* (CPU pinned, or memory full and swapping, for a sustained window):
+Reclaims memory **before** the machine stalls — both when it's detected as *stuck* (CPU pinned, or memory full and swapping, for a sustained window) **and proactively around every build**:
+- **Inactive memory is purged.** The system memory cache is released (`purge`) before a build and again mid-build under pressure — often a 1–2 GB swing — so a heavy build doesn't push the machine into swap exhaustion and a kernel SIGKILL (jetsam).
 - **Orphaned dev processes auto-close.** A dev server detected by its real binary in argv (`…/.bin/nuxt`, `vite/bin/vite`, `next dev`, …) that isn't in the managed tree is killed (SIGTERM → SIGKILL) and a **notification** lists what was closed. The managed server, editor, and system are excluded.
 - **Everything else stays a suggestion.** A sidebar panel surfaces other heavy processes — a fast **Haiku** evaluation of what's worth killing — each with a red **skull** button you press yourself. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself) are never suggested or auto-closed.
 
-### 🔨 Build runner
-- Runs the project's build script as a **separate tracked tree alongside** the dev server — it does *not* stop the server. It gets its own row in the Activity table and its own tab in the terminal; the **Build** button becomes a red **Stop build** while running.
+### 🔨 Build runner — tuned for tight RAM
+- Runs the project's build as a **separate tracked tree** with its own Activity row and terminal tab; the **Build** button becomes a red **Stop build** while running. The CLI's `build` is **synchronous** — it waits for the build and reports the exit code plus a ✅/❌ verdict (so an agent or a script gets the real result).
+- **Pauses all active dev servers** while building (relaunching them after): on an 8 GB Mac a build running alongside a multi-GB dev server gets SIGKILLed by the kernel before it can finish.
+- **Autoscales the build heap** 4 → 6 → 8 on OOM, with its **own** learned level independent from the dev server's.
+- **Frees RAM aggressively around the build**: `purge`s inactive/cached memory (before, and again under pressure during), surfaces the resource advisor to close heavy non-essential apps, watches memory pressure to act **before** the kernel jetsams the build, and runs Node with `--optimize-for-size`. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
 
 ### 🖥️ Global terminal &amp; menu bar
 - **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*).
@@ -66,7 +72,7 @@ When the machine is detected as *stuck* (CPU pinned, or memory full and swapping
 - **Appearance** — app-wide **Theme** (System / Light / Dark) and a separate **Terminal** theme for the log panes.
 
 ### ⌨️ CLI + central hub
-- Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (alongside the server) · `status [--json]` · `stop` · `restart` · `logs -f`. **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. → [CLI reference](#command-line-interface)
+- Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f`. **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. → [CLI reference](#command-line-interface)
 
 ### 🤖 Claude integration
 - **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw `npm run dev` / `nuxt dev` / framework builds and redirects to `dev-monitor`, so every terminal's servers land in one supervised place. → [`integrations/claude/`](integrations/claude/)
