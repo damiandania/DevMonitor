@@ -136,26 +136,26 @@ struct ProjectOpenGroup: View {
 
     private func openInBrowser(port: Int) {
         guard let url = URL(string: "http://localhost:\(port)/") else { return }
-        if let browser = app.settings.browser, !browser.isEmpty {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            task.arguments = ["-a", browser, url.absoluteString]
-            do { try task.run() } catch { NSWorkspace.shared.open(url) }
-        } else {
-            NSWorkspace.shared.open(url)
-        }
+        openWith(appNamed: app.settings.browser, target: url.absoluteString, fallback: url)
     }
 
     private func openInEditor(_ project: Project) {
         let editor = app.settings.editor ?? app.installedEditors.first ?? "Visual Studio Code"
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-a", editor, project.path]
-        do { try task.run() } catch { NSWorkspace.shared.open(URL(fileURLWithPath: project.path)) }
+        openWith(appNamed: editor, target: project.path, fallback: URL(fileURLWithPath: project.path))
     }
 
     private func openInFinder(_ project: Project) {
         NSWorkspace.shared.open(URL(fileURLWithPath: project.path))
+    }
+
+    /// `open -a <app> <target>`, falling back to the system default handler if no app is set or the
+    /// launch fails. Shared by the browser and editor buttons.
+    private func openWith(appNamed appName: String?, target: String, fallback: URL) {
+        guard let appName, !appName.isEmpty else { NSWorkspace.shared.open(fallback); return }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = ["-a", appName, target]
+        do { try task.run() } catch { NSWorkspace.shared.open(fallback) }
     }
 }
 
