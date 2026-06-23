@@ -36,7 +36,10 @@ extension AppState {
             return existing
         }
 
-        let pausedServerIDs = pauseActiveServersForBuild(buildName: project.name)
+        // Only one of dev/build/preview runs per project — stop this project's dev/preview (they stay
+        // Stopped, not relaunched). OTHER projects' servers are merely paused for RAM and relaunched.
+        stopSiblings(of: "build", for: project)
+        let pausedServerIDs = pauseActiveServersForBuild(buildName: project.name, excluding: project.id)
         defer { relaunchPausedServers(pausedServerIDs) }
 
         // RAM relief for the build — the whole point of this app on small Macs. (1) purge inactive/
@@ -59,8 +62,8 @@ extension AppState {
     /// Pause every active dev server (not just this project's) so the build gets the most RAM — on a
     /// starved Mac even another project's server can drive the build into a kernel SIGKILL (not a
     /// clean V8 OOM), which fails it and defeats the autoscaler. Returns the ids to relaunch after.
-    private func pauseActiveServersForBuild(buildName: String) -> [Project.ID] {
-        let ids = sessions.compactMap { $0.value.state.isActive ? $0.key : nil }
+    private func pauseActiveServersForBuild(buildName: String, excluding excludedID: Project.ID) -> [Project.ID] {
+        let ids = sessions.compactMap { $0.key != excludedID && $0.value.state.isActive ? $0.key : nil }
         for id in ids { sessions[id]?.stop() }
         if !ids.isEmpty {
             AppLog.shared.event("Build \(buildName): paused \(ids.count) dev server(s) to free RAM")

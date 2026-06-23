@@ -239,6 +239,7 @@ final class AppState {
     func launch(_ project: Project) {
         selectedTerminalID = "s:\(project.id)"
         if let existing = sessions[project.id], existing.state.isActive { return }
+        stopSiblings(of: "dev", for: project)   // only one of dev/build/preview runs per project
         let session = DevSession(project: project)
         session.onEvent = { [weak self] event in
             self?.route(NotificationPolicy.make(from: event, projectID: project.id))
@@ -252,6 +253,14 @@ final class AppState {
 
     /// Stop the supervised server for one project.
     func stop(_ project: Project) { sessions[project.id]?.stop() }
+
+    /// Dev, build and preview for one project are mutually exclusive — launching one stops the other
+    /// two (they read "Stopped"). Workers are independent and never touched here.
+    func stopSiblings(of kind: String, for project: Project) {
+        if kind != "dev"     { sessions[project.id]?.stop() }
+        if kind != "build"   { builds[project.id]?.stop() }
+        if kind != "preview" { previews[project.id]?.stop() }
+    }
 
     /// Stop every supervised server (pressure relief / Doctor "stop dev servers").
     func stopAllSessions() { for s in sessions.values { s.stop() } }
@@ -321,6 +330,7 @@ final class AppState {
         guard let cmd = project.previewCommand else { return }
         selectedTerminalID = "p:\(project.id)"
         if let existing = previews[project.id], existing.state.isActive { return }
+        stopSiblings(of: "preview", for: project)   // only one of dev/build/preview runs per project
         let preview = DevSession(project: project, commandOverride: cmd)
         previews[project.id] = preview
         preview.start(memoryGB: effectiveBuildMemoryGB(for: project))
