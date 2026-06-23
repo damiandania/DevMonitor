@@ -47,6 +47,25 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
      (`HeapScaling`), and in auto mode persists the learned level so the next launch starts there.
      The build has the same autoscaler, driven from `AppState.runBuildAndWait`. See
      `docs/HEAP-AND-BUILD.md`.
+- **`SpawnedProcess`** — the single owner of the spawn → `DispatchSource` (read + exit) →
+  `AsyncStream<Chunk>` plumbing. `DevSession` and `BuildRunner` consume its `chunks` and layer their
+  own policy on top (port detection + health for the server, nothing extra for a build). Supporting
+  primitives: `ProcessSupport` (`decodeExitCode`, `gracefulKillGroup`, `nodeHeapFlag`), `LineBuffer`
+  (`\n`-splitting with partial-line carryover), `LogNoise` (the shared shell session-restore filter).
+- **`BuildRunner`** — a one-shot tracked build process (same spawn/stream plumbing), reporting
+  success/failure. A user-initiated `stop()` is not reported as a build *failure*.
+- **`PressureManager`** — the machine-pressure subsystem: the "under pressure" state, the one-shot
+  auto-close of orphaned dev processes, and the kill suggestions (heuristic + Haiku). Owned by
+  `AppState` via an unowned back-reference.
+- **`AsyncJob<Output>`** — a one-at-a-time cancellable async job (latest result + running flag);
+  backs the Doctor's three AI analyses, which used to duplicate the guard/flag/`Task`/cancel dance.
+
+### App/
+- **`AppState`** (`@MainActor @Observable`) — the root store, split across cohesive extensions:
+  `AppState+Projects` (project CRUD + the per-project setters, all funneled through one
+  `mutate(_:_:)` helper), `AppState+Builds` (the pause-servers → relieve-pressure → autoscale build
+  orchestration), and `AppState+Doctor` (the three AI analyses, backed by `AsyncJob`). Every
+  notification is funneled through `route(_:)`; classification/wording lives in `NotificationPolicy`.
 
 ### Model/ · Store/
 - `Project` (Codable, persisted to Application Support), `SessionState` (state machine),
@@ -59,9 +78,10 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
 ## Concurrency model
 
 - `DevSession` is `@MainActor @Observable`. Background producers (pipe reader, process-exit
-  watcher) are `DispatchSource` handlers that capture **only Sendable values** and feed an
-  `AsyncStream<Chunk>`; a single `@MainActor` task consumes and mutates state. Sampling and health
-  run as `@MainActor` tasks with `Task.sleep`, cancelled on stop/recycle.
+  watcher) are `DispatchSource` handlers — now owned by `SpawnedProcess` — that capture **only
+  Sendable values** and feed an `AsyncStream<Chunk>`; a single `@MainActor` task consumes and
+  mutates state. Sampling and health run as `@MainActor` tasks with `Task.sleep`, cancelled on
+  stop/recycle.
 
 ## Why these choices
 

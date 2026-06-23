@@ -15,8 +15,19 @@ versions use [SemVer](https://semver.org/).
   heap starts at 4 GB and, on an out-of-memory, climbs **4 → 6 → 8** (was: doubled once, then gave
   up). The learned level is persisted to `projects.json`, so the next launch starts there instead of
   replaying the OOMs. Policy centralised in `Core/HeapScaling.swift`. See `docs/HEAP-AND-BUILD.md`.
+- **Internal refactor — no behavior change.** The dev-server/build process plumbing is shared in
+  `SpawnedProcess` + `ProcessSupport`/`LineBuffer`/`LogNoise`; the `AppState` god object (712 → ~300
+  lines) is split into focused extensions (`+Projects`/`+Builds`/`+Doctor`) with `PressureManager`
+  and a reusable `AsyncJob` extracted; views gain reusable pieces (`StatusDot`, `.pulsing()`, status
+  colour extensions). All 14 test suites stay green. See `docs/ARCHITECTURE.md`.
 
 ### Fixed
+- **Build failures now show a banner.** A failed build was delivered to Notification Center silently
+  (a `.passive` interruption level); it's now urgent/time-sensitive so it breaks through as a banner,
+  while a successful build stays silent.
+- **Cancelling a build no longer reports it as "failed".** Stopping a running build used to fire a
+  "Build failed" notification because the process is signal-killed; a user-initiated stop is now
+  suppressed (the paused dev server still relaunches).
 - **Builds no longer OOM (exit 6) on memory-heavy projects.** `dev-monitor build` (and the Build
   button) now inject the same `NODE_OPTIONS=--max-old-space-size` heap as the dev server, instead of
   running a bare `npm run build` with Node's small default heap.
