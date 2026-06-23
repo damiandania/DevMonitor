@@ -24,7 +24,7 @@ enum NotificationPolicy {
         case .oomRetry:                   return (.failures, .passive, .none)
         case .recycled:                   return (.recovery, .passive, .none)
         case .recovered:                  return (.recovery, .passive, .none)
-        case .buildFinished(_, let ok):   return (.builds,   .passive, ok ? .none : .openLogs)
+        case .buildFinished(_, let ok):   return (.builds,   ok ? .passive : .urgent, ok ? .none : .openLogs)
         }
     }
 

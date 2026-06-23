@@ -18,6 +18,8 @@ final class BuildRunner {
     private var consumeTask: Task<Void, Never>?
     private var lineBuffer = ""
     private let maxLogLines = 4000
+    /// Set when `stop()` is called so the signal-killed exit isn't reported as a build *failure*.
+    private var wasStopped = false
 
     var onEvent: (@MainActor (SupervisionEvent) -> Void)?
     /// Fired once when the build process exits. `success` is true on exit code 0.
@@ -43,6 +45,7 @@ final class BuildRunner {
         logLines = ["$ \(command)  (cwd: \(project.path))"]
         lineBuffer = ""
         result = nil
+        wasStopped = false
         isRunning = true
 
         var fd: Int32 = -1
@@ -92,6 +95,7 @@ final class BuildRunner {
 
     func stop() {
         guard pid > 0 else { return }
+        wasStopped = true
         let target = pid
         killpg(target, SIGTERM)
         Task.detached {
@@ -119,8 +123,15 @@ final class BuildRunner {
         pid = 0
         isRunning = false
         result = code
-        logLines.append("build finished (code \(code))")
-        onEvent?(.buildFinished(project: project.name, success: code == 0))
+        // A user-initiated stop() kills the process with a signal (non-zero exit); don't post a
+        // "Build failed" banner for a build the user deliberately cancelled. The feed/onFinish still
+        // fire so the orchestrator can relaunch the paused dev server.
+        if wasStopped {
+            logLines.append("build stopped")
+        } else {
+            logLines.append("build finished (code \(code))")
+            onEvent?(.buildFinished(project: project.name, success: code == 0))
+        }
         onFinish?(code == 0)
     }
 }

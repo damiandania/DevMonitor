@@ -115,9 +115,29 @@ func runSessionTests() async -> Int {
 
     let failBuild = BuildRunner(project: Project(name: "bf", path: "/tmp",
         buildCommand: "sh -c 'exit 3'"))
+    var failEvented = false
+    failBuild.onEvent = { _ in failEvented = true }
     failBuild.start(memoryGB: 2)
     try? await Task.sleep(for: .seconds(2))
     check("build: failure code", failBuild.result == 3, "result=\(String(describing: failBuild.result))")
+    check("build: failure posts a buildFinished event", failEvented, "evented=\(failEvented)")
+
+    // P6: a user-initiated stop() must NOT post a buildFinished event — the process is signal-killed
+    // (non-zero exit), but the user cancelled deliberately, so it isn't a "Build failed". onFinish
+    // still fires so the orchestrator can relaunch the dev server it paused.
+    let stopBuild = BuildRunner(project: Project(name: "bs", path: "/tmp",
+        buildCommand: "sh -c 'sleep 10'"))
+    var stopEvented = false
+    var stopFinished = false
+    stopBuild.onEvent = { _ in stopEvented = true }
+    stopBuild.onFinish = { _ in stopFinished = true }
+    stopBuild.start(memoryGB: 2)
+    try? await Task.sleep(for: .seconds(0.5))
+    stopBuild.stop()
+    try? await Task.sleep(for: .seconds(2))
+    check("build: stop() posts no buildFinished event", !stopEvented, "evented=\(stopEvented)")
+    check("build: stop() still calls onFinish", stopFinished, "finished=\(stopFinished)")
+    check("build: stop() logs 'build stopped'", stopBuild.logLines.contains { $0.contains("build stopped") })
 
     return failures
 }

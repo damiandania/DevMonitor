@@ -32,10 +32,10 @@ do { let (c, sev, _) = cls(.hung(project: "x"))
      check(c == .failures && sev == .passive, "hung → failures/passive") }
 do { let (c, _, _) = cls(.recycled(project: "x")); check(c == .recovery, "recycled → recovery") }
 do { let (c, _, _) = cls(.recovered(project: "x")); check(c == .recovery, "recovered → recovery") }
-do { let (c, _, a) = cls(.buildFinished(project: "x", success: true))
-     check(c == .builds && a == .none, "build success → builds/none") }
-do { let (c, _, a) = cls(.buildFinished(project: "x", success: false))
-     check(c == .builds && a == .openLogs, "build failure → builds/openLogs") }
+do { let (c, sev, a) = cls(.buildFinished(project: "x", success: true))
+     check(c == .builds && sev == .passive && a == .none, "build success → builds/passive/none") }
+do { let (c, sev, a) = cls(.buildFinished(project: "x", success: false))
+     check(c == .builds && sev == .urgent && a == .openLogs, "build failure → builds/urgent/openLogs") }
 
 // --- make: title/body + carries the classification ---
 let item = NotificationPolicy.make(from: .crashed(project: "Web", code: 9), projectID: nil)
