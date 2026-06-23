@@ -77,13 +77,14 @@ final class AppState {
             let label = live.count == 1 ? "Build · \(live.first?.project.name ?? "build")" : "\(live.count) builds"
             return (pids, label)
         }
-        systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
+        pressure = PressureManager(app: self)
+        systemSampler.onStuck = { [weak self] in self?.pressure.evaluate() }
         // Refresh the pressure suggestions every 30s: prune dead processes, clear once the machine
         // recovers (the yellow tab disappears), or re-evaluate while still stuck.
         Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
-                self?.tickPressure()
+                self?.pressure.tick()
             }
         }
         // Wire notifications: set the UN delegate (foreground presentation + action routing),
@@ -256,114 +257,15 @@ final class AppState {
 
     func persistSettings() { settingsStore.save(settings) }
 
-    // Pressure-triggered kill suggestions (auto): when the machine is stuck, a fast Haiku eval
-    // proposes processes to kill, shown above the server config with a red skull button.
-    var killSuggestions: [ResourceAdvisor.Recommendation] = []
-    var isEvaluatingPressure = false
-    /// Set when the user closes (✕) the pressure tab — hides it until the machine recovers and the
-    /// pressure re-triggers, so a manual dismiss isn't undone every refresh.
-    var pressureDismissed = false
-    /// True for the duration of one stuck episode — so the "under pressure" notification fires once
-    /// (not every refresh) and "recovered" only fires if we actually warned.
-    @ObservationIgnored private var pressureNotified = false
-
-    /// True while the machine is stuck / being evaluated / has kill suggestions — drives the yellow
-    /// "System pressure" tab in the global terminal.
-    var systemUnderPressure: Bool {
-        if pressureDismissed { return false }
-        return isEvaluatingPressure || !killSuggestions.isEmpty || systemSampler.pressure == .stuck
-    }
-
-    /// User closed the pressure tab — clear it and keep it hidden until pressure re-triggers.
-    func dismissPressure() {
-        pressureDismissed = true
-        killSuggestions.removeAll()
-    }
-
-    /// Runs every ~1 min while a pressure tab is/was showing: prunes suggestions whose process has
-    /// exited, clears everything once the machine recovers (so the tab disappears), and otherwise
-    /// refreshes the suggestions while still stuck — without stealing the user's tab selection.
-    func tickPressure() {
-        // Drop suggestions whose process is gone (signal 0 = "are you still there?").
-        if !killSuggestions.isEmpty {
-            killSuggestions.removeAll { $0.id > 0 && kill($0.id, 0) != 0 }
-        }
-        if systemSampler.pressure == .stuck {
-            // Refresh the SUGGESTIONS only — do NOT re-run the orphan auto-close every tick.
-            if !pressureDismissed { refreshKillSuggestions() }
-        } else {
-            // Recovered: notify (if we warned), clear suggestions, and re-arm for the next event.
-            if pressureNotified {
-                route(NotificationPolicy.pressureCleared())
-                pressureNotified = false
-            }
-            killSuggestions.removeAll()
-            pressureDismissed = false
-        }
-    }
-
-    /// Every managed session's leader pid and its whole tree — never auto-close any of these, even a
-    /// server still launching (whose tree isn't enumerable yet, so it isn't aggregated out and would
-    /// otherwise look like an orphan dev server and get SIGKILLed mid-launch).
-    private var managedPids: Set<Int32> {
-        Set(sessions.values.flatMap { [$0.pid] + ProcessTree.sessionMembers(of: $0.pid) }.filter { $0 > 0 })
-    }
-
-    /// Called once on a genuine normal→stuck transition: focuses the pressure tab, auto-closes
-    /// orphaned dev processes (one-shot), then computes the kill suggestions.
-    func evaluatePressure(focusTab: Bool = true) {
-        if focusTab {
-            pressureDismissed = false           // a fresh pressure event un-dismisses the tab
-            selectedTerminalID = "pressure"     // focus it so the suggestions are seen
-            if !pressureNotified {              // once per stuck episode
-                pressureNotified = true
-                route(NotificationPolicy.machineUnderPressure(reason: systemSampler.pressureReason))
-            }
-        }
-        autoCloseOrphans()
-        refreshKillSuggestions()
-    }
-
-    /// Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't part of a
-    /// managed session. Managed servers (incl. one still launching), editor helpers and protected
-    /// processes are excluded; what was closed is notified. (Off-switchable.)
-    private func autoCloseOrphans() {
-        guard settings.autoCloseOrphans else { return }
-        let managed = managedPids
-        let orphans = systemSampler.processes.filter { row in
-            row.id > 0
-                && !managed.contains(row.id)
-                && !row.name.localizedCaseInsensitiveContains("Helper")
-                && !ResourceAdvisor.isProtected(row.name)
-                && ResourceAdvisor.looksLikeDevServer(argv: Self.argv(of: row.id))
-        }
-        guard !orphans.isEmpty else { return }
-        orphans.forEach { Self.killPid($0.id) }
-        let names = orphans.map(\.name).joined(separator: ", ")
-        route(NotificationPolicy.orphansClosed(count: orphans.count, names: names))
-        AppLog.shared.event("Pressure: auto-closed \(orphans.count) orphan(s): \(names)")
-    }
-
-    /// (Re)compute the kill suggestions: heuristic instantly, refined by Haiku. Managed servers are
-    /// kept in the snapshot so a runaway one can be suggested by name. Safe to call on a refresh.
-    func refreshKillSuggestions() {
-        guard !isEvaluatingPressure else { return }
-        isEvaluatingPressure = true
-        let s = systemSampler
-        let procs: [ResourceAdvisor.Proc] = s.processes
-            .map { .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
-                         memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer) }
-        killSuggestions = ResourceAdvisor.heuristicKills(procs: procs)
-        let cpu = s.systemCPU, mem = s.systemMemPercent, swap = s.systemSwapPercent, cores = s.coreCount
-        let model = settings.analysisModel
-        Task { [weak self] in
-            let recs = await ResourceAdvisor.pressureKills(
-                systemCPU: cpu, systemMemPercent: mem, systemSwapPercent: swap,
-                coreCount: cores, procs: procs, model: model)
-            if !recs.isEmpty { self?.killSuggestions = recs }
-            self?.isEvaluatingPressure = false
-        }
-    }
+    // Machine-pressure subsystem (kill suggestions, orphan auto-close, the "under pressure" tab) lives
+    // in PressureManager, created in init(). These shims keep the view-facing API on AppState so the
+    // views are unchanged.
+    @ObservationIgnored private(set) var pressure: PressureManager!
+    var systemUnderPressure: Bool { pressure.systemUnderPressure }
+    var isEvaluatingPressure: Bool { pressure.isEvaluating }
+    var killSuggestions: [ResourceAdvisor.Recommendation] { pressure.killSuggestions }
+    func dismissPressure() { pressure.dismiss() }
+    func killSuggestion(_ rec: ResourceAdvisor.Recommendation) { pressure.killSuggestion(rec) }
 
     /// argv of a pid (joined), via KERN_PROCARGS2 — used for orphan dev-server detection.
     static func argv(of pid: Int32) -> String {
@@ -393,20 +295,6 @@ final class AppState {
         } else if row.id > 0 {
             Self.killPid(row.id)
         }
-    }
-
-    /// Kill a suggested process (red-skull button). The dev-server tree is stopped via the
-    /// supervisor; a foreign process gets SIGTERM, escalating to SIGKILL if still alive.
-    func killSuggestion(_ rec: ResourceAdvisor.Recommendation) {
-        if rec.action == .stopDevServer || rec.id == -1 {
-            // The suggestion's id is the server's synthetic id (-pid) — stop THAT server; if it
-            // doesn't map to a live session, fall back to stopping all.
-            if let s = sessions.values.first(where: { $0.pid == -rec.id }) { s.stop() }
-            else { stopAllSessions() }
-        } else if rec.id > 0 {
-            Self.killPid(rec.id)
-        }
-        killSuggestions.removeAll { $0.id == rec.id }
     }
 
     func persist() {

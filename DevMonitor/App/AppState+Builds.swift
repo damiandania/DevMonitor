@@ -44,7 +44,7 @@ extension AppState {
         // closed (user-confirmed), (3) keep relieving pressure during the build so we act BEFORE the
         // kernel jetsams it (SIGKILL) once swap fills up.
         await Task.detached { Self.purgeSystemMemory() }.value
-        evaluatePressure(focusTab: false)
+        pressure.evaluate(focusTab: false)
         let pressureWatch = startBuildPressureWatch()
         defer { pressureWatch.cancel() }
 
@@ -89,7 +89,7 @@ extension AppState {
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, self.systemSampler.systemMemPercent > 85 else { continue }
                 await Task.detached { Self.purgeSystemMemory() }.value
-                self.evaluatePressure(focusTab: false)
+                self.pressure.evaluate(focusTab: false)
             }
         }
     }
