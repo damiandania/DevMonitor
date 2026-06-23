@@ -17,15 +17,7 @@ struct RootSplitView: View {
                 // 1) Build · 2) Open · 3) Settings + Doctor.
                 .toolbar {
                     ToolbarSpacer(.flexible)
-                    // "Build Running ●●●" sits OUTSIDE the build button, to its left (no glass pill).
-                    if app.isSelectedBuildRunning {
-                        ToolbarItem { BuildRunningLabel() }
-                            .sharedBackgroundVisibility(.hidden)
-                    }
-                    ToolbarItem {
-                        ProjectBuildButton()
-                    }
-                    ToolbarSpacer(.fixed)
+                    // Build/worker/dev controls live in the dashboard card now (see RunControlRow).
                     ToolbarItem {
                         ProjectOpenGroup()
                     }
@@ -60,7 +52,8 @@ struct RootSplitView: View {
                     .dmCard()
             }
             ActivityView()
-            if !app.sessions.isEmpty || !app.builds.isEmpty || app.systemUnderPressure {
+            if !app.sessions.isEmpty || !app.builds.isEmpty || !app.workers.isEmpty
+                || !app.previews.isEmpty || app.systemUnderPressure {
                 GlobalTerminalView()
             }
         }

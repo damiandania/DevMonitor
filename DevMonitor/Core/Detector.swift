@@ -7,6 +7,11 @@ enum Detector {
         var framework: Framework
         var devCommand: String
         var buildCommand: String?
+        /// Optional long-running background worker command (e.g. a queue/job worker), `nil` when the
+        /// project has no worker script.
+        var workerCommand: String?
+        /// Optional command to serve the production build (`preview` / `start`), `nil` when none.
+        var previewCommand: String?
         var port: Int?
     }
 
@@ -68,14 +73,36 @@ enum Detector {
         else { devCommand = "\(pm.runScriptPrefix) dev" }
 
         let buildCommand: String? = scripts["build"] != nil ? "\(pm.runScriptPrefix) build" : nil
+        let workerCommand = self.workerScript(in: scripts).map { "\(pm.runScriptPrefix) \($0)" }
+        let previewCommand = self.previewScript(in: scripts).map { "\(pm.runScriptPrefix) \($0)" }
 
         return Result(packageManager: pm, framework: framework,
-                      devCommand: devCommand, buildCommand: buildCommand, port: nil)
+                      devCommand: devCommand, buildCommand: buildCommand,
+                      workerCommand: workerCommand, previewCommand: previewCommand, port: nil)
+    }
+
+    /// The script that serves the production build, if any: a `preview` script (Vite/Nuxt/Astro/…),
+    /// else a `start` script *only when it's distinct from the dev command* (e.g. Next's `next start`,
+    /// where `dev` is a separate script). Returns the script name or nil.
+    static func previewScript(in scripts: [String: String]) -> String? {
+        if scripts["preview"] != nil { return "preview" }
+        if scripts["start"] != nil && scripts["dev"] != nil { return "start" }
+        return nil
+    }
+
+    /// Pick the project's long-running worker script, if any. Prefers a watch/dev variant so the
+    /// worker reloads on change (mirrors preferring `dev` over `start` for the server), then the
+    /// plain run variant. Returns the script *name* (e.g. "worker:dev") or nil when there is none.
+    static func workerScript(in scripts: [String: String]) -> String? {
+        for candidate in ["worker:dev", "worker:watch", "worker:start", "worker"] where scripts[candidate] != nil {
+            return candidate
+        }
+        return nil
     }
 
     /// Dev/build commands for an explicit package manager, preserving the project's scripts.
     /// Used when the user overrides the package manager in the server config.
-    static func commands(path: String, packageManager pm: PackageManager) -> (dev: String, build: String?) {
+    static func commands(path: String, packageManager pm: PackageManager) -> (dev: String, build: String?, worker: String?, preview: String?) {
         var scripts: [String: String] = [:]
         if let data = FileManager.default.contents(atPath: path + "/package.json"),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -85,7 +112,9 @@ enum Detector {
         else if scripts["start"] != nil { dev = "\(pm.runScriptPrefix) start" }
         else { dev = "\(pm.runScriptPrefix) dev" }
         let build = scripts["build"] != nil ? "\(pm.runScriptPrefix) build" : nil
-        return (dev, build)
+        let worker = workerScript(in: scripts).map { "\(pm.runScriptPrefix) \($0)" }
+        let preview = previewScript(in: scripts).map { "\(pm.runScriptPrefix) \($0)" }
+        return (dev, build, worker, preview)
     }
 
     /// Reasonable default heap (GB) for a framework's dev server.

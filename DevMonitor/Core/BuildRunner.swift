@@ -13,12 +13,17 @@ final class BuildRunner {
     private(set) var result: Int32?   // nil while running; 0 = success, else failure
 
     private(set) var pid: pid_t = 0
+    /// When the build process started — drives the elapsed-time counter in the terminal pane.
+    private(set) var startedAt: Date?
+    /// Wall-clock duration of the finished build (nil while running) — used as the ETA for the next.
+    private(set) var duration: TimeInterval?
     private var process: SpawnedProcess?
     private var consumeTask: Task<Void, Never>?
     private var lineBuffer = LineBuffer()
     private let maxLogLines = 4000
-    /// Set when `stop()` is called so the signal-killed exit isn't reported as a build *failure*.
-    private var wasStopped = false
+    /// Set when `stop()` is called so the signal-killed exit isn't reported as a build *failure*
+    /// (the dashboard shows "Stopped", not "Failed").
+    private(set) var wasStopped = false
 
     var onEvent: (@MainActor (SupervisionEvent) -> Void)?
     /// Fired once when the build process exits. `success` is true on exit code 0.
@@ -42,6 +47,8 @@ final class BuildRunner {
         logLines = ["$ \(command)  (cwd: \(project.path))"]
         lineBuffer.reset()
         result = nil
+        duration = nil
+        startedAt = Date()
         wasStopped = false
         isRunning = true
 
@@ -86,6 +93,7 @@ final class BuildRunner {
         pid = 0
         isRunning = false
         result = code
+        if let s = startedAt { duration = Date().timeIntervalSince(s) }
         // A user-initiated stop() kills the process with a signal (non-zero exit); don't post a
         // "Build failed" banner for a build the user deliberately cancelled. The feed/onFinish still
         // fire so the orchestrator can relaunch the paused dev server.

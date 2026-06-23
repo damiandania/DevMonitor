@@ -58,6 +58,12 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     var devCommand: String?
     /// Optional override for the build command; `nil` = auto-derived.
     var buildCommand: String?
+    /// Long-running background worker command (e.g. a queue/job worker). `nil` = the project has no
+    /// worker; non-nil makes the worker controls appear (mirrors `buildCommand`).
+    var workerCommand: String?
+    /// Command to serve the production build (`preview` / `start`). `nil` = none; non-nil makes the
+    /// Preview control appear.
+    var previewCommand: String?
     /// Heap size in GB injected as `--max-old-space-size` (used when `memoryAuto` is false).
     var memoryGB: Int
     /// When true, the heap follows the framework default instead of `memoryGB`.
@@ -87,6 +93,8 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         framework: Framework = .unknown,
         devCommand: String? = nil,
         buildCommand: String? = nil,
+        workerCommand: String? = nil,
+        previewCommand: String? = nil,
         memoryGB: Int = 4,
         memoryAuto: Bool = true,
         port: Int? = nil,
@@ -103,6 +111,8 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.framework = framework
         self.devCommand = devCommand
         self.buildCommand = buildCommand
+        self.workerCommand = workerCommand
+        self.previewCommand = previewCommand
         self.memoryGB = memoryGB
         self.memoryAuto = memoryAuto
         self.port = port
@@ -117,7 +127,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     // fields default by INHERITING the dev-server config (so an existing project keeps the heap the
     // user already set, for the build too), and the learned autoscaler levels start at firstGB.
     enum CodingKeys: String, CodingKey {
-        case id, name, path, packageManager, framework, devCommand, buildCommand
+        case id, name, path, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
         case memoryGB, memoryAuto, port, packageManagerAuto
         case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB
     }
@@ -131,6 +141,9 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         framework = try c.decode(Framework.self, forKey: .framework)
         devCommand = try c.decodeIfPresent(String.self, forKey: .devCommand)
         buildCommand = try c.decodeIfPresent(String.self, forKey: .buildCommand)
+        // Absent in projects.json written before workers/preview existed — AppState re-detects on load.
+        workerCommand = try c.decodeIfPresent(String.self, forKey: .workerCommand)
+        previewCommand = try c.decodeIfPresent(String.self, forKey: .previewCommand)
         memoryGB = try c.decode(Int.self, forKey: .memoryGB)
         memoryAuto = try c.decodeIfPresent(Bool.self, forKey: .memoryAuto) ?? true
         port = try c.decodeIfPresent(Int.self, forKey: .port)

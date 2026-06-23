@@ -3,12 +3,13 @@ import Observation
 
 /// One row in the system process table.
 struct ProcessRow: Identifiable, Sendable {
-    let id: Int32          // pid (-1 = aggregated dev-server row, -2 = aggregated build row)
+    let id: Int32          // pid (negative = a synthetic aggregated row: -2 = build, else -pid)
     let name: String
     let cpuPerCore: Double // per-core % (can exceed 100)
     let memBytes: Double
     var isDevServer = false      // a server SUPERVISED by the app (managed tree)
     var isBuild = false
+    var isWorker = false         // a background worker SUPERVISED by the app (managed tree)
     var isExternalDev = false    // a dev server running OUTSIDE the app (identified, not supervised)
     var isExtension = false      // a VS Code / Cursor extension language-server helper
 }
@@ -53,6 +54,9 @@ final class SystemSampler {
     var devServerInfo: (@MainActor () -> [(id: Int32, pids: Set<Int32>, label: String)])?
     /// Same, for an in-progress build — its tree shows as one identified row (like the server).
     var buildInfo: (@MainActor () -> (pids: Set<Int32>, label: String)?)?
+    /// One entry PER running background worker, so each shows as its own highlighted row
+    /// (e.g. "MiddleSpace · worker"), like a supervised server.
+    var workerInfo: (@MainActor () -> [(id: Int32, pids: Set<Int32>, label: String)])?
 
     init() {
         coreCount = max(1, ProcessInfo.processInfo.processorCount)
@@ -132,6 +136,7 @@ final class SystemSampler {
         // Aggregate the dev-server and build trees into single identified rows; otherwise surface
         // only processes with a real performance impact. (Pure + testable — see SystemSampler.aggregate.)
         let result = Self.aggregate(rows: rows, devs: devServerInfo?() ?? [], build: buildInfo?(),
+                                    workers: workerInfo?() ?? [],
                                     coreCount: coreCount, totalMem: totalMem, topN: topN)
 
         // Give generic helpers (VS Code language servers, bare "node", …) a readable name
@@ -173,6 +178,7 @@ final class SystemSampler {
         rows: [ProcessRow],
         devs: [(id: Int32, pids: Set<Int32>, label: String)],
         build: (pids: Set<Int32>, label: String)?,
+        workers: [(id: Int32, pids: Set<Int32>, label: String)] = [],
         coreCount: Int, totalMem: Double, topN: Int
     ) -> [ProcessRow] {
         let cores = Double(coreCount)
@@ -181,18 +187,24 @@ final class SystemSampler {
         func impact(_ row: ProcessRow) -> Double {
             row.cpuPerCore / cores + (totalMem > 0 ? row.memBytes / totalMem * 100 : 0)
         }
-        // Map each pid to its dev-server index so trees are summed PER server, not all together.
+        // Map each pid to its dev-server / worker index so trees are summed PER process, not together.
         var devIndexByPid: [Int32: Int] = [:]
         for (i, d) in devs.enumerated() { for p in d.pids { devIndexByPid[p] = i } }
+        var workerIndexByPid: [Int32: Int] = [:]
+        for (i, w) in workers.enumerated() { for p in w.pids { workerIndexByPid[p] = i } }
         let buildPids = build?.pids ?? []
 
         var devCPU = [Double](repeating: 0, count: devs.count)
         var devMem = [Double](repeating: 0, count: devs.count)
+        var workerCPU = [Double](repeating: 0, count: workers.count)
+        var workerMem = [Double](repeating: 0, count: workers.count)
         var buildCPU = 0.0, buildMem = 0.0
         var others: [ProcessRow] = []
         for row in rows {
             if let gi = devIndexByPid[row.id] {
                 devCPU[gi] += row.cpuPerCore; devMem[gi] += row.memBytes
+            } else if let wi = workerIndexByPid[row.id] {
+                workerCPU[wi] += row.cpuPerCore; workerMem[wi] += row.memBytes
             } else if !buildPids.isEmpty, buildPids.contains(row.id) {
                 buildCPU += row.cpuPerCore; buildMem += row.memBytes
             } else {
@@ -204,6 +216,11 @@ final class SystemSampler {
         for (i, d) in devs.enumerated() {
             result.append(ProcessRow(id: d.id, name: d.label, cpuPerCore: devCPU[i],
                                      memBytes: devMem[i], isDevServer: true))
+        }
+        // One row per running worker.
+        for (i, w) in workers.enumerated() {
+            result.append(ProcessRow(id: w.id, name: w.label, cpuPerCore: workerCPU[i],
+                                     memBytes: workerMem[i], isWorker: true))
         }
         if let build, !buildPids.isEmpty {
             result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))

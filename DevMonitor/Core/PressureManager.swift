@@ -80,7 +80,8 @@ final class PressureManager {
     /// server still launching (whose tree isn't enumerable yet, so it isn't aggregated out and would
     /// otherwise look like an orphan dev server and get SIGKILLed mid-launch).
     private var managedPids: Set<Int32> {
-        Set(app.sessions.values.flatMap { [$0.pid] + ProcessTree.sessionMembers(of: $0.pid) }.filter { $0 > 0 })
+        let leaders = Array(app.sessions.values) + Array(app.previews.values)
+        return Set(leaders.flatMap { [$0.pid] + ProcessTree.sessionMembers(of: $0.pid) }.filter { $0 > 0 })
     }
 
     /// Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't part of a

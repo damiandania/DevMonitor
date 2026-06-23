@@ -13,7 +13,17 @@ final class AppState {
     var sessions: [Project.ID: DevSession] = [:]
     /// One build per project, keyed by project id.
     var builds: [Project.ID: BuildRunner] = [:]
-    /// Selected tab in the GLOBAL terminal panel: "s:<projectID>" (server) or "b:<projectID>" (build).
+    /// One long-running background worker per project, keyed by project id.
+    var workers: [Project.ID: WorkerRunner] = [:]
+    /// Wall-clock seconds the last successful build took, per project — the ETA for the next build's
+    /// progress bar. In-memory (resets on relaunch; the bar just runs without an ETA until the first
+    /// build of the session finishes).
+    var lastBuildSeconds: [Project.ID: TimeInterval] = [:]
+    /// One production-build preview server per project — a DevSession running the project's preview
+    /// command, so it reuses all the server supervision (port, health, logs).
+    var previews: [Project.ID: DevSession] = [:]
+    /// Selected tab in the GLOBAL terminal panel: "s:<projectID>" (server), "b:<projectID>" (build)
+    /// or "w:<projectID>" (worker).
     var selectedTerminalID: String?
 
     /// App-wide settings (browser, analysis model, …) — the gear at the bottom of the sidebar.
@@ -49,6 +59,8 @@ final class AppState {
             projects = onDisk
             store.save(projects)
         }
+        // Backfill worker commands for projects saved before workers existed (and keep them in sync).
+        refreshWorkerCommands()
         installedBrowsers = BrowserList.installed()
         installedEditors = EditorList.installed()
         selectedProjectID = projects.first?.id
@@ -56,16 +68,21 @@ final class AppState {
         systemSampler.start()
         systemSampler.devServerInfo = { [weak self] in
             guard let self else { return [] }
-            // One entry PER supervised server (each gets its own table row, not aggregated).
-            // id = -pid so the synthetic row never collides with a real pid and skips enrichment.
-            return self.sessions.values
-                .filter { $0.pid > 0 }
-                .map { s -> (id: Int32, pids: Set<Int32>, label: String) in
-                    let pids = Set(ProcessTree.sessionMembers(of: s.pid))
-                    let label = s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")
-                    return (id: -s.pid, pids: pids, label: label)
-                }
-                .filter { !$0.pids.isEmpty }
+            // One entry PER supervised server — dev servers AND production-build previews (both are
+            // DevSessions) — each its own table row. id = -pid so the synthetic row never collides
+            // with a real pid and skips enrichment.
+            var rows: [(id: Int32, pids: Set<Int32>, label: String)] = []
+            for s in self.sessions.values where s.pid > 0 {
+                let pids = Set(ProcessTree.sessionMembers(of: s.pid))
+                let label = s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")
+                if !pids.isEmpty { rows.append((id: -s.pid, pids: pids, label: label)) }
+            }
+            for p in self.previews.values where p.pid > 0 {
+                let pids = Set(ProcessTree.sessionMembers(of: p.pid))
+                let label = p.project.name + " · preview" + (p.effectivePort.map { " :\($0)" } ?? "")
+                if !pids.isEmpty { rows.append((id: -p.pid, pids: pids, label: label)) }
+            }
+            return rows
         }
         systemSampler.buildInfo = { [weak self] in
             guard let self else { return nil }
@@ -76,6 +93,18 @@ final class AppState {
             guard !pids.isEmpty else { return nil }
             let label = live.count == 1 ? "Build · \(live.first?.project.name ?? "build")" : "\(live.count) builds"
             return (pids, label)
+        }
+        systemSampler.workerInfo = { [weak self] in
+            guard let self else { return [] }
+            // One entry PER running worker (its own highlighted row, like a supervised server).
+            // id = -pid so the synthetic row never collides with a real pid and skips enrichment.
+            return self.workers.values
+                .filter { $0.isRunning && $0.pid > 0 }
+                .map { w -> (id: Int32, pids: Set<Int32>, label: String) in
+                    (id: -w.pid, pids: Set(ProcessTree.sessionMembers(of: w.pid)),
+                     label: "\(w.project.name) · worker")
+                }
+                .filter { !$0.pids.isEmpty }
         }
         pressure = PressureManager(app: self)
         systemSampler.onStuck = { [weak self] in self?.pressure.evaluate() }
@@ -103,18 +132,28 @@ final class AppState {
         return projects.first { $0.id == id }
     }
 
-    /// Aggregate server health for the menu-bar status dot, by priority:
-    /// red (any Failed) > orange (any Launching/Recycling/Degraded) > green (any Running) > idle (none).
+    /// Aggregate health for the menu-bar status glyph across EVERY supervised process (dev servers,
+    /// previews, workers, builds), by priority: red (any failed OR stopped) > orange (any starting /
+    /// building) > green (any running) > idle (none).
     enum ServerHealth { case idle, green, orange, red }
     var serversHealth: ServerHealth {
         var orange = false, green = false
-        for session in sessions.values {
-            switch session.state {
-            case .failed:                              return .red
+        // Dev servers + previews (both DevSessions).
+        for s in Array(sessions.values) + Array(previews.values) {
+            switch s.state {
+            case .failed, .stopped:                    return .red
             case .launching, .recycling, .degraded:    orange = true
             case .running:                             green = true
-            case .idle, .stopped:                      break
+            case .idle:                                break
             }
+        }
+        for w in workers.values {
+            if w.didCrash || (w.lastExitCode != nil && !w.isRunning) { return .red }   // crashed/stopped
+            if w.isRunning { green = true }
+        }
+        for b in builds.values {
+            if b.isRunning { orange = true }
+            else if let code = b.result, code != 0 { return .red }   // failed or user-stopped
         }
         if orange { return .orange }
         if green { return .green }
@@ -222,8 +261,12 @@ final class AppState {
     /// synchronously since the process is terminating: SIGTERM each group, a short grace, then
     /// SIGKILL. A force-kill of the app can't run this — the next launch's `reapLeftovers` covers it.
     func shutdown() {
-        let pgids = sessions.values.map(\.pid).filter { $0 > 0 }
-                  + builds.values.map(\.pid).filter { $0 > 0 }
+        var pgids: [pid_t] = []
+        pgids += sessions.values.map(\.pid)
+        pgids += builds.values.map(\.pid)
+        pgids += workers.values.map(\.pid)
+        pgids += previews.values.map(\.pid)
+        pgids = pgids.filter { $0 > 0 }
         guard !pgids.isEmpty else { return }
         for pg in pgids { killpg(pg, SIGTERM) }
         usleep(400_000)
@@ -244,6 +287,56 @@ final class AppState {
 
     /// The supervised session for `project`, if any.
     func session(for project: Project) -> DevSession? { sessions[project.id] }
+
+    // MARK: - Workers
+
+    /// Launch (or no-op if already running, or the project has no worker) the background worker for
+    /// `project`, and select its tab in the global terminal. Idempotent; injects the dev-server heap.
+    func startWorker(_ project: Project) {
+        guard project.workerCommand != nil else { return }
+        selectedTerminalID = "w:\(project.id)"
+        if let existing = workers[project.id], existing.isRunning { return }
+        let worker = WorkerRunner(project: project)
+        workers[project.id] = worker
+        worker.start(memoryGB: effectiveMemoryGB(for: project))
+    }
+
+    /// Stop the background worker for one project.
+    func stopWorker(_ project: Project) { workers[project.id]?.stop() }
+
+    /// Close a worker tab in the global terminal: stop the worker if running and drop it.
+    func closeWorker(id: Project.ID) {
+        workers[id]?.stop()
+        workers[id] = nil
+    }
+
+    /// The worker for `project`, if any.
+    func worker(for project: Project) -> WorkerRunner? { workers[project.id] }
+
+    // MARK: - Preview (serve the production build)
+
+    /// Launch (or no-op) the production-build preview for `project` — a DevSession running the
+    /// preview command, with the build heap (it serves the build). Idempotent; selects its tab.
+    func startPreview(_ project: Project) {
+        guard let cmd = project.previewCommand else { return }
+        selectedTerminalID = "p:\(project.id)"
+        if let existing = previews[project.id], existing.state.isActive { return }
+        let preview = DevSession(project: project, commandOverride: cmd)
+        previews[project.id] = preview
+        preview.start(memoryGB: effectiveBuildMemoryGB(for: project))
+    }
+
+    /// Stop the preview server for one project.
+    func stopPreview(_ project: Project) { previews[project.id]?.stop() }
+
+    /// Close a preview tab in the global terminal: stop it and drop it.
+    func closePreview(id: Project.ID) {
+        previews[id]?.stop()
+        previews[id] = nil
+    }
+
+    /// The preview server for `project`, if any.
+    func preview(for project: Project) -> DevSession? { previews[project.id] }
 
     // Build orchestration (runBuild, runBuildAndWait + its pause/pressure/autoscale steps, build(for:))
     // lives in AppState+Builds.swift.
@@ -284,12 +377,14 @@ final class AppState {
         }
     }
 
-    /// Kill the process behind a table row (the hover ✕ button). A managed server (synthetic
-    /// id = -pid) is stopped through its supervisor; the aggregated build row stops every running
-    /// build; any real process (external dev server, foreign helper) gets SIGTERM→SIGKILL.
+    /// Kill the process behind a table row (the hover ✕ button). A managed server or worker
+    /// (synthetic id = -pid) is stopped through its supervisor; the aggregated build row stops every
+    /// running build; any real process (external dev server, foreign helper) gets SIGTERM→SIGKILL.
     func killProcessRow(_ row: ProcessRow) {
         if row.isBuild {
             for b in builds.values where b.isRunning { b.stop() }
+        } else if row.isWorker {
+            workers.values.first { $0.pid == -row.id }?.stop()
         } else if row.isDevServer {
             sessions.values.first { $0.pid == -row.id }?.stop()
         } else if row.id > 0 {

@@ -71,8 +71,13 @@ final class DevSession {
     private var stableProbes = 0
     private let stableProbesToReset = 3
 
-    init(project: Project) {
+    /// When set, this command is launched instead of the project's dev command — used to run the
+    /// production-build **preview** (`npm run preview` / `next start`) through the same supervisor.
+    let commandOverride: String?
+
+    init(project: Project, commandOverride: String? = nil) {
         self.project = project
+        self.commandOverride = commandOverride
     }
 
     var effectivePort: Int? { detectedPort ?? project.port ?? lastKnownPort }
@@ -109,7 +114,7 @@ final class DevSession {
             AppLog.shared.event("DevSession: could not resolve the user shell PATH for \(project.name) — using inherited PATH")
         }
 
-        let baseCommand = project.devCommand ?? Detector.detect(path: project.path).devCommand
+        let baseCommand = commandOverride ?? project.devCommand ?? Detector.detect(path: project.path).devCommand
         // Prepend env inline (the login shell applies it), and `exec` so the dev process
         // REPLACES the shell — making it the session leader we spawned, so the whole tree
         // is reliably enumerable (by session) and killable (by killpg).

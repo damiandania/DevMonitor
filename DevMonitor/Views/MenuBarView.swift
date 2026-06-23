@@ -34,30 +34,40 @@ struct MenuBarView: View {
         .frame(width: 300)
     }
 
-    /// Lists every online server: each supervised session (with Stop/Restart) and each dev server
-    /// running OUTSIDE the app (purple, display-only). Falls back to a Launch button for the
-    /// selected project when nothing is running for it.
+    /// Lists every live run-control across all projects (dev, worker, build, preview — straight from
+    /// `AppState.runControls`, so a new process type shows up automatically) plus dev servers running
+    /// OUTSIDE the app, with a Launch row for whatever the selected project can still start.
     @ViewBuilder private var serversSection: some View {
-        let managed = app.sessions.values
-            .filter { $0.state.isActive }
-            .sorted { $0.project.name < $1.project.name }
+        let controls = app.projects
+            .flatMap { app.runControls(for: $0) }
+            .filter(\.isLive)
+            .sorted { ($0.projectName, $0.rank) < ($1.projectName, $1.rank) }
         let external = app.systemSampler.processes.filter { $0.isExternalDev }
-        let builds = app.builds.values
-            .filter { $0.isRunning || $0.result != nil }
-            .sorted { $0.project.name < $1.project.name }
 
         TimelineView(.periodic(from: Date(), by: 1)) { _ in
             VStack(alignment: .leading, spacing: 10) {
-                if managed.isEmpty && external.isEmpty && builds.isEmpty {
-                    Text("No servers running").font(.subheadline).foregroundStyle(.secondary)
+                if controls.isEmpty && external.isEmpty {
+                    Text("Nothing running").font(.subheadline).foregroundStyle(.secondary)
                 } else {
-                    ForEach(managed, id: \.project.id) { managedRow($0) }
-                    ForEach(builds, id: \.project.id) { buildRow($0) }
+                    ForEach(controls) { controlRow($0) }
                     ForEach(external) { externalRow($0) }
                 }
-                if let p = app.selectedProject, app.sessions[p.id]?.state.isActive != true {
-                    Button { app.launch(p) } label: {
-                        Label("Launch \(p.name)", systemImage: "play.fill")
+                launchButtons
+            }
+        }
+    }
+
+    /// Play buttons for whatever the selected project can still start (dev / worker / build / preview).
+    @ViewBuilder private var launchButtons: some View {
+        if let p = app.selectedProject {
+            let startable = app.runControls(for: p).filter { !$0.isLive }
+            if !startable.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Launch \(p.name)").font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(startable) { c in
+                            Button(action: c.onToggle) { Label(c.title, systemImage: "play.fill") }
+                        }
                     }
                     .buttonStyle(.borderedProminent).controlSize(.small)
                 }
@@ -65,42 +75,24 @@ struct MenuBarView: View {
         }
     }
 
-    private func managedRow(_ s: DevSession) -> some View {
+    /// One live process row: icon + "Project · Title", its status, uptime, and a stop button.
+    private func controlRow(_ c: RunControl) -> some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(s.project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Label(s.state.label, systemImage: "circle.fill")
-                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(s.state.tint)
-                if let started = s.startedAt, s.state.isActive {
-                    Text("up \(Self.uptime(since: started))"
-                        + (s.recycleCount > 0 ? " · \(s.recycleCount) recycles" : ""))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                Button { app.stop(s.project) } label: { Image(systemName: "stop.fill") }.help("Stop")
-                Button { s.recycle() } label: { Image(systemName: "arrow.clockwise") }.help("Restart")
-            }
-            .buttonStyle(.borderless).controlSize(.small)
-        }
-    }
-
-    private func buildRow(_ b: BuildRunner) -> some View {
-        let label = b.isRunning ? "Building…" : (b.result == 0 ? "Built" : "Build failed")
-        let tint: Color = b.isRunning ? .orange : (b.result == 0 ? .green : .red)
-        return HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Image(systemName: "hammer.fill").font(.caption2).foregroundStyle(.secondary)
-                    Text(b.project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Image(systemName: c.icon).font(.caption2).foregroundStyle(.secondary)
+                    Text("\(c.projectName) · \(c.title)").font(.subheadline.weight(.semibold)).lineLimit(1)
                 }
-                Label(label, systemImage: "circle.fill")
-                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(tint)
+                Label(c.status.label.isEmpty ? "Idle" : c.status.label, systemImage: "circle.fill")
+                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(c.status.color)
+                if let started = c.startedAt, c.status.showsStop {
+                    Text("up \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer()
-            if b.isRunning {
-                Button { b.stop() } label: { Image(systemName: "stop.fill") }.help("Stop build")
+            if c.status.showsStop {
+                Button(action: c.onToggle) { Image(systemName: "stop.fill") }
+                    .help("Stop \(c.title.lowercased())")
                     .buttonStyle(.borderless).controlSize(.small)
             }
         }

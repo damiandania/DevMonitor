@@ -22,6 +22,8 @@ extension AppState {
             framework: d.framework,
             devCommand: d.devCommand,
             buildCommand: d.buildCommand,
+            workerCommand: d.workerCommand,
+            previewCommand: d.previewCommand,
             memoryGB: settings.defaultMemoryGB,   // new projects inherit the default-heap setting
             port: d.port
         )
@@ -31,9 +33,23 @@ extension AppState {
         return project
     }
 
+    /// Backfill / refresh each project's `workerCommand` and `previewCommand` from its package.json on
+    /// launch — so a project saved before those existed gains them when the script is present, and
+    /// they stay in sync if scripts are later added or removed. Persists only on an actual change.
+    func refreshWorkerCommands() {
+        var changed = false
+        for i in projects.indices {
+            let c = Detector.commands(path: projects[i].path, packageManager: projects[i].packageManager)
+            if projects[i].workerCommand != c.worker { projects[i].workerCommand = c.worker; changed = true }
+            if projects[i].previewCommand != c.preview { projects[i].previewCommand = c.preview; changed = true }
+        }
+        if changed { persist() }
+    }
+
     func removeProject(_ id: Project.ID) {
         sessions[id]?.stop(); sessions[id] = nil
         builds[id]?.stop(); builds[id] = nil
+        workers[id]?.stop(); workers[id] = nil
         projects.removeAll { $0.id == id }
         if selectedProjectID == id { selectedProjectID = projects.first?.id }
         persist()
@@ -67,6 +83,8 @@ extension AppState {
             $0.packageManager = pm
             $0.devCommand = c.dev
             $0.buildCommand = c.build
+            $0.workerCommand = c.worker
+            $0.previewCommand = c.preview
         }
     }
 
@@ -78,6 +96,8 @@ extension AppState {
                 $0.packageManager = d.packageManager
                 $0.devCommand = d.devCommand
                 $0.buildCommand = d.buildCommand
+                $0.workerCommand = d.workerCommand
+                $0.previewCommand = d.previewCommand
             }
             $0.packageManagerAuto = auto
         }

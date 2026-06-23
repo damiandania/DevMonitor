@@ -28,6 +28,8 @@ struct ProjectSidebar: View {
                     }
                 }
             }
+            // Last 5 notifications as a "Recent" section on the same card surface as Projects.
+            NotificationsFeedView()
         }
         .overlay {
             if app.projects.isEmpty {
@@ -51,10 +53,6 @@ struct ProjectSidebar: View {
                 app.addProject(path: url.path)
                 if access { url.stopAccessingSecurityScopedResource() }
             }
-        }
-        // Last 5 notifications, pinned below the project list.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            NotificationsFeedView()
         }
     }
 }

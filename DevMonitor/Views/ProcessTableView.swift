@@ -117,7 +117,7 @@ private struct ProcessRowView: View {
     /// other real process is killed by pid. Critical system processes and the editor (anything
     /// `ResourceAdvisor` protects) get no button, so a stray hover-click can't take down the session.
     private var killable: Bool {
-        if row.isDevServer || row.isBuild || row.isExternalDev { return true }
+        if row.isDevServer || row.isBuild || row.isWorker || row.isExternalDev { return true }
         return row.id > 0 && !ResourceAdvisor.isProtected(row.name)
     }
 
@@ -134,6 +134,7 @@ private struct ProcessRowView: View {
 
     private var killHelp: String {
         if row.isDevServer { return "Stop \(row.name)" }
+        if row.isWorker { return "Stop \(row.name)" }
         if row.isBuild { return "Stop the build" }
         return "Kill \(row.name) (pid \(row.id))"
     }
@@ -142,6 +143,7 @@ private struct ProcessRowView: View {
     private var rowHelp: String {
         let kind: String
         if row.isDevServer { kind = " — supervised dev server" }
+        else if row.isWorker { kind = " — supervised worker" }
         else if row.isExternalDev { kind = " — external dev server (not supervised)" }
         else if row.isBuild { kind = " — build" }
         else if row.isExtension { kind = " — VS Code extension" }
@@ -155,6 +157,10 @@ private struct ProcessRowView: View {
         } else if row.isExternalDev {
             // Same glyph as a managed server, but purple = running outside the app.
             Image(systemName: "server.rack").foregroundStyle(Color.indigo)
+        } else if row.isWorker {
+            // A "gears" glyph marks a background worker — distinct from the server's rack and the
+            // build's hammer.
+            Image(systemName: "gearshape.2.fill").foregroundStyle(.teal)
         } else if row.isBuild {
             Image(systemName: "hammer.fill").foregroundStyle(.orange)
         } else if row.isExtension {
@@ -166,10 +172,11 @@ private struct ProcessRowView: View {
         }
     }
 
-    private var emphasized: Bool { row.isDevServer || row.isExternalDev || row.isBuild }
+    private var emphasized: Bool { row.isDevServer || row.isWorker || row.isExternalDev || row.isBuild }
 
     private var accent: Color {
         if row.isDevServer { return .accentColor }
+        if row.isWorker { return .teal }
         if row.isExternalDev { return .indigo }
         if row.isBuild { return .orange }
         return .primary

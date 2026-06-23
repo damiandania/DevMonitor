@@ -15,7 +15,7 @@ extension NotificationItem {
         if severity == .urgent { return category == .pressure ? .orange : .red }
         switch category {
         case .recovery: return .green
-        case .builds:   return action == .openLogs ? .red : .blue
+        case .builds:   return action == .openLogs ? .red : .green   // failed → red, succeeded → green
         case .pressure: return .yellow
         case .failures: return .orange      // passive failures: OOM-retry, hung
         }

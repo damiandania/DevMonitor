@@ -6,6 +6,8 @@ struct LogPaneView: View {
     let lines: [String]
     var inputPlaceholder: String? = nil
     var onSubmit: ((String) -> Void)? = nil
+    /// A status strip (e.g. a run timer) pinned at the bottom in place of the stdin input.
+    var footer: AnyView? = nil
     /// Terminal appearance: "app" (follow the app theme), "dark", or "light".
     var terminalTheme: String = "dark"
     @State private var input = ""
@@ -52,7 +54,13 @@ struct LogPaneView: View {
                 }
             }
 
-            if let placeholder = inputPlaceholder, let onSubmit {
+            if let footer {
+                Divider()
+                footer
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(inputBg)
+            } else if let placeholder = inputPlaceholder, let onSubmit {
                 Divider()
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
