@@ -86,11 +86,12 @@ struct MenuBarView: View {
                 Text("· \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            if c.status.showsStop {
-                Button(action: c.onToggle) { Image(systemName: "stop.fill") }
-                    .help("Stop \(c.title.lowercased())")
-                    .buttonStyle(.borderless).controlSize(.small)
+            // Play to (re)launch, stop to halt — same icon style either way.
+            Button(action: c.onToggle) {
+                Image(systemName: c.status.showsStop ? "stop.fill" : "play.fill")
             }
+            .help((c.status.showsStop ? "Stop " : "Start ") + c.title.lowercased())
+            .buttonStyle(.borderless).controlSize(.small)
         }
     }
 
