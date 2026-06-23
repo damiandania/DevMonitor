@@ -49,9 +49,13 @@ build_run() {
 
 build_run spawn    "$ROOT/tests/spawn/main.swift" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run metrics  "$ROOT/tests/metrics/main.swift" "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
-build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift"
+build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
+  "$SRC/Core/HeapScaling.swift"
 build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
-  "$SRC/Model/AppSettings.swift" "$SRC/Core/AppLog.swift"
+  "$SRC/Model/AppSettings.swift" "$SRC/Core/AppLog.swift" "$SRC/Core/HeapScaling.swift"
+build_run notifications "$ROOT/tests/notifications/main.swift" \
+  "$SRC/Model/NotificationItem.swift" "$SRC/Model/SupervisionEvent.swift" \
+  "$SRC/Model/AppSettings.swift" "$SRC/Core/NotificationPolicy.swift" "$SRC/Core/AppLog.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
@@ -59,7 +63,7 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Model/Project.swift" "$SRC/Model/SessionState.swift" "$SRC/Model/MetricsSample.swift" \
   "$SRC/Model/SupervisionEvent.swift" \
   "$SRC/Core/Detector.swift" "$SRC/Core/ProcessTree.swift" "$SRC/Core/DevSession.swift" \
-  "$SRC/Core/ShellEnvironment.swift" \
+  "$SRC/Core/ShellEnvironment.swift" "$SRC/Core/HeapScaling.swift" \
   "$SRC/Core/BuildRunner.swift" "$SRC/Core/ANSI.swift" "$SRC/Core/AppLog.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run advisor "$ROOT/tests/advisor/main.swift" \

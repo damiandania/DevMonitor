@@ -66,6 +66,18 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     var port: Int?
     /// When true, the package manager / dev command follow detection instead of `packageManager`.
     var packageManagerAuto: Bool
+    /// Dev-server heap (GB) used when `memoryAuto` is on: the level last learned by the OOM
+    /// autoscaler — starts at 4, climbs 4→6→8 on OOM and is persisted — instead of a fixed
+    /// framework default. The dev server and the build keep SEPARATE learned levels.
+    var autoHeapGB: Int
+    /// Build heap (GB) used when `buildMemoryAuto` is off — independent from the dev server's heap
+    /// (a production build is usually heavier than the dev server).
+    var buildMemoryGB: Int
+    /// When true, the build heap follows the OOM autoscaler (`buildAutoHeapGB`) instead of `buildMemoryGB`.
+    var buildMemoryAuto: Bool
+    /// Build heap (GB) used when `buildMemoryAuto` is on: the level last learned by the build OOM
+    /// autoscaler — starts at 4, climbs 4→6→8 on OOM, persisted.
+    var buildAutoHeapGB: Int
 
     init(
         id: UUID = UUID(),
@@ -78,7 +90,11 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         memoryGB: Int = 4,
         memoryAuto: Bool = true,
         port: Int? = nil,
-        packageManagerAuto: Bool = true
+        packageManagerAuto: Bool = true,
+        autoHeapGB: Int = HeapScaling.firstGB,
+        buildMemoryGB: Int = 4,
+        buildMemoryAuto: Bool = true,
+        buildAutoHeapGB: Int = HeapScaling.firstGB
     ) {
         self.id = id
         self.name = name
@@ -91,12 +107,19 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.memoryAuto = memoryAuto
         self.port = port
         self.packageManagerAuto = packageManagerAuto
+        self.autoHeapGB = autoHeapGB
+        self.buildMemoryGB = buildMemoryGB
+        self.buildMemoryAuto = buildMemoryAuto
+        self.buildAutoHeapGB = buildAutoHeapGB
     }
 
-    // Custom decoding so projects.json written before the auto flags still loads (defaults to auto).
+    // Custom decoding so projects.json written before these fields still loads. New build-heap
+    // fields default by INHERITING the dev-server config (so an existing project keeps the heap the
+    // user already set, for the build too), and the learned autoscaler levels start at firstGB.
     enum CodingKeys: String, CodingKey {
         case id, name, path, packageManager, framework, devCommand, buildCommand
         case memoryGB, memoryAuto, port, packageManagerAuto
+        case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB
     }
 
     init(from decoder: Decoder) throws {
@@ -112,6 +135,11 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         memoryAuto = try c.decodeIfPresent(Bool.self, forKey: .memoryAuto) ?? true
         port = try c.decodeIfPresent(Int.self, forKey: .port)
         packageManagerAuto = try c.decodeIfPresent(Bool.self, forKey: .packageManagerAuto) ?? true
+        autoHeapGB = try c.decodeIfPresent(Int.self, forKey: .autoHeapGB) ?? HeapScaling.firstGB
+        // Build heap defaults to the dev config of an existing project (decoded just above).
+        buildMemoryGB = try c.decodeIfPresent(Int.self, forKey: .buildMemoryGB) ?? memoryGB
+        buildMemoryAuto = try c.decodeIfPresent(Bool.self, forKey: .buildMemoryAuto) ?? memoryAuto
+        buildAutoHeapGB = try c.decodeIfPresent(Int.self, forKey: .buildAutoHeapGB) ?? HeapScaling.firstGB
     }
 }
 
@@ -120,18 +148,25 @@ extension Project {
     /// leftover `1`) starving the dev server into an out-of-memory crash.
     static let minHeapGB = 2
 
-    /// The heap (GB) actually injected as `--max-old-space-size` at launch — the single source of
-    /// truth shared by the launcher, the IPC reply and the settings UI.
-    ///
-    /// In **auto** mode it follows the framework default (Nuxt/Next 8, Astro/Vite 4, …); only when
-    /// `memoryAuto` is off does the explicit `memoryGB` win. Always floored at `minHeapGB`, and —
-    /// when a machine size is supplied — capped at physical RAM, so the result is deterministic and
-    /// never depends on a stale stored value.
-    func effectiveMemoryGB(systemGB: Int? = nil) -> Int {
-        let base = memoryAuto ? Detector.defaultMemoryGB(for: framework) : memoryGB
-        var gb = max(Project.minHeapGB, base)
+    /// Clamp a requested heap to `[minHeapGB, systemGB]`.
+    private static func clampHeap(_ requested: Int, systemGB: Int?) -> Int {
+        var gb = max(Project.minHeapGB, requested)
         if let systemGB, systemGB > 0 { gb = min(gb, max(Project.minHeapGB, systemGB)) }
         return gb
+    }
+
+    /// Dev-server heap (GB) injected as `--max-old-space-size`. In **auto** mode it follows the OOM
+    /// autoscaler's learned level (`autoHeapGB`, starting at 4 and climbing 4→6→8); only when
+    /// `memoryAuto` is off does the explicit `memoryGB` win. Floored at `minHeapGB`, capped at
+    /// physical RAM when supplied, so the result is deterministic.
+    func effectiveMemoryGB(systemGB: Int? = nil) -> Int {
+        Project.clampHeap(memoryAuto ? autoHeapGB : memoryGB, systemGB: systemGB)
+    }
+
+    /// Build heap (GB), INDEPENDENT from the dev server. In **auto** mode follows the build OOM
+    /// autoscaler's learned level (`buildAutoHeapGB`, 4→6→8); else the explicit `buildMemoryGB`.
+    func effectiveBuildMemoryGB(systemGB: Int? = nil) -> Int {
+        Project.clampHeap(buildMemoryAuto ? buildAutoHeapGB : buildMemoryGB, systemGB: systemGB)
     }
 
     /// `~/Library/Application Support/DevMonitor/logs` — one file per project lives here.

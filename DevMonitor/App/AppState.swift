@@ -78,6 +78,17 @@ final class AppState {
             return (pids, label)
         }
         systemSampler.onStuck = { [weak self] in self?.evaluatePressure() }
+        // Refresh the pressure suggestions every 30s: prune dead processes, clear once the machine
+        // recovers (the yellow tab disappears), or re-evaluate while still stuck.
+        Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                self?.tickPressure()
+            }
+        }
+        // Wire notifications: set the UN delegate (foreground presentation + action routing),
+        // register actionable categories, and request authorization.
+        Notifier.shared.attach(app: self)
         // Clean up on quit: stop every supervised server/build so none is left orphaned holding a
         // port — they run in their own session (SETSID) and would otherwise outlive the app.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
@@ -91,11 +102,93 @@ final class AppState {
         return projects.first { $0.id == id }
     }
 
+    /// Aggregate server health for the menu-bar status dot, by priority:
+    /// red (any Failed) > orange (any Launching/Recycling/Degraded) > green (any Running) > idle (none).
+    enum ServerHealth { case idle, green, orange, red }
+    var serversHealth: ServerHealth {
+        var orange = false, green = false
+        for session in sessions.values {
+            switch session.state {
+            case .failed:                              return .red
+            case .launching, .recycling, .degraded:    orange = true
+            case .running:                             green = true
+            case .idle, .stopped:                      break
+            }
+        }
+        if orange { return .orange }
+        if green { return .green }
+        return .idle
+    }
+
+    /// Whether the selected project's build is currently running (drives the toolbar "Build Running"
+    /// label shown to the left of the build button).
+    var isSelectedBuildRunning: Bool {
+        guard let p = selectedProject else { return false }
+        return build(for: p)?.isRunning ?? false
+    }
+
+    // MARK: - Notifications
+
+    /// The last 5 notifications (most-recent first) shown in the sidebar feed.
+    var recentNotifications: [NotificationItem] = []
+    /// Banner de-dup: last time a given key posted a system banner (the feed records everything).
+    @ObservationIgnored private var lastNotified: [String: Date] = [:]
+
+    /// Single funnel for every notification: record it in the in-app feed, then post a system banner
+    /// if its category is enabled and it isn't a throttled repeat.
+    func route(_ item: NotificationItem) {
+        recentNotifications.insert(item, at: 0)
+        if recentNotifications.count > 5 { recentNotifications.removeLast(recentNotifications.count - 5) }
+        guard NotificationPolicy.shouldNotify(item.category, settings) else { return }
+        let key = "\(item.category.rawValue)|\(item.projectID?.uuidString ?? "-")|\(item.title)"
+        if NotificationThrottle.shouldSuppress(key: key, now: item.date, last: lastNotified[key], window: 15) { return }
+        lastNotified[key] = item.date
+        Notifier.shared.post(item)
+    }
+
+    /// Notification action: relaunch the project's server and bring the window forward.
+    func restartFromNotification(projectID: UUID?) {
+        bringMainWindowToFront()
+        guard let id = projectID, let p = projects.first(where: { $0.id == id }) else { return }
+        selectedProjectID = id
+        sessions[id]?.stop()
+        launch(p)
+    }
+
+    /// Notification action: focus the app on the related project (or its build log / the pressure tab).
+    func focusFromNotification(projectID: UUID?, showLogs: Bool) {
+        bringMainWindowToFront()
+        if let id = projectID {
+            selectedProjectID = id
+            selectedTerminalID = showLogs ? "b:\(id)" : "s:\(id)"
+        } else {
+            selectedTerminalID = "pressure"   // machine-wide (pressure) events
+        }
+    }
+
+    /// Activate the app and bring the single main window to the front (no SwiftUI openWindow here).
+    private func bringMainWindowToFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first { $0.identifier?.rawValue == "main" }?.makeKeyAndOrderFront(nil)
+    }
+
     /// Physical RAM in whole GB — the ceiling for any injected heap.
     var systemRAMGB: Int { max(1, Int((systemSampler.totalMem / 1_073_741_824).rounded())) }
 
-    /// The heap (GB) that will actually be injected for `project`, capped at this machine's RAM.
+    /// The dev-server heap (GB) that will actually be injected for `project`, capped at this machine's RAM.
     func effectiveMemoryGB(for project: Project) -> Int { project.effectiveMemoryGB(systemGB: systemRAMGB) }
+
+    /// The build heap (GB) for `project` (independent from the dev server), capped at physical RAM.
+    func effectiveBuildMemoryGB(for project: Project) -> Int { project.effectiveBuildMemoryGB(systemGB: systemRAMGB) }
+
+    /// Free inactive/cached system memory (macOS `purge`). Best-effort, off the main thread — this
+    /// app exists for RAM-constrained Macs, so we squeeze every page before/under a heavy build.
+    nonisolated static func purgeSystemMemory() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/purge")
+        try? p.run()
+        p.waitUntilExit()
+    }
 
     /// Add (or focus, if already present) a project. Returns the project, or `nil` when `path` is not
     /// a launchable project folder — in which case nothing is created or persisted.
@@ -150,6 +243,33 @@ final class AppState {
         persist()
     }
 
+    func setBuildMemoryGB(_ gb: Int, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].buildMemoryGB = max(1, gb)
+        persist()
+    }
+
+    func setBuildMemoryAuto(_ auto: Bool, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].buildMemoryAuto = auto
+        persist()
+    }
+
+    /// Persist the dev-server heap level learned by the OOM autoscaler (AUTO mode), so the next
+    /// launch starts there instead of replaying 4→6→8.
+    func setAutoHeapGB(_ gb: Int, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].autoHeapGB = gb
+        persist()
+    }
+
+    /// Persist the build heap level learned by the OOM autoscaler (AUTO mode).
+    func setBuildAutoHeapGB(_ gb: Int, for id: Project.ID) {
+        guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[i].buildAutoHeapGB = gb
+        persist()
+    }
+
     /// Manually override the package manager → regenerate the dev/build commands for it.
     func setPackageManager(_ pm: PackageManager, for id: Project.ID) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
@@ -179,7 +299,12 @@ final class AppState {
         selectedTerminalID = "s:\(project.id)"
         if let existing = sessions[project.id], existing.state.isActive { return }
         let session = DevSession(project: project)
-        session.onEvent = { event in Notifier.shared.notify(event) }
+        session.onEvent = { [weak self] event in
+            self?.route(NotificationPolicy.make(from: event, projectID: project.id))
+        }
+        // Persist the heap level the OOM autoscaler learns (AUTO mode), so the next launch starts
+        // there instead of replaying 4→6→8.
+        session.onHeapEscalated = { [weak self] gb in self?.setAutoHeapGB(gb, for: project.id) }
         sessions[project.id] = session
         session.start(memoryGB: effectiveMemoryGB(for: project))
     }
@@ -218,15 +343,97 @@ final class AppState {
     /// The supervised session for `project`, if any.
     func session(for project: Project) -> DevSession? { sessions[project.id] }
 
-    /// Build a project ALONGSIDE its dev server (the running server is left untouched), adding a
-    /// build tab to the global terminal and selecting it.
+    /// Build a project, **pausing its dev server while the build runs** to free RAM (relaunched
+    /// after), adding a build tab to the global terminal and selecting it.
     func runBuild(_ project: Project) {
+        guard builds[project.id]?.isRunning != true else { return }
+        // Reuse the autoscaling build loop so a UI-triggered build also retries 4→6→8 on OOM. The
+        // build tab follows each attempt as `builds[project.id]` is replaced.
+        Task { @MainActor in _ = await runBuildAndWait(project) }
+    }
+
+    /// Build a project and WAIT for completion, returning the finished BuildRunner. Backs the
+    /// synchronous `build` IPC command so the CLI can report exit code + output instead of
+    /// returning immediately. Pauses the project's dev server while building (to free RAM) and
+    /// relaunches it after.
+    ///
+    /// OOM autoscaler: starts at the build's effective heap and, in AUTO mode, retries with the next
+    /// step (4→6→8) on an out-of-memory failure, persisting the learned level (`buildAutoHeapGB`) so
+    /// the next build starts there. Returns the LAST BuildRunner (success, or the final failure).
+    func runBuildAndWait(_ project: Project) async -> BuildRunner {
         selectedTerminalID = "b:\(project.id)"
-        if let existing = builds[project.id], existing.isRunning { return }
-        let build = BuildRunner(project: project)
-        build.onEvent = { event in Notifier.shared.notify(event) }
-        builds[project.id] = build
-        build.start()
+        // Already building this project → attach to it and await the same completion.
+        if let existing = builds[project.id], existing.isRunning {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                let previous = existing.onFinish
+                existing.onFinish = { success in
+                    previous?(success)
+                    cont.resume()
+                }
+            }
+            return existing
+        }
+        // Free the most RAM for the build by pausing ALL active dev servers (not just this project's)
+        // — on a RAM-starved Mac even another project's server can starve the build into a kernel
+        // SIGKILL (not a clean V8 OOM), which fails the build and defeats the autoscaler. Relaunch
+        // them all after, deferred via a Task with a short settle delay and re-read from the store,
+        // so it doesn't race the just-paused sessions' state transitions (which left one Idle).
+        let pausedServerIDs = sessions.compactMap { $0.value.state.isActive ? $0.key : nil }
+        for id in pausedServerIDs { sessions[id]?.stop() }
+        if !pausedServerIDs.isEmpty {
+            AppLog.shared.event("Build \(project.name): paused \(pausedServerIDs.count) dev server(s) to free RAM")
+        }
+        defer {
+            if !pausedServerIDs.isEmpty {
+                let ids = pausedServerIDs
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    guard let self else { return }
+                    for id in ids where self.sessions[id]?.state.isActive != true {
+                        if let p = self.projects.first(where: { $0.id == id }) { self.launch(p) }
+                    }
+                }
+            }
+        }
+
+        // RAM relief for the build — the whole point of this app on small Macs. (1) purge inactive/
+        // cached system memory, (2) surface the resource advisor so heavy non-essential apps can be
+        // closed (user-confirmed), (3) keep relieving pressure during the build so we act BEFORE the
+        // kernel jetsams it (SIGKILL) once swap fills up.
+        await Task.detached { Self.purgeSystemMemory() }.value
+        evaluatePressure(focusTab: false)
+        let pressureWatch = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard let self, self.systemSampler.systemMemPercent > 85 else { continue }
+                await Task.detached { Self.purgeSystemMemory() }.value
+                self.evaluatePressure(focusTab: false)
+            }
+        }
+        defer { pressureWatch.cancel() }
+
+        var heapGB = effectiveBuildMemoryGB(for: project)
+        while true {
+            let build = BuildRunner(project: project)
+            build.onEvent = { [weak self] event in
+                self?.route(NotificationPolicy.make(from: event, projectID: project.id))
+            }
+            builds[project.id] = build
+            // Set onFinish BEFORE start() so the exit can't race ahead of our continuation.
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                build.onFinish = { _ in cont.resume() }
+                build.start(memoryGB: heapGB)
+            }
+            let code = build.result ?? -1
+            let isAuto = projects.first(where: { $0.id == project.id })?.buildMemoryAuto ?? false
+            guard code != 0, isAuto,
+                  HeapScaling.looksLikeOOM(logLines: build.logLines, exitCode: code),
+                  let next = HeapScaling.next(after: heapGB, systemGB: systemRAMGB)
+            else { return build }
+            setBuildAutoHeapGB(next, for: project.id)   // persist the learned level before retrying
+            heapGB = next
+            AppLog.shared.event("Build \(project.name) OOM (exit \(code)) — retrying with \(next) GB")
+        }
     }
 
     /// The active build if it belongs to `project`, else nil.
@@ -342,34 +549,105 @@ final class AppState {
     // proposes processes to kill, shown above the server config with a red skull button.
     var killSuggestions: [ResourceAdvisor.Recommendation] = []
     var isEvaluatingPressure = false
+    /// Set when the user closes (✕) the pressure tab — hides it until the machine recovers and the
+    /// pressure re-triggers, so a manual dismiss isn't undone every refresh.
+    var pressureDismissed = false
+    /// True for the duration of one stuck episode — so the "under pressure" notification fires once
+    /// (not every refresh) and "recovered" only fires if we actually warned.
+    @ObservationIgnored private var pressureNotified = false
 
-    func evaluatePressure() {
-        guard !isEvaluatingPressure else { return }
-        isEvaluatingPressure = true
-        let s = systemSampler
+    /// True while the machine is stuck / being evaluated / has kill suggestions — drives the yellow
+    /// "System pressure" tab in the global terminal.
+    var systemUnderPressure: Bool {
+        if pressureDismissed { return false }
+        return isEvaluatingPressure || !killSuggestions.isEmpty || systemSampler.pressure == .stuck
+    }
 
-        // 1) Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't in
-        //    our managed tree (managed/build trees are aggregated out of `processes`). Editor helpers
-        //    and protected processes are excluded. Then notify what was closed. (Off-switchable.)
-        let orphans = settings.autoCloseOrphans ? s.processes.filter { row in
+    /// User closed the pressure tab — clear it and keep it hidden until pressure re-triggers.
+    func dismissPressure() {
+        pressureDismissed = true
+        killSuggestions.removeAll()
+    }
+
+    /// Runs every ~1 min while a pressure tab is/was showing: prunes suggestions whose process has
+    /// exited, clears everything once the machine recovers (so the tab disappears), and otherwise
+    /// refreshes the suggestions while still stuck — without stealing the user's tab selection.
+    func tickPressure() {
+        // Drop suggestions whose process is gone (signal 0 = "are you still there?").
+        if !killSuggestions.isEmpty {
+            killSuggestions.removeAll { $0.id > 0 && kill($0.id, 0) != 0 }
+        }
+        if systemSampler.pressure == .stuck {
+            // Refresh the SUGGESTIONS only — do NOT re-run the orphan auto-close every tick.
+            if !pressureDismissed { refreshKillSuggestions() }
+        } else {
+            // Recovered: notify (if we warned), clear suggestions, and re-arm for the next event.
+            if pressureNotified {
+                route(NotificationItem(title: "System pressure cleared",
+                                       body: "The machine is no longer under pressure.",
+                                       category: .pressure, severity: .passive, projectID: nil, action: .open))
+                pressureNotified = false
+            }
+            killSuggestions.removeAll()
+            pressureDismissed = false
+        }
+    }
+
+    /// Every managed session's leader pid and its whole tree — never auto-close any of these, even a
+    /// server still launching (whose tree isn't enumerable yet, so it isn't aggregated out and would
+    /// otherwise look like an orphan dev server and get SIGKILLed mid-launch).
+    private var managedPids: Set<Int32> {
+        Set(sessions.values.flatMap { [$0.pid] + ProcessTree.sessionMembers(of: $0.pid) }.filter { $0 > 0 })
+    }
+
+    /// Called once on a genuine normal→stuck transition: focuses the pressure tab, auto-closes
+    /// orphaned dev processes (one-shot), then computes the kill suggestions.
+    func evaluatePressure(focusTab: Bool = true) {
+        if focusTab {
+            pressureDismissed = false           // a fresh pressure event un-dismisses the tab
+            selectedTerminalID = "pressure"     // focus it so the suggestions are seen
+            if !pressureNotified {              // once per stuck episode
+                pressureNotified = true
+                let reason = systemSampler.pressureReason
+                route(NotificationItem(title: "Machine under pressure",
+                                       body: reason.isEmpty ? "The machine is stuck." : reason,
+                                       category: .pressure, severity: .urgent, projectID: nil, action: .open))
+            }
+        }
+        autoCloseOrphans()
+        refreshKillSuggestions()
+    }
+
+    /// Auto-close ORPHANED dev processes — a dev server (by its binary in argv) that isn't part of a
+    /// managed session. Managed servers (incl. one still launching), editor helpers and protected
+    /// processes are excluded; what was closed is notified. (Off-switchable.)
+    private func autoCloseOrphans() {
+        guard settings.autoCloseOrphans else { return }
+        let managed = managedPids
+        let orphans = systemSampler.processes.filter { row in
             row.id > 0
+                && !managed.contains(row.id)
                 && !row.name.localizedCaseInsensitiveContains("Helper")
                 && !ResourceAdvisor.isProtected(row.name)
                 && ResourceAdvisor.looksLikeDevServer(argv: Self.argv(of: row.id))
-        } : []
-        if !orphans.isEmpty {
-            orphans.forEach { Self.killPid($0.id) }
-            let names = orphans.map(\.name).joined(separator: ", ")
-            Notifier.shared.notify(
-                title: "Closed orphaned dev process\(orphans.count > 1 ? "es" : "")",
-                body: "Auto-closed \(orphans.count) to relieve pressure: \(names)")
-            AppLog.shared.event("Pressure: auto-closed \(orphans.count) orphan(s): \(names)")
         }
-        let orphanIDs = Set(orphans.map(\.id))
+        guard !orphans.isEmpty else { return }
+        orphans.forEach { Self.killPid($0.id) }
+        let names = orphans.map(\.name).joined(separator: ", ")
+        route(NotificationItem(
+            title: "Closed orphaned dev process\(orphans.count > 1 ? "es" : "")",
+            body: "Auto-closed \(orphans.count) to relieve pressure: \(names)",
+            category: .pressure, severity: .passive, projectID: nil, action: .none))
+        AppLog.shared.event("Pressure: auto-closed \(orphans.count) orphan(s): \(names)")
+    }
 
-        // 2) Suggest the rest (heuristic instantly, refined by Haiku) for the manual skull button.
+    /// (Re)compute the kill suggestions: heuristic instantly, refined by Haiku. Managed servers are
+    /// kept in the snapshot so a runaway one can be suggested by name. Safe to call on a refresh.
+    func refreshKillSuggestions() {
+        guard !isEvaluatingPressure else { return }
+        isEvaluatingPressure = true
+        let s = systemSampler
         let procs: [ResourceAdvisor.Proc] = s.processes
-            .filter { !orphanIDs.contains($0.id) }
             .map { .init(pid: $0.id, name: $0.name, cpuPerCore: $0.cpuPerCore,
                          memMB: $0.memBytes / 1_048_576, managedDev: $0.isDevServer) }
         killSuggestions = ResourceAdvisor.heuristicKills(procs: procs)
@@ -418,7 +696,10 @@ final class AppState {
     /// supervisor; a foreign process gets SIGTERM, escalating to SIGKILL if still alive.
     func killSuggestion(_ rec: ResourceAdvisor.Recommendation) {
         if rec.action == .stopDevServer || rec.id == -1 {
-            stopAllSessions()
+            // The suggestion's id is the server's synthetic id (-pid) — stop THAT server; if it
+            // doesn't map to a live session, fall back to stopping all.
+            if let s = sessions.values.first(where: { $0.pid == -rec.id }) { s.stop() }
+            else { stopAllSessions() }
         } else if rec.id > 0 {
             Self.killPid(rec.id)
         }

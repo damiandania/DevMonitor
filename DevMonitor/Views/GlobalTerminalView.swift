@@ -1,29 +1,37 @@
 import SwiftUI
 import AppKit
 
-/// Global terminal panel: one tab per running server and per build, across ALL projects. Each tab
-/// is "icon (server/build) + project name + ✕". Launching another project's server adds a tab; a
-/// build adds its own tab alongside the server (builds no longer stop servers).
+/// Global terminal panel: one tab per running server and per build, across ALL projects, plus a
+/// yellow "System pressure" tab (when the machine is stuck) that shows the kill suggestions.
+/// Each terminal tab is "icon + project name + status dot / ✕ on hover".
 struct GlobalTerminalView: View {
     @Environment(AppState.self) private var app
 
     private struct Tab: Identifiable {
-        let id: String          // "s:<projectID>" (server) | "b:<projectID>" (build)
-        let projectID: Project.ID
+        enum Kind { case server, build, pressure }
+        let id: String              // "s:<projectID>" | "b:<projectID>" | "pressure"
+        let projectID: Project.ID?  // nil for the pressure tab
         let name: String
-        let isBuild: Bool
+        let kind: Kind
+        var isBuild: Bool { kind == .build }
+        var isPressure: Bool { kind == .pressure }
     }
 
     private var tabs: [Tab] {
         var result: [Tab] = []
         for (pid, s) in app.sessions {
-            result.append(Tab(id: "s:\(pid)", projectID: pid, name: s.project.name, isBuild: false))
+            result.append(Tab(id: "s:\(pid)", projectID: pid, name: s.project.name, kind: .server))
         }
         for (pid, b) in app.builds {
-            result.append(Tab(id: "b:\(pid)", projectID: pid, name: b.project.name, isBuild: true))
+            result.append(Tab(id: "b:\(pid)", projectID: pid, name: b.project.name, kind: .build))
         }
         // Stable order: by project name, server before its build.
-        return result.sorted { $0.name == $1.name ? (!$0.isBuild && $1.isBuild) : $0.name < $1.name }
+        result.sort { $0.name == $1.name ? ($0.kind == .server && $1.kind == .build) : $0.name < $1.name }
+        // The pressure tab is an alert — always first (leftmost).
+        if app.systemUnderPressure {
+            result.insert(Tab(id: "pressure", projectID: nil, name: "System pressure", kind: .pressure), at: 0)
+        }
+        return result
     }
 
     /// The selected tab, falling back to the first when the stored selection is gone (e.g. closed).
@@ -45,8 +53,11 @@ struct GlobalTerminalView: View {
                                 tint: statusColor(tab),
                                 onSelect: { app.selectedTerminalID = tab.id },
                                 onClose: {
-                                    if tab.isBuild { app.closeBuild(id: tab.projectID) }
-                                    else { app.closeServer(id: tab.projectID) }
+                                    switch tab.kind {
+                                    case .pressure: app.dismissPressure()
+                                    case .build:    tab.projectID.map { app.closeBuild(id: $0) }
+                                    case .server:   tab.projectID.map { app.closeServer(id: $0) }
+                                    }
                                 })
                     }
                 }
@@ -55,41 +66,52 @@ struct GlobalTerminalView: View {
             .scrollIndicators(.hidden)
 
             if let sel, let tab = tabs.first(where: { $0.id == sel }) {
-                logPane(for: tab)
+                pane(for: tab)
             }
         }
         .dmCard()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder private func logPane(for tab: Tab) -> some View {
-        if tab.isBuild, let build = app.builds[tab.projectID] {
-            LogPaneView(lines: build.logLines, terminalTheme: app.settings.terminalTheme)
-        } else if let session = app.sessions[tab.projectID] {
-            LogPaneView(lines: session.logLines,
-                        inputPlaceholder: "Send input to \(session.project.name) (press Enter)…",
-                        onSubmit: { session.sendInput($0) },
-                        terminalTheme: app.settings.terminalTheme)
+    @ViewBuilder private func pane(for tab: Tab) -> some View {
+        switch tab.kind {
+        case .pressure:
+            ScrollView { PressureSuggestionsView().frame(maxWidth: .infinity, alignment: .leading) }
+        case .build:
+            if let id = tab.projectID, let build = app.builds[id] {
+                LogPaneView(lines: build.logLines, terminalTheme: app.settings.terminalTheme)
+            }
+        case .server:
+            if let id = tab.projectID, let session = app.sessions[id] {
+                LogPaneView(lines: session.logLines,
+                            inputPlaceholder: "Send input to \(session.project.name) (press Enter)…",
+                            onSubmit: { session.sendInput($0) },
+                            terminalTheme: app.settings.terminalTheme)
+            }
         }
     }
 
-    /// Status colour for a tab's dot: a build's outcome (running orange, built green, failed red) or
-    /// the server's live state (running green, launching orange, failed red, idle/stopped gray).
+    /// Status colour for a tab's dot: the pressure alert (yellow), a build's outcome (running orange,
+    /// built green, failed red) or the server's live state (running green, launching orange, …).
     private func statusColor(_ tab: Tab) -> Color {
-        if tab.isBuild {
-            guard let b = app.builds[tab.projectID] else { return .secondary }
+        switch tab.kind {
+        case .pressure: return .yellow
+        case .build:
+            guard let id = tab.projectID, let b = app.builds[id] else { return .secondary }
             if b.isRunning { return .orange }
             switch b.result {
             case .some(0): return .green
             case .some:    return .red
             default:       return .secondary
             }
+        case .server:
+            guard let id = tab.projectID else { return .secondary }
+            return (app.sessions[id]?.state ?? .idle).tint
         }
-        return (app.sessions[tab.projectID]?.state ?? .idle).tint
     }
 
-    /// A tab pill: icon + project name (tap to select). The trailing control is a small status dot
-    /// coloured by the server/build state, swapping to the ✕ close button on hover.
+    /// A tab pill: icon + project name (tap to select). Terminal tabs show a status dot that swaps to
+    /// an ✕ on hover; the pressure tab is yellow with a warning glyph (and no close — it self-clears).
     private struct TabPill: View {
         let tab: Tab
         let selected: Bool
@@ -101,25 +123,50 @@ struct GlobalTerminalView: View {
         var body: some View {
             HStack(spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: tab.isBuild ? "hammer.fill" : "server.rack")
-                        .font(.system(size: 10, weight: .semibold))
+                    Image(systemName: icon).font(.system(size: 10, weight: .semibold))
                     Text(tab.name)
                         .font(.callout.weight(selected ? .semibold : .regular))
                         .lineLimit(1)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onSelect)
-                .help("\(tab.isBuild ? "Build" : "Server") · \(tab.name)")
+                .help(helpText)
 
                 trailing.frame(width: 14, height: 14)   // fixed slot so dot↔✕ never shifts layout
             }
-            .foregroundStyle(selected ? Color.white : Color.primary)
+            .foregroundStyle(foreground)
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(selected ? AnyShapeStyle(Color.accentColor)
-                                 : AnyShapeStyle(Color(.quaternaryLabelColor)),
-                        in: Capsule())
+            .background(background, in: Capsule())
             .onHover { hovering = $0 }
             .animation(.easeInOut(duration: 0.12), value: hovering)
+        }
+
+        private var icon: String {
+            switch tab.kind {
+            case .pressure: return "exclamationmark.triangle.fill"
+            case .build:    return "hammer.fill"
+            case .server:   return "server.rack"
+            }
+        }
+
+        private var helpText: String {
+            switch tab.kind {
+            case .pressure: return "System under pressure — suggested processes to free up"
+            case .build:    return "Build · \(tab.name)"
+            case .server:   return "Server · \(tab.name)"
+            }
+        }
+
+        private var foreground: Color {
+            if tab.isPressure { return selected ? .black : .pressureAmber }
+            return selected ? .white : .primary
+        }
+
+        private var background: AnyShapeStyle {
+            if tab.isPressure {
+                return AnyShapeStyle(selected ? Color.yellow.opacity(0.9) : Color.yellow.opacity(0.22))
+            }
+            return selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(.quaternaryLabelColor))
         }
 
         @ViewBuilder private var trailing: some View {
@@ -128,7 +175,8 @@ struct GlobalTerminalView: View {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).opacity(0.7)
                 }
                 .buttonStyle(.plain)
-                .help("Close \(tab.isBuild ? "build" : "server") · \(tab.name)")
+                .help(tab.isPressure ? "Dismiss pressure suggestions"
+                                     : "Close \(tab.isBuild ? "build" : "server") · \(tab.name)")
             } else {
                 Circle().fill(tint).frame(width: 8, height: 8)
             }

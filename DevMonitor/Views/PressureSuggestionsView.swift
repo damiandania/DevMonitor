@@ -14,7 +14,7 @@ struct PressureSuggestionsView: View {
                 if app.isEvaluatingPressure { ProgressView().controlSize(.mini) }
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.orange)
+            .foregroundStyle(Color.pressureAmber)
 
             Text(app.systemSampler.pressureReason)
                 .font(.caption2)
@@ -31,7 +31,8 @@ struct PressureSuggestionsView: View {
             }
         }
         .padding(14)
-        .background(.orange.opacity(0.10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.yellow.opacity(0.13))
     }
 
     private func row(_ rec: ResourceAdvisor.Recommendation) -> some View {
@@ -57,4 +58,9 @@ struct PressureSuggestionsView: View {
                   : "Kill \(rec.name) (pid \(rec.id))")
         }
     }
+}
+
+extension Color {
+    /// Dark gold — readable "yellow-family" accent for text/icons on the light-yellow pressure UI.
+    static let pressureAmber = Color(red: 0.60, green: 0.45, blue: 0.0)
 }

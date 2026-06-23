@@ -37,13 +37,13 @@ final class IPCServer {
                     continue
                 }
                 Task { @MainActor in
-                    self?.handle(req, client: client)
+                    await self?.handle(req, client: client)
                 }
             }
         }
     }
 
-    private func handle(_ req: IPCRequest, client: Int32) {
+    private func handle(_ req: IPCRequest, client: Int32) async {
         defer { close(client) }
         guard let app else {
             IPCIO.write(client, IPCMessage(type: "error", message: "app unavailable"))
@@ -100,8 +100,20 @@ final class IPCServer {
         case "build":
             guard let project = resolveProject(req, app: app, client: client) else { return }
             app.selectedProjectID = project.id
-            app.runBuild(project)   // runs alongside the dev server (doesn't stop it)
-            IPCIO.write(client, IPCMessage(type: "ok", message: "building \(project.name)"))
+            // Synchronous: run the build to completion (leaving the dev server untouched, like
+            // runBuild), then stream the tail of its output followed by an ok/error verdict. The
+            // CLI prints every message and exits non-zero on the trailing "error" — so a caller
+            // (or an agent) gets the real result instead of a fire-and-forget "building …".
+            let build = await app.runBuildAndWait(project)
+            let code = build.result ?? -1
+            for line in build.logLines.suffix(40) {
+                IPCIO.write(client, IPCMessage(type: "ok", message: line))
+            }
+            if code == 0 {
+                IPCIO.write(client, IPCMessage(type: "ok", message: "✅ build succeeded — \(project.name) (exit 0)"))
+            } else {
+                IPCIO.write(client, IPCMessage(type: "error", message: "❌ build failed — \(project.name) (exit \(code))"))
+            }
 
         case "stop":
             if req.all == true {

@@ -58,7 +58,7 @@ enum ResourceAdvisor {
         }
         for p in procs {
             let tag = p.managedDev ? "[DEV SERVER — managed by Dev Monitor]" : "[foreign]"
-            let pidStr = p.pid >= 0 ? "pid \(p.pid)" : "tree"
+            let pidStr = "pid \(p.pid)"   // managed dev servers have negative (synthetic) pids
             lines.append(String(format: "  %@  %@  cpu %.0f%%  mem %.0f MB  %@",
                                 pidStr, p.name, p.cpuPerCore, p.memMB, tag))
         }
@@ -87,7 +87,8 @@ enum ResourceAdvisor {
         {
           "summary": "one sentence on overall machine health",
           "recommendations": [
-            {"pid": <int, -1 for the dev-server tree>, "action": "keep|investigate|stop_dev_server|close_process",
+            {"pid": <int — the exact pid shown for that process (dev servers have negative pids)>,
+             "action": "keep|investigate|stop_dev_server|close_process",
              "severity": "low|medium|high", "reason": "short, specific"}
           ]
         }
@@ -147,7 +148,7 @@ enum ResourceAdvisor {
         never Dev Monitor itself. A [DEV SERVER — managed by Dev Monitor] entry uses "stop_dev_server".
 
         Reply with ONLY JSON, no prose:
-        {"recommendations":[{"pid":<int,-1 for the dev-server tree>,
+        {"recommendations":[{"pid":<int — the exact pid shown (dev servers have negative pids)>,
           "action":"close_process|stop_dev_server","severity":"low|medium|high","reason":"short"}]}
         Only include processes that really should be killed; return an empty list if nothing is safe.
 
@@ -185,7 +186,7 @@ enum ResourceAdvisor {
         let top = procs.sorted { $0.memMB > $1.memMB }.prefix(12)
         if top.isEmpty { lines.append("  (none notable)") }
         for p in top {
-            let pidStr = p.pid >= 0 ? "pid \(p.pid)" : "tree"
+            let pidStr = "pid \(p.pid)"   // managed dev servers have negative (synthetic) pids
             let tag = p.managedDev ? "  [dev server — managed]" : ""
             lines.append(String(format: "  %@  %@  %.0f MB%@", pidStr, p.name, p.memMB, tag))
         }
@@ -210,7 +211,8 @@ enum ResourceAdvisor {
         {
           "summary": "one line: memory health + roughly how much closing these frees",
           "recommendations": [
-            {"pid": <int, -1 for the dev-server tree>, "action": "close_process|stop_dev_server|keep",
+            {"pid": <int — the exact pid shown (dev servers have negative pids)>,
+             "action": "close_process|stop_dev_server|keep",
              "severity": "low|medium|high", "reason": "e.g. 3.7 GB across many Chrome tabs"}
           ]
         }

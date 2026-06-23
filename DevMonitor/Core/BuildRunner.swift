@@ -32,9 +32,14 @@ final class BuildRunner {
         project.buildCommand ?? "\(project.packageManager.runScriptPrefix) build"
     }
 
-    func start() {
+    func start(memoryGB: Int) {
         guard !isRunning else { return }
-        let command = "FORCE_COLOR=0 exec \(buildCommand)"
+        // Inject the same heap as the dev server (--max-old-space-size) so a large build doesn't OOM
+        // where a bare `npm run build` would. NOTE: only NODE_OPTIONS-allowlisted flags work here —
+        // V8 flags like --optimize-for-size are REJECTED ("not allowed in NODE_OPTIONS") and make
+        // node exit immediately (code 9), failing every build. Keep it to --max-old-space-size.
+        let nodeOpts = "--max-old-space-size=\(memoryGB * 1024)"
+        let command = "NODE_OPTIONS='\(nodeOpts)' FORCE_COLOR=0 exec \(buildCommand)"
         logLines = ["$ \(command)  (cwd: \(project.path))"]
         lineBuffer = ""
         result = nil

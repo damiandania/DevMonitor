@@ -167,14 +167,7 @@ struct ProjectBuildButton: View {
     var body: some View {
         if let project = app.selectedProject, project.buildCommand != nil {
             if let build = app.build(for: project), build.isRunning {
-                Button { build.stop() } label: {
-                    Label {
-                        Text("Stop build")
-                    } icon: {
-                        Image(systemName: "stop.fill").foregroundStyle(.red)
-                    }
-                }
-                .help("Stop build")
+                BuildStopButton { build.stop() }
             } else {
                 Button { app.runBuild(project) } label: { Label("Build", systemImage: "hammer.fill") }
                     .help(buildHelp(project))
@@ -187,6 +180,43 @@ struct ProjectBuildButton: View {
         case .some(0): return "Built — click to rebuild"
         case .some: return "Build failed — click to rebuild"
         default: return "Build the project"
+        }
+    }
+}
+
+/// Shown in the toolbar to the LEFT of (and outside) the build button while a build runs:
+/// "Build Running", blinking (fades in/out) in sync with the Stop icon.
+struct BuildRunningLabel: View {
+    @Environment(AppState.self) private var app
+    @State private var pulse = false
+
+    var body: some View {
+        if let project = app.selectedProject, app.build(for: project)?.isRunning == true {
+            Text("Build Running")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .opacity(pulse ? 1 : 0.4)
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
+                }
+        }
+    }
+}
+
+/// The build button while running: a red Stop icon that fades in/out to signal in-progress.
+private struct BuildStopButton: View {
+    let onStop: () -> Void
+    @State private var pulse = false
+
+    var body: some View {
+        Button(action: onStop) {
+            Image(systemName: "stop.fill")
+                .foregroundStyle(.red)
+                .opacity(pulse ? 1 : 0.4)
+        }
+        .help("Stop build")
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
         }
     }
 }

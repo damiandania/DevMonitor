@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Settings modal styled like macOS System Settings: a left sidebar (General + one row per project)
 /// and a grouped-form detail pane on the right. Server config defaults to Auto.
@@ -8,6 +9,7 @@ struct AppSettingsView: View {
 
     enum Item: Hashable {
         case general
+        case notifications
         case project(Project.ID)
     }
 
@@ -15,6 +17,7 @@ struct AppSettingsView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Label("General", systemImage: "gearshape").tag(Item.general)
+                Label("Notifications", systemImage: "bell").tag(Item.notifications)
                 Section("Projects") {
                     ForEach(app.projects) { p in
                         Label { Text(p.name) } icon: { ProjectIconView(project: p, size: 16) }
@@ -35,6 +38,8 @@ struct AppSettingsView: View {
         switch selection {
         case .general:
             GeneralSettings()
+        case .notifications:
+            NotificationsSettings()
         case .project(let id):
             if let p = app.projects.first(where: { $0.id == id }) {
                 ProjectSettings(project: p) { selection = .general }
@@ -140,6 +145,82 @@ private struct GeneralSettings: View {
     }
 }
 
+// MARK: - Notifications
+
+private struct NotificationsSettings: View {
+    @Environment(AppState.self) private var app
+    /// Whether macOS has granted notification permission to the app (assume yes until checked).
+    @State private var systemAuthorized = true
+
+    var body: some View {
+        Form {
+            if !systemAuthorized {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Notifications are turned off in macOS", systemImage: "bell.slash.fill")
+                            .font(.callout.weight(.medium)).foregroundStyle(.orange)
+                        Text("Dev Monitor can't show banners until you allow them in "
+                             + "System Settings → Notifications.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open System Settings") { Self.openSystemNotificationSettings() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            Section {
+                Toggle("Enable notifications", isOn: master)
+            } footer: {
+                Text("Native banners for supervision events. Urgent ones (crash, failure, system "
+                     + "pressure) play a sound and can break through Focus; the rest are silent. The "
+                     + "last 5 also appear at the bottom of the sidebar.")
+            }
+            Section("Categories") {
+                ForEach(NotificationCatalog.all, id: \.id) { c in
+                    Toggle(isOn: categoryBinding(c.id)) {
+                        Label(c.label, systemImage: c.systemImage)
+                    }
+                    .disabled(!app.settings.notificationsEnabled)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("Notifications")
+        .onAppear { Notifier.shared.authorizationGranted { systemAuthorized = $0 } }
+    }
+
+    /// Open System Settings ▸ Notifications so the user can re-enable banners for the app.
+    static func openSystemNotificationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+            ?? URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!
+        NSWorkspace.shared.open(url)
+    }
+
+    private var master: Binding<Bool> {
+        .init(get: { app.settings.notificationsEnabled },
+              set: { app.settings.notificationsEnabled = $0; app.persistSettings() })
+    }
+
+    private func categoryBinding(_ c: NotificationCategory) -> Binding<Bool> {
+        .init(get: {
+            switch c {
+            case .failures: return app.settings.notifyFailures
+            case .recovery: return app.settings.notifyRecovery
+            case .builds:   return app.settings.notifyBuilds
+            case .pressure: return app.settings.notifyPressure
+            }
+        }, set: { on in
+            switch c {
+            case .failures: app.settings.notifyFailures = on
+            case .recovery: app.settings.notifyRecovery = on
+            case .builds:   app.settings.notifyBuilds = on
+            case .pressure: app.settings.notifyPressure = on
+            }
+            app.persistSettings()
+        })
+    }
+}
+
 // MARK: - Claude Code hook (install / uninstall)
 
 /// Lets the user install (or remove) the global Claude Code hook that makes OTHER Claude sessions
@@ -200,6 +281,7 @@ private struct ProjectSettings: View {
         Form {
             Section("Server") {
                 memoryRow
+                buildMemoryRow
                 portRow
                 packageRow
             }
@@ -230,6 +312,21 @@ private struct ProjectSettings: View {
             Picker("", selection: Binding(get: { live.memoryGB },
                                           set: { app.setMemoryGB($0, for: project.id) })) {
                 ForEach(1...max(systemMaxGB, live.memoryGB), id: \.self) { Text("\($0) GB").tag($0) }
+            }
+            .labelsHidden().fixedSize()
+        }
+    }
+
+    /// Build heap — independent from the dev server. In auto it shows the autoscaler's learned level
+    /// (4→6→8); in manual a fixed GB picker.
+    private var buildMemoryRow: some View {
+        let auto = Binding(get: { live.buildMemoryAuto }, set: { app.setBuildMemoryAuto($0, for: project.id) })
+        return row(icon: "hammer", name: "Build memory", auto: auto) {
+            Text("\(app.effectiveBuildMemoryGB(for: live)) GB").foregroundStyle(.secondary)
+        } manual: {
+            Picker("", selection: Binding(get: { live.buildMemoryGB },
+                                          set: { app.setBuildMemoryGB($0, for: project.id) })) {
+                ForEach(1...max(systemMaxGB, live.buildMemoryGB), id: \.self) { Text("\($0) GB").tag($0) }
             }
             .labelsHidden().fixedSize()
         }

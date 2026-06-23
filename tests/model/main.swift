@@ -38,10 +38,10 @@ chk(back.memoryAuto == false && back.packageManagerAuto == false
 //   manual → the explicit memoryGB, floored at minHeapGB
 //   always capped at physical RAM.
 let nuxtAuto = Project(name: "n", path: "/tmp/n", framework: .nuxt, memoryGB: 1, memoryAuto: true)
-chk(nuxtAuto.effectiveMemoryGB(systemGB: 64) == 8,
-    "effective: auto Nuxt → 8, ignores stale memoryGB=1", "\(nuxtAuto.effectiveMemoryGB(systemGB: 64))")
+chk(nuxtAuto.effectiveMemoryGB(systemGB: 64) == HeapScaling.firstGB,
+    "effective: auto starts at firstGB, ignores stale memoryGB=1", "\(nuxtAuto.effectiveMemoryGB(systemGB: 64))")
 let nodeAuto = Project(name: "x", path: "/tmp/x", framework: .node, memoryAuto: true)
-chk(nodeAuto.effectiveMemoryGB(systemGB: 64) == 2, "effective: auto node → 2")
+chk(nodeAuto.effectiveMemoryGB(systemGB: 64) == HeapScaling.firstGB, "effective: auto node → firstGB")
 let manual = Project(name: "m", path: "/tmp/m", framework: .nuxt, memoryGB: 6, memoryAuto: false)
 chk(manual.effectiveMemoryGB(systemGB: 64) == 6, "effective: manual respects memoryGB=6")
 let lowManual = Project(name: "l", path: "/tmp/l", framework: .node, memoryGB: 1, memoryAuto: false)
@@ -65,9 +65,13 @@ chk(defs.autoCloseOrphans, "settings: auto-close orphans on by default")
 chk(defs.defaultMemoryGB == 4, "settings: default heap 4")
 chk(defs.editor == nil, "settings: default editor = first found (nil)")
 chk(defs.bars == AppSettings.defaultBars, "settings: default bars = cpu/memory/swap")
+chk(defs.notificationsEnabled, "settings: notifications enabled by default")
+chk(defs.notifyFailures && defs.notifyRecovery && defs.notifyBuilds && defs.notifyPressure,
+    "settings: all notification categories on by default")
 
 let custom = AppSettings(browser: "Firefox", analysisModel: "claude-opus-4-8",
-                         autoCloseOrphans: false, defaultMemoryGB: 8)
+                         autoCloseOrphans: false, defaultMemoryGB: 8,
+                         notificationsEnabled: false, notifyFailures: false, notifyPressure: false)
 guard let sData = try? JSONEncoder().encode(custom),
       let sBack = try? dec.decode(AppSettings.self, from: sData) else {
     print("FAIL model: AppSettings round-trip failed"); exit(1)

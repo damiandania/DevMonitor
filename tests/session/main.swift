@@ -108,14 +108,14 @@ func runSessionTests() async -> Int {
     // P5: build runner — success and failure.
     let okBuild = BuildRunner(project: Project(name: "b", path: "/tmp",
         buildCommand: "sh -c 'echo BUILDING_OK; exit 0'"))
-    okBuild.start()
+    okBuild.start(memoryGB: 2)
     try? await Task.sleep(for: .seconds(2))
     check("build: success", okBuild.result == 0 && !okBuild.isRunning, "result=\(String(describing: okBuild.result))")
     check("build: log captured", okBuild.logLines.contains { $0.contains("BUILDING_OK") })
 
     let failBuild = BuildRunner(project: Project(name: "bf", path: "/tmp",
         buildCommand: "sh -c 'exit 3'"))
-    failBuild.start()
+    failBuild.start(memoryGB: 2)
     try? await Task.sleep(for: .seconds(2))
     check("build: failure code", failBuild.result == 3, "result=\(String(describing: failBuild.result))")
 

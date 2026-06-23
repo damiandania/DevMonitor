@@ -23,6 +23,9 @@ final class DevSession {
 
     /// Supervision-event hook (notifications). Set by AppState; nil in headless tests.
     var onEvent: (@MainActor (SupervisionEvent) -> Void)?
+    /// Fired when the OOM autoscaler bumps the heap, with the new GB level. AppState persists it to
+    /// the project (`autoHeapGB`) so the next launch starts there. Only invoked in AUTO mode.
+    var onHeapEscalated: (@MainActor (Int) -> Void)?
 
     private let maxLogLines = 2000
     private var lineBuffer = ""
@@ -58,8 +61,6 @@ final class DevSession {
     /// Last port the server actually bound to — re-pinned across recycles/restarts so it doesn't
     /// drift (e.g. 3000 → 3001) when relaunched.
     private var lastKnownPort: Int?
-    /// One-shot: bump the heap and relaunch when a crash looks like an out-of-memory kill.
-    private var oomRetried = false
     /// Bounded auto-restart after an unexpected crash (budget restored after a stable healthy streak).
     private var crashRestarts = 0
     private let crashRestartLimit = 3
@@ -350,13 +351,14 @@ final class DevSession {
             if stopping || code == 0 {
                 state = .stopped(code: 0)
                 lastError = nil
-            } else if looksLikeOOM(), !oomRetried, let bigger = biggerHeap() {
-                // The crash looks like an out-of-memory kill → relaunch once with a bigger heap.
-                oomRetried = true
-                lastError = "out of memory — relaunching with \(bigger) GB heap (set explicitly with: dev-monitor up --gb \(bigger))"
+            } else if looksLikeOOM(code), let bigger = biggerHeap() {
+                // OOM → relaunch with the NEXT heap step (4→6→8). In AUTO mode persist the new level
+                // (onHeapEscalated → autoHeapGB) so the next launch starts there, not back at 4.
+                if project.memoryAuto { onHeapEscalated?(bigger) }
+                lastError = "out of memory — relaunching with \(bigger) GB heap"
                 append(line: "oom: out-of-memory detected — relaunching with \(bigger) GB heap")
                 AppLog.shared.event("DevSession: \(project.name) OOM (exit \(code)) — retrying with \(bigger) GB")
-                onEvent?(.recycled(project: project.name))
+                onEvent?(.oomRetry(project: project.name, newHeapGB: bigger))
                 scheduleRestart(memoryGB: bigger, delaySeconds: 1)
             } else if hasBeenHealthy, crashRestarts < crashRestartLimit {
                 // A server that WAS up then died → bounded auto-restart with exponential backoff
@@ -371,11 +373,11 @@ final class DevSession {
                 scheduleRestart(memoryGB: lastMemoryGB, delaySeconds: backoff)
             } else {
                 // Give up. Keep an OOM hint if that's what it looked like, else the plain exit cause.
-                lastError = looksLikeOOM()
+                lastError = looksLikeOOM(code)
                     ? "out of memory — relaunch with more heap (e.g. dev-monitor up --gb \(biggerHeap() ?? lastMemoryGB))"
                     : "exited with code \(code)"
                 state = .failed(lastError ?? "exited with code \(code)")
-                onEvent?(.crashed(project: project.name, code: code))
+                onEvent?(.failed(project: project.name, reason: lastError ?? "exited with code \(code)"))
                 AppLog.shared.event("DevSession: \(project.name) crashed (exit \(code)) — giving up after \(crashRestarts) auto-restarts")
             }
         default:
@@ -385,20 +387,15 @@ final class DevSession {
 
     /// Heuristic: did the recent output look like a V8 out-of-memory abort? (Robust to the exit code,
     /// which varies — SIGABRT 134, Nuxt 6, etc.)
-    private func looksLikeOOM() -> Bool {
-        logLines.suffix(60).contains { line in
-            let s = line.lowercased()
-            return s.contains("heap out of memory") || s.contains("javascript heap")
-                || s.contains("reached heap limit") || s.contains("allocation failed")
-        }
+    private func looksLikeOOM(_ exitCode: Int32) -> Bool {
+        HeapScaling.looksLikeOOM(logLines: logLines, exitCode: exitCode)
     }
 
-    /// The next heap to try after an OOM: double the last, floored at 4 GB, capped at physical RAM.
-    /// Returns nil when there's no headroom left to grow.
+    /// The next heap to try after an OOM: the next step on the 4→6→8 ladder, capped at physical
+    /// RAM. Returns nil when there's no higher step left.
     private func biggerHeap() -> Int? {
-        let sysGB = max(4, Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824))
-        let next = min(max(lastMemoryGB * 2, 4), sysGB)
-        return next > lastMemoryGB ? next : nil
+        let sysGB = Int(ProcessInfo.processInfo.physicalMemory / 1_073_741_824)
+        return HeapScaling.next(after: lastMemoryGB, systemGB: sysGB)
     }
 
     /// Relaunch after a delay (unless the user has since stopped us). During the backoff the state
@@ -520,7 +517,6 @@ final class DevSession {
                     self.stableProbes += 1
                     if self.stableProbes >= self.stableProbesToReset {
                         self.crashRestarts = 0
-                        self.oomRetried = false
                     }
                     if firstTime { self.append(line: "ok: server is responding on :\(port)") }
                     if recovering {

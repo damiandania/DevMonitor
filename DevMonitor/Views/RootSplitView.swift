@@ -12,30 +12,37 @@ struct RootSplitView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             detailTop
+                // Toolbar lives on the detail content (not the split-view root) so ToolbarSpacer
+                // actually splits the trailing items into separate Liquid Glass groups:
+                // 1) Build · 2) Open · 3) Settings + Doctor.
+                .toolbar {
+                    ToolbarSpacer(.flexible)
+                    // "Build Running ●●●" sits OUTSIDE the build button, to its left (no glass pill).
+                    if app.isSelectedBuildRunning {
+                        ToolbarItem { BuildRunningLabel() }
+                            .sharedBackgroundVisibility(.hidden)
+                    }
+                    ToolbarItem {
+                        ProjectBuildButton()
+                    }
+                    ToolbarSpacer(.fixed)
+                    ToolbarItem {
+                        ProjectOpenGroup()
+                    }
+                    ToolbarSpacer(.fixed)
+                    ToolbarItemGroup {
+                        Button { openWindow(id: "settings") } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .help("App settings")
+                        Button { openWindow(id: "doctor") } label: {
+                            Label("Doctor", systemImage: "stethoscope")
+                        }
+                        .help("Doctor Claude")
+                    }
+                }
         }
         .navigationTitle("Dev Monitor")
-        .toolbar {
-            // Build sits at the left of the trailing toolbar group (before Open), separated from
-            // the open/settings/doctor cluster.
-            ToolbarItem(placement: .primaryAction) {
-                ProjectBuildButton()
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ProjectOpenGroup()
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { openWindow(id: "settings") } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("App settings")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { openWindow(id: "doctor") } label: {
-                    Label("Doctor", systemImage: "stethoscope")
-                }
-                .help("Doctor Claude")
-            }
-        }
     }
 
     /// The detail stack: the selected project's header card (or a placeholder), the GLOBAL Activity
@@ -53,7 +60,7 @@ struct RootSplitView: View {
                     .dmCard()
             }
             ActivityView()
-            if !(app.sessions.isEmpty && app.builds.isEmpty) {
+            if !app.sessions.isEmpty || !app.builds.isEmpty || app.systemUnderPressure {
                 GlobalTerminalView()
             }
         }

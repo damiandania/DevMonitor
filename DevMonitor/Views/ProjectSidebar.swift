@@ -57,5 +57,9 @@ struct ProjectSidebar: View {
                 if access { url.stopAccessingSecurityScopedResource() }
             }
         }
+        // Last 5 notifications, pinned below the project list.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            NotificationsFeedView()
+        }
     }
 }

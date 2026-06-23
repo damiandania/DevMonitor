@@ -7,5 +7,7 @@ enum SupervisionEvent: Sendable {
     case recycled(project: String)
     case recovered(project: String)
     case crashed(project: String, code: Int32)
+    case oomRetry(project: String, newHeapGB: Int)   // out-of-memory → auto-retrying with a bigger heap
+    case failed(project: String, reason: String)     // gave up (exhausted restarts / never healthy)
     case buildFinished(project: String, success: Bool)
 }

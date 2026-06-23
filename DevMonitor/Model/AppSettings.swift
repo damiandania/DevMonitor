@@ -20,6 +20,13 @@ struct AppSettings: Codable, Sendable, Equatable {
     /// Terminal/log appearance: "app" (follow the app theme), "dark", or "light".
     var terminalTheme: String
 
+    // Notifications — master switch + a toggle per category (see NotificationCategory).
+    var notificationsEnabled: Bool
+    var notifyFailures: Bool
+    var notifyRecovery: Bool
+    var notifyBuilds: Bool
+    var notifyPressure: Bool
+
     init(browser: String? = nil,
          editor: String? = nil,
          analysisModel: String = AppSettings.defaultModel,
@@ -27,7 +34,12 @@ struct AppSettings: Codable, Sendable, Equatable {
          defaultMemoryGB: Int = 4,
          bars: [String] = AppSettings.defaultBars,
          theme: String = "system",
-         terminalTheme: String = "dark") {
+         terminalTheme: String = "dark",
+         notificationsEnabled: Bool = true,
+         notifyFailures: Bool = true,
+         notifyRecovery: Bool = true,
+         notifyBuilds: Bool = true,
+         notifyPressure: Bool = true) {
         self.browser = browser
         self.editor = editor
         self.analysisModel = analysisModel
@@ -36,11 +48,17 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.bars = bars
         self.theme = theme
         self.terminalTheme = terminalTheme
+        self.notificationsEnabled = notificationsEnabled
+        self.notifyFailures = notifyFailures
+        self.notifyRecovery = notifyRecovery
+        self.notifyBuilds = notifyBuilds
+        self.notifyPressure = notifyPressure
     }
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
         case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme, terminalTheme
+        case notificationsEnabled, notifyFailures, notifyRecovery, notifyBuilds, notifyPressure
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -52,6 +70,11 @@ struct AppSettings: Codable, Sendable, Equatable {
         bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         terminalTheme = try c.decodeIfPresent(String.self, forKey: .terminalTheme) ?? "dark"
+        notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
+        notifyFailures = try c.decodeIfPresent(Bool.self, forKey: .notifyFailures) ?? true
+        notifyRecovery = try c.decodeIfPresent(Bool.self, forKey: .notifyRecovery) ?? true
+        notifyBuilds = try c.decodeIfPresent(Bool.self, forKey: .notifyBuilds) ?? true
+        notifyPressure = try c.decodeIfPresent(Bool.self, forKey: .notifyPressure) ?? true
     }
 
     static let defaultModel = "claude-haiku-4-5"
