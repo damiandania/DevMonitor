@@ -44,7 +44,22 @@ check(item.category == .failures && item.severity == .urgent && item.action == .
 let oom = NotificationPolicy.make(from: .oomRetry(project: "Api", newHeapGB: 6), projectID: nil)
 check(oom.body.contains("6 GB"), "make: oomRetry mentions the new heap")
 
+// --- machine-pressure factories ---
+let pressure = NotificationPolicy.machineUnderPressure(reason: "swap full")
+check(pressure.category == .pressure && pressure.severity == .urgent && pressure.action == .open
+      && pressure.body == "swap full", "machineUnderPressure: urgent/open, carries reason")
+check(NotificationPolicy.machineUnderPressure(reason: "").body == "The machine is stuck.",
+      "machineUnderPressure: empty reason → default body")
+let cleared = NotificationPolicy.pressureCleared()
+check(cleared.category == .pressure && cleared.severity == .passive, "pressureCleared → pressure/passive")
+let orphan1 = NotificationPolicy.orphansClosed(count: 1, names: "node")
+check(orphan1.title == "Closed orphaned dev process" && orphan1.severity == .passive
+      && orphan1.action == .none, "orphansClosed(1): singular title, passive/none")
+check(NotificationPolicy.orphansClosed(count: 2, names: "node, vite").title == "Closed orphaned dev processes",
+      "orphansClosed(2): plural title")
+
 // --- throttle ---
+check(NotificationThrottle.defaultWindow == 15, "throttle default window is 15s")
 let now = Date()
 check(!NotificationThrottle.shouldSuppress(key: "k", now: now, last: nil, window: 15), "no prior → not suppressed")
 check(NotificationThrottle.shouldSuppress(key: "k", now: now, last: now.addingTimeInterval(-5), window: 15), "5s ago within 15s → suppressed")

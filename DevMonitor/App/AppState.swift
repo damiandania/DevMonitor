@@ -141,7 +141,8 @@ final class AppState {
         if recentNotifications.count > 5 { recentNotifications.removeLast(recentNotifications.count - 5) }
         guard NotificationPolicy.shouldNotify(item.category, settings) else { return }
         let key = "\(item.category.rawValue)|\(item.projectID?.uuidString ?? "-")|\(item.title)"
-        if NotificationThrottle.shouldSuppress(key: key, now: item.date, last: lastNotified[key], window: 15) { return }
+        if NotificationThrottle.shouldSuppress(key: key, now: item.date, last: lastNotified[key],
+                                               window: NotificationThrottle.defaultWindow) { return }
         lastNotified[key] = item.date
         Notifier.shared.post(item)
     }
@@ -583,9 +584,7 @@ final class AppState {
         } else {
             // Recovered: notify (if we warned), clear suggestions, and re-arm for the next event.
             if pressureNotified {
-                route(NotificationItem(title: "System pressure cleared",
-                                       body: "The machine is no longer under pressure.",
-                                       category: .pressure, severity: .passive, projectID: nil, action: .open))
+                route(NotificationPolicy.pressureCleared())
                 pressureNotified = false
             }
             killSuggestions.removeAll()
@@ -608,10 +607,7 @@ final class AppState {
             selectedTerminalID = "pressure"     // focus it so the suggestions are seen
             if !pressureNotified {              // once per stuck episode
                 pressureNotified = true
-                let reason = systemSampler.pressureReason
-                route(NotificationItem(title: "Machine under pressure",
-                                       body: reason.isEmpty ? "The machine is stuck." : reason,
-                                       category: .pressure, severity: .urgent, projectID: nil, action: .open))
+                route(NotificationPolicy.machineUnderPressure(reason: systemSampler.pressureReason))
             }
         }
         autoCloseOrphans()
@@ -634,10 +630,7 @@ final class AppState {
         guard !orphans.isEmpty else { return }
         orphans.forEach { Self.killPid($0.id) }
         let names = orphans.map(\.name).joined(separator: ", ")
-        route(NotificationItem(
-            title: "Closed orphaned dev process\(orphans.count > 1 ? "es" : "")",
-            body: "Auto-closed \(orphans.count) to relieve pressure: \(names)",
-            category: .pressure, severity: .passive, projectID: nil, action: .none))
+        route(NotificationPolicy.orphansClosed(count: orphans.count, names: names))
         AppLog.shared.event("Pressure: auto-closed \(orphans.count) orphan(s): \(names)")
     }
 

@@ -55,6 +55,9 @@ final class DevSession {
     private let httpTimeout: TimeInterval = 8   // tolerant of a busy server under load
     private let warmHTTPTimeout: TimeInterval = 3   // snappier flip to .running during warm-up
     private let strikeLimit = 2
+    /// If nothing answers HTTP within this window after launch, assume the server is up (e.g. an API
+    /// with no "/" route). We never recycle during this window — only after it.
+    private let warmUpWindow: Duration = .seconds(150)
 
     // Crash recovery (auto-revive)
     /// Last port the server actually bound to — re-pinned across recycles/restarts so it doesn't
@@ -154,8 +157,9 @@ final class DevSession {
         // (e.g. MiddleSpace ~25s of Vite compile). We do NOT recycle during warm-up; only the
         // first successful HTTP probe flips to .running (see startHealth). If nothing ever
         // answers within the window (e.g. an API with no "/" route), assume it's up.
+        let window = warmUpWindow
         graceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(150))
+            try? await Task.sleep(for: window)
             guard let self, !self.hasBeenHealthy, case .launching = self.state else { return }
             self.hasBeenHealthy = true
             self.state = .running(port: self.effectivePort ?? 3000)

@@ -52,10 +52,37 @@ enum NotificationPolicy {
         return NotificationItem(title: title, body: body, category: category,
                                 severity: severity, projectID: projectID, action: action)
     }
+
+    // MARK: - Machine-pressure notifications
+    // These aren't derived from a per-project `SupervisionEvent`; they're machine-wide. Kept here
+    // (not inline in AppState) so the wording/classification is policy and stays unit-testable.
+
+    /// Posted once when the machine enters a stuck/pressure episode. Urgent so it cuts through.
+    static func machineUnderPressure(reason: String) -> NotificationItem {
+        NotificationItem(title: "Machine under pressure",
+                         body: reason.isEmpty ? "The machine is stuck." : reason,
+                         category: .pressure, severity: .urgent, projectID: nil, action: .open)
+    }
+
+    /// Posted when the machine recovers from a pressure episode we previously warned about.
+    static func pressureCleared() -> NotificationItem {
+        NotificationItem(title: "System pressure cleared",
+                         body: "The machine is no longer under pressure.",
+                         category: .pressure, severity: .passive, projectID: nil, action: .open)
+    }
+
+    /// Posted after auto-closing orphaned dev processes to relieve pressure.
+    static func orphansClosed(count: Int, names: String) -> NotificationItem {
+        NotificationItem(title: "Closed orphaned dev process\(count > 1 ? "es" : "")",
+                         body: "Auto-closed \(count) to relieve pressure: \(names)",
+                         category: .pressure, severity: .passive, projectID: nil, action: .none)
+    }
 }
 
 /// Banner de-dup: suppress a repeat of the same key within `window` (the feed still records every event).
 enum NotificationThrottle {
+    /// Default suppression window for repeated banners of the same key.
+    static let defaultWindow: TimeInterval = 15
     static func shouldSuppress(key: String, now: Date, last: Date?, window: TimeInterval) -> Bool {
         guard let last else { return false }
         return now.timeIntervalSince(last) < window
