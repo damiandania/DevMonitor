@@ -5,7 +5,23 @@ versions use [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Background workers.** A project with a `worker` script (`worker`, `worker:dev`, …) gets a
+  supervised long-running worker — its own run-control, terminal tab and process-table row.
+- **Production-build preview.** A project with a `preview` (or Next's `start`) script gets a Preview
+  control that serves the built output through the same server supervision as the dev server (port,
+  health, logs), with its own terminal tab.
+- **Unified run-controls.** Dev, worker, build and preview are now one row of play/stop pills on the
+  dashboard, each showing a short live status; a failed control's status is an underlined link that
+  opens a popover with the terminal error (copyable). Launching/building blinks. They all come from
+  one source (`AppState.runControls`), so the menu bar, terminal tabs and the menu-bar health glyph
+  pick up a new process type automatically.
+- **Terminal run timers.** The terminal pane shows a live uptime for a running server/worker, and for
+  a build the elapsed time + a progress bar against the last build's duration as the ETA.
+
 ### Changed
+- **Menu-bar status glyph** now turns red when *any* supervised process (dev, worker, build, preview)
+  is stopped or failed — not just a failed dev server.
 - **`dev-monitor build` is now synchronous.** It waits for the build to finish, then prints the tail
   of the build output and a success/failure verdict — exiting non-zero on failure — instead of
   returning immediately with "building …". A caller (or an agent) gets the real result, not a

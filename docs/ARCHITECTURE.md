@@ -53,7 +53,13 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   primitives: `ProcessSupport` (`decodeExitCode`, `gracefulKillGroup`, `nodeHeapFlag`), `LineBuffer`
   (`\n`-splitting with partial-line carryover), `LogNoise` (the shared shell session-restore filter).
 - **`BuildRunner`** — a one-shot tracked build process (same spawn/stream plumbing), reporting
-  success/failure. A user-initiated `stop()` is not reported as a build *failure*.
+  success/failure. A user-initiated `stop()` is not reported as a build *failure*. Records its
+  start time + duration (the latter becomes the next build's progress-bar ETA).
+- **`WorkerRunner`** — supervises a project's long-running background **worker** (a queue/job worker,
+  `tsx watch …`): same spawn/stream plumbing as the build, but no port/health — it just runs and
+  reports running / stopped / crashed.
+- **Preview** — serving a production build (`npm run preview` / `next start`) reuses `DevSession`
+  via a `commandOverride`, so it gets the same port/health/log supervision as the dev server.
 - **`PressureManager`** — the machine-pressure subsystem: the "under pressure" state, the one-shot
   auto-close of orphaned dev processes, and the kill suggestions (heuristic + Haiku). Owned by
   `AppState` via an unowned back-reference.
@@ -72,8 +78,13 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   `MetricPoint` (one sample). `ProjectStore` loads/saves the project list.
 
 ### Views/
-- `RootSplitView` (sidebar + dashboard), `ProjectSidebar`, `DashboardView` (status, launch
-  controls, GB stepper), `LogPaneView`, `Charts/MetricsGrid`.
+- `RootSplitView` (sidebar + dashboard), `ProjectSidebar`, `LogPaneView`, `Charts/MetricsGrid`.
+- **`RunControl`** is the single source of a project's run-controls (dev, worker, build, preview):
+  `AppState.runControls(for:)` lists them once, and the dashboard pills (`RunControlButton` driven by
+  the shared `RunStatus`), the menu-bar rows and the terminal tabs all render that one list — so
+  adding a new supervised process type makes it appear in every surface (and the menu-bar health
+  glyph) automatically. `RunTimerBar` shows a server/worker uptime or a build's elapsed + ETA in the
+  terminal pane.
 
 ## Concurrency model
 
