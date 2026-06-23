@@ -13,10 +13,9 @@ final class BuildRunner {
     private(set) var result: Int32?   // nil while running; 0 = success, else failure
 
     private(set) var pid: pid_t = 0
-    private var readSource: DispatchSourceRead?
-    private var exitSource: DispatchSourceProcess?
+    private var process: SpawnedProcess?
     private var consumeTask: Task<Void, Never>?
-    private var lineBuffer = ""
+    private var lineBuffer = LineBuffer()
     private let maxLogLines = 4000
     /// Set when `stop()` is called so the signal-killed exit isn't reported as a build *failure*.
     private var wasStopped = false
@@ -25,8 +24,6 @@ final class BuildRunner {
     /// Fired once when the build process exits. `success` is true on exit code 0.
     /// Used by the orchestrator to relaunch a server that was stopped for the build.
     var onFinish: (@MainActor (Bool) -> Void)?
-
-    private enum Chunk: Sendable { case data(Data); case exit(code: Int32) }
 
     init(project: Project) { self.project = project }
 
@@ -40,53 +37,30 @@ final class BuildRunner {
         // where a bare `npm run build` would. NOTE: only NODE_OPTIONS-allowlisted flags work here —
         // V8 flags like --optimize-for-size are REJECTED ("not allowed in NODE_OPTIONS") and make
         // node exit immediately (code 9), failing every build. Keep it to --max-old-space-size.
-        let nodeOpts = "--max-old-space-size=\(memoryGB * 1024)"
+        let nodeOpts = ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)
         let command = "NODE_OPTIONS='\(nodeOpts)' FORCE_COLOR=0 exec \(buildCommand)"
         logLines = ["$ \(command)  (cwd: \(project.path))"]
-        lineBuffer = ""
+        lineBuffer.reset()
         result = nil
         wasStopped = false
         isRunning = true
 
-        var fd: Int32 = -1
-        let childPid = dm_spawn_session(command, project.path, &fd, nil)
-        guard childPid > 0, fd >= 0 else {
+        guard let proc = SpawnedProcess.spawn(command: command, cwd: project.path, wantsStdin: false) else {
             isRunning = false
             result = -1
             logLines.append("build: failed to spawn")
             return
         }
-        pid = childPid
-        let pipeFD = fd  // immutable copy for the @Sendable Dispatch handlers
+        pid = proc.pid
+        process = proc
 
-        let (stream, continuation) = AsyncStream<Chunk>.makeStream()
-        let queue = DispatchQueue(label: "build.\(childPid)")
-
-        let reader = DispatchSource.makeReadSource(fileDescriptor: pipeFD, queue: queue)
-        reader.setEventHandler { @Sendable in
-            var buffer = [UInt8](repeating: 0, count: 1 << 16)
-            let n = read(pipeFD, &buffer, buffer.count)
-            if n > 0 { continuation.yield(.data(Data(buffer[0..<n]))) }
-        }
-        reader.setCancelHandler { @Sendable in close(pipeFD) }
-        reader.resume()
-        readSource = reader
-
-        let watcher = DispatchSource.makeProcessSource(identifier: childPid, eventMask: .exit, queue: queue)
-        watcher.setEventHandler { @Sendable in
-            var status: Int32 = 0
-            waitpid(childPid, &status, 0)
-            let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : status
-            continuation.yield(.exit(code: code))
-        }
-        watcher.resume()
-        exitSource = watcher
-
+        let stream = proc.chunks   // captured by the consume task; does NOT retain `proc`
         consumeTask = Task { @MainActor [weak self] in
             for await chunk in stream {
                 guard let self else { continue }
                 switch chunk {
                 case .data(let data): self.ingest(data)
+                case .eof: self.process?.cancelReader()
                 case .exit(let code): self.finish(code: code)
                 }
             }
@@ -96,30 +70,19 @@ final class BuildRunner {
     func stop() {
         guard pid > 0 else { return }
         wasStopped = true
-        let target = pid
-        killpg(target, SIGTERM)
-        Task.detached {
-            try? await Task.sleep(for: .seconds(2))
-            killpg(target, SIGKILL)
-        }
+        ProcessSupport.gracefulKillGroup(pid)
     }
 
     private func ingest(_ data: Data) {
-        guard let text = String(data: data, encoding: .utf8) else { return }
-        lineBuffer += text
-        while let nl = lineBuffer.firstIndex(of: "\n") {
-            let line = String(lineBuffer[..<nl])
-            lineBuffer.removeSubrange(...nl)
-            if line.hasPrefix("Restored session:") || line.contains("Saving session...completed") { continue }
+        for line in lineBuffer.ingest(data) {
+            if LogNoise.isShellNoise(line) { continue }
             logLines.append(line)
             if logLines.count > maxLogLines { logLines.removeFirst(logLines.count - maxLogLines) }
         }
     }
 
     private func finish(code: Int32) {
-        readSource?.cancel()
-        readSource = nil
-        exitSource = nil
+        process?.release()
         pid = 0
         isRunning = false
         result = code

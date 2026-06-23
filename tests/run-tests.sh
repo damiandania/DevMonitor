@@ -65,6 +65,8 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Core/Detector.swift" "$SRC/Core/ProcessTree.swift" "$SRC/Core/DevSession.swift" \
   "$SRC/Core/ShellEnvironment.swift" "$SRC/Core/HeapScaling.swift" \
   "$SRC/Core/BuildRunner.swift" "$SRC/Core/ANSI.swift" "$SRC/Core/AppLog.swift" \
+  "$SRC/Core/ProcessSupport.swift" "$SRC/Core/LineBuffer.swift" "$SRC/Core/LogNoise.swift" \
+  "$SRC/Core/SpawnedProcess.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run advisor "$ROOT/tests/advisor/main.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"

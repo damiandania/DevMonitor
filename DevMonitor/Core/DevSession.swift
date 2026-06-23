@@ -28,9 +28,8 @@ final class DevSession {
     var onHeapEscalated: (@MainActor (Int) -> Void)?
 
     private let maxLogLines = 2000
-    private var lineBuffer = ""
-    private var readSource: DispatchSourceRead?
-    private var exitSource: DispatchSourceProcess?
+    private var lineBuffer = LineBuffer()
+    private var process: SpawnedProcess?
     private var graceTask: Task<Void, Never>?
     private var consumeTask: Task<Void, Never>?
     private var stopping = false
@@ -69,12 +68,6 @@ final class DevSession {
     private var stableProbes = 0
     private let stableProbesToReset = 3
 
-    private enum Chunk: Sendable {
-        case data(Data)
-        case eof
-        case exit(code: Int32)
-    }
-
     init(project: Project) {
         self.project = project
     }
@@ -98,7 +91,7 @@ final class DevSession {
         strikes = 0
         lastMemoryGB = memoryGB
         logLines.removeAll()
-        lineBuffer = ""
+        lineBuffer.reset()
         detectedPort = nil
         startedAt = Date()
         openLogFile()
@@ -132,55 +125,26 @@ final class DevSession {
         // reads this var, so inject it ONLY for Nuxt projects rather than polluting every
         // framework's environment with it.
         let nuxtEnv = project.framework == .nuxt ? "NUXT_IGNORE_LOCK=1 " : ""
-        let command = "\(nuxtEnv)NODE_OPTIONS=--max-old-space-size=\(memoryGB * 1024) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
+        let command = "\(nuxtEnv)NODE_OPTIONS=\(ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
-        var fd: Int32 = -1
-        var inFD: Int32 = -1
-        let childPid = dm_spawn_session(command, project.path, &fd, &inFD)
-        guard childPid > 0, fd >= 0 else {
+        guard let proc = SpawnedProcess.spawn(command: command, cwd: project.path, wantsStdin: true) else {
             lastError = "spawn failed — could not start the dev command"
             state = .failed("spawn failed")
             AppLog.shared.event("DevSession: spawn failed for \(project.name) — cmd: \(command)")
             return
         }
-        pid = childPid
-        stdinFD = inFD
-        let pipeFD = fd  // immutable copy for the @Sendable Dispatch handlers
+        pid = proc.pid
+        stdinFD = proc.stdinFD
+        process = proc
 
-        let (stream, continuation) = AsyncStream<Chunk>.makeStream()
-        let queue = DispatchQueue(label: "devsession.\(childPid)")
-
-        let reader = DispatchSource.makeReadSource(fileDescriptor: pipeFD, queue: queue)
-        reader.setEventHandler { @Sendable in
-            var buffer = [UInt8](repeating: 0, count: 1 << 16)
-            let n = read(pipeFD, &buffer, buffer.count)
-            if n > 0 {
-                continuation.yield(.data(Data(buffer[0..<n])))
-            } else {
-                continuation.yield(.eof)
-            }
-        }
-        reader.setCancelHandler { @Sendable in close(pipeFD) }
-        reader.resume()
-        readSource = reader
-
-        let watcher = DispatchSource.makeProcessSource(identifier: childPid, eventMask: .exit, queue: queue)
-        watcher.setEventHandler { @Sendable in
-            var status: Int32 = 0
-            waitpid(childPid, &status, 0)
-            let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : status
-            continuation.yield(.exit(code: code))
-        }
-        watcher.resume()
-        exitSource = watcher
-
+        let stream = proc.chunks   // captured by the consume task; does NOT retain `proc`
         consumeTask = Task { @MainActor [weak self] in
             for await chunk in stream {
                 guard let self else { continue }
                 switch chunk {
                 case .data(let data): self.ingest(data)
-                case .eof: self.readSource?.cancel(); self.readSource = nil
+                case .eof: self.process?.cancelReader()
                 case .exit(let code): self.handleExit(code: code)
                 }
             }
@@ -263,28 +227,18 @@ final class DevSession {
         }
         let target = pid
         append(line: "stop: SIGTERM → killpg \(target)")
-        killpg(target, SIGTERM)
-        Task.detached {
-            try? await Task.sleep(for: .seconds(2))
-            killpg(target, SIGKILL)
-        }
+        ProcessSupport.gracefulKillGroup(target)
     }
 
     // MARK: - Output handling
 
     private func ingest(_ data: Data) {
-        guard let text = String(data: data, encoding: .utf8) else { return }
-        lineBuffer += text
-        while let nl = lineBuffer.firstIndex(of: "\n") {
-            let line = String(lineBuffer[..<nl])
-            lineBuffer.removeSubrange(...nl)
-            handle(line: line)
-        }
+        for line in lineBuffer.ingest(data) { handle(line: line) }
     }
 
     private func handle(line: String) {
         let clean = line.strippedANSI
-        if clean.hasPrefix("Restored session:") || clean.contains("Saving session...completed") { return }
+        if LogNoise.isShellNoise(clean) { return }
         append(line: line)
         if detectedPort == nil,
            let match = clean.firstMatch(of: /https?:\/\/[^\s:\/]+:(\d{2,5})/),
@@ -333,9 +287,7 @@ final class DevSession {
         pid = 0
         lastExitCode = code
         closeStdin()
-        readSource?.cancel()
-        readSource = nil
-        exitSource = nil
+        process?.release()
 
         if recycling {
             append(line: "recycle: old tree exited (code \(code)) — relaunching")
@@ -570,12 +522,7 @@ final class DevSession {
         sampleTask?.cancel()
         graceTask?.cancel()
         if pid > 0 {
-            let target = pid
-            killpg(target, SIGTERM)
-            Task.detached {
-                try? await Task.sleep(for: .seconds(2))
-                killpg(target, SIGKILL)
-            }
+            ProcessSupport.gracefulKillGroup(pid)
             // handleExit() fires on exit and calls relaunchAfterRecycle().
         } else {
             relaunchAfterRecycle()
