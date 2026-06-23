@@ -245,7 +245,7 @@ private struct AdviceList: View {
 
     private func row(_ rec: ResourceAdvisor.Recommendation) -> some View {
         HStack(spacing: 12) {
-            Circle().fill(color(rec.severity)).frame(width: 8, height: 8)
+            StatusDot(color: rec.severity.tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(rec.name).fontWeight(.medium).lineLimit(1)
@@ -281,9 +281,6 @@ private struct AdviceList: View {
         .padding(.vertical, 11)
     }
 
-    private func color(_ s: ResourceAdvisor.Severity) -> Color {
-        switch s { case .high: return .red; case .medium: return .orange; case .low: return .secondary }
-    }
 }
 
 // MARK: - Dev Monitor diagnosis (text report)

@@ -188,17 +188,13 @@ struct ProjectBuildButton: View {
 /// "Build Running", blinking (fades in/out) in sync with the Stop icon.
 struct BuildRunningLabel: View {
     @Environment(AppState.self) private var app
-    @State private var pulse = false
 
     var body: some View {
         if let project = app.selectedProject, app.build(for: project)?.isRunning == true {
             Text("Build Running")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .opacity(pulse ? 1 : 0.4)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
-                }
+                .pulsing()
         }
     }
 }
@@ -206,17 +202,13 @@ struct BuildRunningLabel: View {
 /// The build button while running: a red Stop icon that fades in/out to signal in-progress.
 private struct BuildStopButton: View {
     let onStop: () -> Void
-    @State private var pulse = false
 
     var body: some View {
         Button(action: onStop) {
             Image(systemName: "stop.fill")
                 .foregroundStyle(.red)
-                .opacity(pulse ? 1 : 0.4)
+                .pulsing()
         }
         .help("Stop build")
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true }
-        }
     }
 }

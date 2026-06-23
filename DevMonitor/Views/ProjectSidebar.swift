@@ -17,13 +17,8 @@ struct ProjectSidebar: View {
                         if let st = app.session(for: project)?.state, st.isActive {
                             Spacer(minLength: 4)
                             // Running indicator: status tint (green = running, orange = launching, …).
-                            // `.drawingGroup()` rasterises the dot into an opaque Metal bitmap so the
-                            // macOS selection *vibrancy* can't darken it — a plain Circle/SF Symbol on
-                            // the selected (blue) row gets blended down (green 20,174,60 → 0,113,58).
-                            Circle()
-                                .fill(st.tint)
-                                .frame(width: 9, height: 9)
-                                .drawingGroup()
+                            // drawingGroup so the selected-row vibrancy can't darken it (see StatusDot).
+                            StatusDot(color: st.tint, size: 9, drawingGroup: true)
                                 .help("Server: \(st.label)")
                         }
                     }

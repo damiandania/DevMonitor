@@ -98,12 +98,7 @@ struct GlobalTerminalView: View {
         case .pressure: return .yellow
         case .build:
             guard let id = tab.projectID, let b = app.builds[id] else { return .secondary }
-            if b.isRunning { return .orange }
-            switch b.result {
-            case .some(0): return .green
-            case .some:    return .red
-            default:       return .secondary
-            }
+            return b.statusColor
         case .server:
             guard let id = tab.projectID else { return .secondary }
             return (app.sessions[id]?.state ?? .idle).tint
@@ -178,7 +173,7 @@ struct GlobalTerminalView: View {
                 .help(tab.isPressure ? "Dismiss pressure suggestions"
                                      : "Close \(tab.isBuild ? "build" : "server") · \(tab.name)")
             } else {
-                Circle().fill(tint).frame(width: 8, height: 8)
+                StatusDot(color: tint)
             }
         }
     }
