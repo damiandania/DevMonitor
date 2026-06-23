@@ -249,8 +249,11 @@ final class DevSession {
         let clean = line.strippedANSI
         if LogNoise.isShellNoise(clean) { return }
         append(line: line)
+        // Match the port in a URL the server prints, incl. IPv6 hosts in brackets — Vite/Nuxt dev
+        // print "Local: http://localhost:3000/", but a Nitro/node *preview* prints
+        // "Listening on http://[::]:3000", whose bracketed host the simpler pattern missed.
         if detectedPort == nil,
-           let match = clean.firstMatch(of: /https?:\/\/[^\s:\/]+:(\d{2,5})/),
+           let match = clean.firstMatch(of: /https?:\/\/(?:\[[^\]]*\]|[^\s:\/]+):(\d{2,5})/),
            let port = Int(match.1) {
             detectedPort = port
             lastKnownPort = port

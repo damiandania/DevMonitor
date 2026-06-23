@@ -75,21 +75,17 @@ struct MenuBarView: View {
         }
     }
 
-    /// One live process row: icon + "Project · Title", its status, uptime, and a stop button.
+    /// One live process on a single line: icon · "Project · Title" · status · uptime · stop button.
     private func controlRow(_ c: RunControl) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Image(systemName: c.icon).font(.caption2).foregroundStyle(.secondary)
-                    Text("\(c.projectName) · \(c.title)").font(.subheadline.weight(.semibold)).lineLimit(1)
-                }
-                Label(c.status.label.isEmpty ? "Idle" : c.status.label, systemImage: "circle.fill")
-                    .labelStyle(.titleAndIcon).font(.caption).foregroundStyle(c.status.color)
-                if let started = c.startedAt, c.status.showsStop {
-                    Text("up \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary)
-                }
+        HStack(spacing: 6) {
+            Image(systemName: c.icon).font(.caption2).foregroundStyle(.secondary)
+            Text("\(c.projectName) · \(c.title)").font(.subheadline.weight(.semibold)).lineLimit(1)
+            Text(c.status.label.isEmpty ? "Idle" : c.status.label)
+                .font(.caption.weight(.medium)).foregroundStyle(c.status.color).lineLimit(1)
+            if let started = c.startedAt, c.status.showsStop {
+                Text("· \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 4)
             if c.status.showsStop {
                 Button(action: c.onToggle) { Image(systemName: "stop.fill") }
                     .help("Stop \(c.title.lowercased())")
