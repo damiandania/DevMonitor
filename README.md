@@ -12,7 +12,8 @@ Live resource graphs · hang detection · crash auto-revive · build runner · a
 [![Swift 6.3](https://img.shields.io/badge/Swift-6.3-F05138?logo=swift&logoColor=white)](#requirements)
 ![SwiftUI · Liquid Glass](https://img.shields.io/badge/SwiftUI-Liquid%20Glass-2C7EF8)
 ![Claude](https://img.shields.io/badge/Claude-integrated-D97757)
-![Tests](https://img.shields.io/badge/tests-headless%20suites-3DA639)
+[![CI](https://github.com/damiandania/DevMonitor/actions/workflows/ci.yml/badge.svg)](https://github.com/damiandania/DevMonitor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [Features](#features) · [Quick start](#quick-start) · [CLI](#command-line-interface) · [How it works](#under-the-hood) · [Architecture](docs/ARCHITECTURE.md)
 
@@ -159,7 +160,7 @@ Paths default to the current directory and resolve to absolute. Invalid input fa
 ## Requirements
 
 - **macOS 26+** and **Xcode 26+** (Swift 6.3).
-- [**XcodeGen**](https://github.com/yonsm/XcodeGen) (`brew install xcodegen`) to generate the project.
+- [**XcodeGen**](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) to generate the project.
 - The app is **not sandboxed** — it spawns processes and reads system-wide info.
 
 ---
@@ -237,6 +238,13 @@ When adding a feature, prefer extracting its decision logic into a pure (ideally
 </details>
 
 ---
+
+## Contributing
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to build, run the test
+suites, and submit a pull request, and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design.
+This project follows a [Code of Conduct](CODE_OF_CONDUCT.md). To report a vulnerability, see the
+[Security policy](SECURITY.md).
 
 ## License
 
