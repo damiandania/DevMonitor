@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Dev Monitor is NOT sandboxed: it supervises arbitrary dev servers, reads system metrics
+	     and spawns node/npm/claude. Under the hardened runtime (Release builds) no extra
+	     entitlements are needed — spawning a separate executable isn't "loading code" into this
+	     process, and outbound network (health probes) needs no entitlement outside the sandbox.
+	     Add an entitlement here only if a future feature requires one. -->
+</dict>
+</plist>

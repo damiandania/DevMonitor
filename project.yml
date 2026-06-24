@@ -27,6 +27,13 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_OBJC_BRIDGING_HEADER: DevMonitor/Sys/DevMonitor-Bridging-Header.h
+      configs:
+        # Hardened runtime + entitlements only on Release — that's what notarization requires. Debug
+        # (and the test harness, which builds Debug) stay ad-hoc with no runtime, so they're untouched.
+        # package-release.sh re-signs the Release build with a Developer ID when DEVELOPER_ID is set.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+          CODE_SIGN_ENTITLEMENTS: DevMonitor/Resources/DevMonitor.entitlements
   dev-monitor:
     type: tool
     platform: macOS

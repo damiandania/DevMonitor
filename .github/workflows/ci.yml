@@ -13,7 +13,14 @@ jobs:
       - name: Headless unit suites
         run: bash tests/run-tests.sh --unit
 
-# Only the headless unit suites run in CI (Phase 2 — pure `swiftc`, no Xcode host).
-# Phase 1 (the full app build) compiles the SwiftUI / Liquid Glass views and needs Xcode 26 /
-# the macOS 26 SDK; run `bash tests/run-tests.sh` locally for that. If `macos-latest` lacks the
-# Swift toolchain these suites need, pin `runs-on` to a newer image once available.
+  # Full app + CLI build (Phase 1) — compiles the SwiftUI / Liquid Glass views the unit suites
+  # can't. continue-on-error so it never blocks a PR if the runner lacks the macOS 26 SDK yet;
+  # drop continue-on-error once `macos-latest` ships it.
+  build:
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Build app + CLI
+        run: bash tests/run-tests.sh   # Phase 1 (build) + Phase 2 (units)
