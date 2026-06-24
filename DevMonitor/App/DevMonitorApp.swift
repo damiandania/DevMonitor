@@ -53,7 +53,7 @@ struct DevMonitorApp: App {
 /// servers, one green and one red, show as two differently-coloured dots instead of a single
 /// aggregate dot that's red whenever anything is red. The first process takes the centre slot; each
 /// further one fills a scattered slot (fixed order, so dots don't flicker); past 7 they're not shown.
-/// Nothing running → one dim centre dot.
+/// Unused slots stay white, so the full constellation is always visible.
 struct MenuBarStatusIcon: View {
     @Environment(AppState.self) private var app
 
@@ -96,22 +96,20 @@ struct MenuBarStatusIcon: View {
                 : "\(colors.count) active process\(colors.count == 1 ? "" : "es")")
     }
 
-    /// Draw one filled dot per live process at its scatter slot. With nothing running, a single dim
-    /// centre dot (adapts to the menu bar's light/dark via `labelColor`).
+    /// Draw the full 7-dot constellation: the first N slots take live processes' status colours, the
+    /// rest stay **white** (the resting/unused slots), so the logo is always visible and you can read
+    /// both how many processes run and how each is doing.
     private static func icon(dots: [NSColor]) -> NSImage {
         let size = iconSize
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
             let r = size * dotRadiusRatio
-            func draw(_ slot: (x: CGFloat, y: CGFloat), _ color: NSColor) {
+            for (i, slot) in slots.enumerated() {
+                // Used slot → that process's status colour; unused slot → white.
+                let color = i < dots.count ? dots[i] : NSColor.white
                 color.setFill()
                 let cx = slot.x * size
                 let cy = (1 - slot.y) * size   // SVG is top-down; AppKit drawing is bottom-up
                 NSBezierPath(ovalIn: NSRect(x: cx - r, y: cy - r, width: 2 * r, height: 2 * r)).fill()
-            }
-            if dots.isEmpty {
-                draw(slots[0], .labelColor.withAlphaComponent(0.55))
-            } else {
-                for (i, color) in dots.enumerated() where i < slots.count { draw(slots[i], color) }
             }
             return true
         }
