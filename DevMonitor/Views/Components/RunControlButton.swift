@@ -72,6 +72,13 @@ struct RunControlButton: View {
         .onTapGesture(perform: onToggle)
         .help(status.showsStop ? "Stop \(title.lowercased())" : "Start \(title.lowercased())")
         .animation(.easeInOut(duration: 0.2), value: status.showsStop)
+        // VoiceOver: the pill is a custom tap target, so expose it as a button with the action name
+        // and current state, and route the tap through an accessibility action.
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(status.showsStop ? "Stop" : "Start") \(title)")
+        .accessibilityValue(status.label)
+        .accessibilityAction(.default, onToggle)
     }
 
     @ViewBuilder private var stateLabel: some View {

@@ -164,6 +164,9 @@ private struct MeterTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
         .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(detail)
     }
 }
 

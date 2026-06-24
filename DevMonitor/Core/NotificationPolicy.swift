@@ -34,20 +34,27 @@ enum NotificationPolicy {
         let (title, body): (String, String)
         switch event {
         case .hung(let p):
-            (title, body) = ("Dev server unresponsive", "\(p) stopped responding.")
+            (title, body) = (String(localized: "Dev server unresponsive"),
+                             String(localized: "\(p) stopped responding."))
         case .recycled(let p):
-            (title, body) = ("Dev server recycled", "\(p) was hung and has been restarted.")
+            (title, body) = (String(localized: "Dev server recycled"),
+                             String(localized: "\(p) was hung and has been restarted."))
         case .recovered(let p):
-            (title, body) = ("Dev server recovered", "\(p) is responding again.")
+            (title, body) = (String(localized: "Dev server recovered"),
+                             String(localized: "\(p) is responding again."))
         case .crashed(let p, let code):
-            (title, body) = ("Dev server crashed", "\(p) exited with code \(code).")
+            (title, body) = (String(localized: "Dev server crashed"),
+                             String(localized: "\(p) exited with code \(Int(code))."))
         case .oomRetry(let p, let gb):
-            (title, body) = ("Out of memory — retrying", "\(p) ran out of memory; restarting with \(gb) GB.")
+            (title, body) = (String(localized: "Out of memory — retrying"),
+                             String(localized: "\(p) ran out of memory; restarting with \(gb) GB."))
         case .failed(let p, let reason):
-            (title, body) = ("Dev server failed", "\(p): \(reason)")
+            (title, body) = (String(localized: "Dev server failed"),
+                             String(localized: "\(p): \(reason)"))
         case .buildFinished(let p, let ok):
-            (title, body) = (ok ? "Build succeeded" : "Build failed",
-                             "\(p) build \(ok ? "completed successfully" : "failed").")
+            (title, body) = (ok ? String(localized: "Build succeeded") : String(localized: "Build failed"),
+                             ok ? String(localized: "\(p) build completed successfully.")
+                                : String(localized: "\(p) build failed."))
         }
         return NotificationItem(title: title, body: body, category: category,
                                 severity: severity, projectID: projectID, action: action)
@@ -59,15 +66,15 @@ enum NotificationPolicy {
 
     /// Posted once when the machine enters a stuck/pressure episode. Urgent so it cuts through.
     static func machineUnderPressure(reason: String) -> NotificationItem {
-        NotificationItem(title: "Machine under pressure",
-                         body: reason.isEmpty ? "The machine is stuck." : reason,
+        NotificationItem(title: String(localized: "Machine under pressure"),
+                         body: reason.isEmpty ? String(localized: "The machine is stuck.") : reason,
                          category: .pressure, severity: .urgent, projectID: nil, action: .open)
     }
 
     /// Posted when the machine recovers from a pressure episode we previously warned about.
     static func pressureCleared() -> NotificationItem {
-        NotificationItem(title: "System pressure cleared",
-                         body: "The machine is no longer under pressure.",
+        NotificationItem(title: String(localized: "System pressure cleared"),
+                         body: String(localized: "The machine is no longer under pressure."),
                          category: .pressure, severity: .passive, projectID: nil, action: .open)
     }
 
@@ -75,17 +82,19 @@ enum NotificationPolicy {
     /// bad file has been backed up and the data reset to defaults, so the user knows it was reset
     /// (and where to recover it) instead of silently losing every project / preference.
     static func storeCorrupted(what: String, backup: URL?) -> NotificationItem {
-        let recovery = backup.map { " A backup was saved to “\($0.lastPathComponent)”." } ?? ""
-        return NotificationItem(title: "\(what) was reset",
-                                body: "\(what) couldn’t be read and was reset to defaults.\(recovery)",
+        let recovery = backup.map { String(localized: " A backup was saved to “\($0.lastPathComponent)”.") } ?? ""
+        return NotificationItem(title: String(localized: "\(what) was reset"),
+                                body: String(localized: "\(what) couldn’t be read and was reset to defaults.") + recovery,
                                 category: .failures, severity: .urgent, projectID: nil, action: .none)
     }
 
     /// Posted after auto-closing orphaned dev processes to relieve pressure.
     static func orphansClosed(count: Int, names: String) -> NotificationItem {
-        NotificationItem(title: "Closed orphaned dev process\(count > 1 ? "es" : "")",
-                         body: "Auto-closed \(count) to relieve pressure: \(names)",
-                         category: .pressure, severity: .passive, projectID: nil, action: .none)
+        let title = count > 1 ? String(localized: "Closed orphaned dev processes")
+                              : String(localized: "Closed orphaned dev process")
+        return NotificationItem(title: title,
+                                body: String(localized: "Auto-closed \(count) to relieve pressure: \(names)"),
+                                category: .pressure, severity: .passive, projectID: nil, action: .none)
     }
 }
 

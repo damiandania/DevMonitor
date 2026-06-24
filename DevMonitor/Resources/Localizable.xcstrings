@@ -1,0 +1,210 @@
+{
+  "sourceLanguage" : "en",
+  "version" : "1.0",
+  "strings" : {
+    "%@ build completed successfully." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "La compilación de %@ finalizó con éxito." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Le build de %@ a réussi." } }
+      }
+    },
+    "%@ build failed." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Falló la compilación de %@." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Le build de %@ a échoué." } }
+      }
+    },
+    "%@ exited with code %lld." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "%@ salió con el código %lld." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "%@ s'est arrêté avec le code %lld." } }
+      }
+    },
+    "%@ is responding again." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "%@ vuelve a responder." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "%@ répond à nouveau." } }
+      }
+    },
+    "%@ ran out of memory; restarting with %lld GB." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "%@ se quedó sin memoria; reiniciando con %lld GB." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "%@ a manqué de mémoire ; redémarrage avec %lld Go." } }
+      }
+    },
+    "%@ stopped responding." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "%@ dejó de responder." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "%@ a cessé de répondre." } }
+      }
+    },
+    "%@ was hung and has been restarted." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "%@ estaba colgado y se reinició." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "%@ était bloqué et a été redémarré." } }
+      }
+    },
+    "Activity" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Actividad" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Activité" } }
+      }
+    },
+    "Appearance" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Apariencia" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Apparence" } }
+      }
+    },
+    "Build failed" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Falló la compilación" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Échec du build" } }
+      }
+    },
+    "Build succeeded" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Compilación exitosa" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Build réussi" } }
+      }
+    },
+    "Categories" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Categorías" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Catégories" } }
+      }
+    },
+    "Closed orphaned dev process" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Se cerró un proceso de desarrollo huérfano" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Processus de dev orphelin fermé" } }
+      }
+    },
+    "Closed orphaned dev processes" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Se cerraron procesos de desarrollo huérfanos" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Processus de dev orphelins fermés" } }
+      }
+    },
+    "Dev server crashed" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "El servidor de desarrollo se cayó" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Le serveur de dev a planté" } }
+      }
+    },
+    "Dev server failed" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "El servidor de desarrollo falló" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Échec du serveur de dev" } }
+      }
+    },
+    "Dev server recovered" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Servidor de desarrollo recuperado" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Serveur de dev rétabli" } }
+      }
+    },
+    "Dev server recycled" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Servidor de desarrollo reciclado" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Serveur de dev recyclé" } }
+      }
+    },
+    "Dev server unresponsive" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "El servidor de desarrollo no responde" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Le serveur de dev ne répond pas" } }
+      }
+    },
+    "Filter log" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Filtrar registro" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Filtrer le journal" } }
+      }
+    },
+    "Hide processes" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Ocultar procesos" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Masquer les processus" } }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Historial" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Historique" } }
+      }
+    },
+    "Machine under pressure" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Equipo bajo presión" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Machine sous pression" } }
+      }
+    },
+    "No history yet" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Aún no hay historial" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Pas encore d’historique" } }
+      }
+    },
+    "Notifications" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Notificaciones" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Notifications" } }
+      }
+    },
+    "Out of memory — retrying" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Sin memoria — reintentando" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Mémoire insuffisante — nouvelle tentative" } }
+      }
+    },
+    "Projects" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Proyectos" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Projets" } }
+      }
+    },
+    "Remove project" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Eliminar proyecto" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Supprimer le projet" } }
+      }
+    },
+    "Server" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Servidor" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Serveur" } }
+      }
+    },
+    "Show processes" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Mostrar procesos" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Afficher les processus" } }
+      }
+    },
+    "System pressure cleared" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Presión del sistema resuelta" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Pression système résorbée" } }
+      }
+    },
+    "The machine is no longer under pressure." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "El equipo ya no está bajo presión." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "La machine n’est plus sous pression." } }
+      }
+    },
+    "The machine is stuck." : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "El equipo está bloqueado." } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "La machine est bloquée." } }
+      }
+    },
+    "Theme" : {
+      "localizations" : {
+        "es" : { "stringUnit" : { "state" : "translated", "value" : "Tema" } },
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Thème" } }
+      }
+    }
+  }
+}

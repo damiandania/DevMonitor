@@ -74,6 +74,17 @@ struct MenuBarStatusIcon: View {
         Image(nsImage: Self.icon(dot: dotColor))
             .renderingMode(.original)
             .accessibilityLabel("Dev Monitor")
+            .accessibilityValue(healthLabel)
+    }
+
+    /// Spoken aggregate health for the menu-bar item, so VoiceOver conveys what the dot colour shows.
+    private var healthLabel: String {
+        switch app.serversHealth {
+        case .red:    return "attention needed"
+        case .orange: return "starting"
+        case .green:  return "running"
+        case .idle:   return "idle"
+        }
     }
 
     private static func icon(dot: NSColor) -> NSImage {

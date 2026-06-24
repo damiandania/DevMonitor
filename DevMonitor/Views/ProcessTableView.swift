@@ -111,6 +111,22 @@ private struct ProcessRowView: View {
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: hovering)
         .help(rowHelp)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue("CPU \(cpuText), memory \(memText)")
+        .accessibilityActions {
+            if killable { Button(killHelp, action: onKill) }
+        }
+    }
+
+    /// Spoken row label: the process name plus its category (the hover help, first line).
+    private var accessibilityLabel: String {
+        if row.isDevServer { return "\(row.name), supervised dev server" }
+        if row.isWorker { return "\(row.name), supervised worker" }
+        if row.isExternalDev { return "\(row.name), external dev server" }
+        if row.isBuild { return "\(row.name), build" }
+        if row.isExtension { return "\(row.name), editor extension" }
+        return row.name
     }
 
     /// A managed server / build is stopped through its supervisor; an external dev server or any
