@@ -38,16 +38,16 @@ enum Detector {
                  || fm.fileExists(atPath: path + "/deno.jsonc") { pm = .deno }
         else { pm = .npm }
 
-        // Parse package.json deps + scripts.
+        // Parse package.json deps (framework detection), and the runnable scripts/tasks.
         var deps: [String: String] = [:]
-        var scripts: [String: String] = [:]
         if let data = fm.contents(atPath: path + "/package.json"),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for key in ["dependencies", "devDependencies"] {
                 if let d = json[key] as? [String: String] { deps.merge(d) { a, _ in a } }
             }
-            if let s = json["scripts"] as? [String: String] { scripts = s }
         }
+        // package.json "scripts" for npm/pnpm/yarn/bun, deno.json(c) "tasks" for Deno.
+        let scripts = self.scripts(path: path, packageManager: pm)
 
         // Framework by deps.
         let framework: Framework
@@ -100,13 +100,41 @@ enum Detector {
         return nil
     }
 
+    /// The runnable script/task NAMES for a project: package.json `scripts` for npm/pnpm/yarn/bun, or
+    /// deno.json(c) `tasks` for Deno (only the keys are used downstream — to pick dev/build/worker/
+    /// preview — so a Deno project resolves `deno task <name>` instead of always falling back to a
+    /// possibly-nonexistent `deno task dev`). A Deno project with no tasks declared falls back to
+    /// package.json scripts (Deno's npm-compat).
+    static func scripts(path: String, packageManager pm: PackageManager) -> [String: String] {
+        if pm == .deno {
+            let tasks = denoTasks(path: path)
+            if !tasks.isEmpty { return tasks }
+        }
+        if let data = FileManager.default.contents(atPath: path + "/package.json"),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let s = json["scripts"] as? [String: String] { return s }
+        return [:]
+    }
+
+    /// Task names declared in deno.json / deno.jsonc (`tasks` object). The value is the task's command
+    /// when it's a plain string, or "" for the newer object form — only the names are used downstream.
+    /// (JSONSerialization can't parse deno.jsonc comments; such a file yields no tasks and falls back.)
+    static func denoTasks(path: String) -> [String: String] {
+        for file in ["deno.json", "deno.jsonc"] {
+            guard let data = FileManager.default.contents(atPath: path + "/" + file),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tasks = json["tasks"] as? [String: Any] else { continue }
+            var out: [String: String] = [:]
+            for (name, body) in tasks { out[name] = (body as? String) ?? "" }
+            if !out.isEmpty { return out }
+        }
+        return [:]
+    }
+
     /// Dev/build commands for an explicit package manager, preserving the project's scripts.
     /// Used when the user overrides the package manager in the server config.
     static func commands(path: String, packageManager pm: PackageManager) -> (dev: String, build: String?, worker: String?, preview: String?) {
-        var scripts: [String: String] = [:]
-        if let data = FileManager.default.contents(atPath: path + "/package.json"),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let s = json["scripts"] as? [String: String] { scripts = s }
+        let scripts = self.scripts(path: path, packageManager: pm)
         let dev: String
         if scripts["dev"] != nil { dev = "\(pm.runScriptPrefix) dev" }
         else if scripts["start"] != nil { dev = "\(pm.runScriptPrefix) start" }

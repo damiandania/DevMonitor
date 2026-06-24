@@ -139,6 +139,30 @@ func runSessionTests() async -> Int {
     check("build: stop() still calls onFinish", stopFinished, "finished=\(stopFinished)")
     check("build: stop() logs 'build stopped'", stopBuild.logLines.contains { $0.contains("build stopped") })
 
+    // A4: reapLeftovers matches a project path by boundary, not substring — a project at /p/foo must
+    // never reap a sibling server at /p/foobar.
+    check("path: exact arg match", DevSession.args("node /p/foo/server.js", referencePath: "/p/foo"))
+    check("path: trailing match", DevSession.args("cd /p/foo", referencePath: "/p/foo"))
+    check("path: sibling NOT matched", !DevSession.args("node /p/foobar/server.js", referencePath: "/p/foo"))
+    check("path: longer-name NOT matched", !DevSession.args("/p/foobar", referencePath: "/p/foo"))
+
+    // A5: fullTree enumerates the whole tree (leader + children) and the tree-kill reaps all of it,
+    // including children that live in their own process group (the setsid-escapee case the old
+    // killpg-only path missed).
+    if let proc = SpawnedProcess.spawn(command: "sh -c 'sleep 30 & sleep 30 & wait'",
+                                       cwd: "/tmp", wantsStdin: false) {
+        try? await Task.sleep(for: .seconds(1.0))
+        let tree = ProcessTree.fullTree(of: proc.pid)
+        check("tree: fullTree includes leader + children", tree.count >= 3, "count=\(tree.count)")
+        ProcessSupport.gracefulKillTree(proc.pid)
+        try? await Task.sleep(for: .seconds(3.5))   // SIGTERM + 2s grace + SIGKILL + reap
+        let aliveAfter = tree.filter { kill($0, 0) == 0 }
+        check("tree: every pid reaped by tree-kill", aliveAfter.isEmpty, "alive=\(aliveAfter)")
+        proc.release()
+    } else {
+        check("tree: spawn succeeded", false, "spawn failed")
+    }
+
     return failures
 }
 

@@ -30,6 +30,14 @@ final class IPCServer {
             while true {
                 let client = dm_ipc_accept(fd)
                 if client < 0 { break }
+                // Only the user who owns the hub may drive it (run/stop/build/remove). A connection
+                // from another UID is refused and dropped — but we must NOT break the accept loop
+                // (that would take the whole hub down), so this is `continue`, not a fatal return.
+                if dm_ipc_peer_uid(client) != Int32(getuid()) {
+                    IPCIO.write(client, IPCMessage(type: "error", message: "unauthorized"))
+                    close(client)
+                    continue
+                }
                 guard let reqData = IPCIO.readLine(client),
                       let req = try? JSONDecoder().decode(IPCRequest.self, from: reqData) else {
                     IPCIO.write(client, IPCMessage(type: "error", message: "bad request"))
@@ -41,6 +49,13 @@ final class IPCServer {
                 }
             }
         }
+    }
+
+    /// Stop the hub on quit: close the listening socket (which breaks the accept loop) and remove the
+    /// socket file so a stale one isn't left behind. Best-effort; called from `AppState.shutdown()`.
+    func stop() {
+        if listenFD >= 0 { close(listenFD); listenFD = -1 }
+        try? FileManager.default.removeItem(atPath: IPCSocket.path)
     }
 
     private func handle(_ req: IPCRequest, client: Int32) async {

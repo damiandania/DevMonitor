@@ -71,6 +71,16 @@ enum NotificationPolicy {
                          category: .pressure, severity: .passive, projectID: nil, action: .open)
     }
 
+    /// Posted on launch when a persisted store (projects.json / settings.json) was unreadable: the
+    /// bad file has been backed up and the data reset to defaults, so the user knows it was reset
+    /// (and where to recover it) instead of silently losing every project / preference.
+    static func storeCorrupted(what: String, backup: URL?) -> NotificationItem {
+        let recovery = backup.map { " A backup was saved to “\($0.lastPathComponent)”." } ?? ""
+        return NotificationItem(title: "\(what) was reset",
+                                body: "\(what) couldn’t be read and was reset to defaults.\(recovery)",
+                                category: .failures, severity: .urgent, projectID: nil, action: .none)
+    }
+
     /// Posted after auto-closing orphaned dev processes to relieve pressure.
     static func orphansClosed(count: Int, names: String) -> NotificationItem {
         NotificationItem(title: "Closed orphaned dev process\(count > 1 ? "es" : "")",

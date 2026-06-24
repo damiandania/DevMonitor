@@ -52,10 +52,12 @@ build_run metrics  "$ROOT/tests/metrics/main.swift" "$SYS/metrics.c" "$SYS/spawn
 build_run detector "$ROOT/tests/detector/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
   "$SRC/Core/HeapScaling.swift"
 build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$SRC/Core/Detector.swift" \
-  "$SRC/Model/AppSettings.swift" "$SRC/Core/AppLog.swift" "$SRC/Core/HeapScaling.swift"
+  "$SRC/Model/AppSettings.swift" "$SRC/Core/AppLog.swift" "$SRC/Core/HeapScaling.swift" \
+  "$SRC/Core/JSONFileStore.swift" "$SRC/Store/ProjectStore.swift"
 build_run notifications "$ROOT/tests/notifications/main.swift" \
   "$SRC/Model/NotificationItem.swift" "$SRC/Model/SupervisionEvent.swift" \
-  "$SRC/Model/AppSettings.swift" "$SRC/Core/NotificationPolicy.swift" "$SRC/Core/AppLog.swift"
+  "$SRC/Model/AppSettings.swift" "$SRC/Core/NotificationPolicy.swift" "$SRC/Core/AppLog.swift" \
+  "$SRC/Core/JSONFileStore.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
@@ -73,7 +75,8 @@ build_run advisor "$ROOT/tests/advisor/main.swift" \
 build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/dev-monitor/ArgParse.swift"
 build_run git    "$ROOT/tests/git/main.swift" "$SRC/Core/GitInfo.swift"
 build_run hook   "$ROOT/tests/hook/main.swift" "$SRC/Core/ClaudeHookInstaller.swift"
-build_run ipc    "$ROOT/tests/ipc/main.swift" "$SRC/Core/IPCIO.swift" "$SRC/Model/IPCProtocol.swift"
+build_run ipc    "$ROOT/tests/ipc/main.swift" "$SRC/Core/IPCIO.swift" "$SRC/Model/IPCProtocol.swift" \
+  "$SYS/ipc.c" -import-objc-header "$HDR"
 
 echo "────────────────────────────────────────────────"
 [ "$fail" = 0 ] && echo "✅ ALL CHECKS PASSED" || echo "❌ SOME CHECKS FAILED"

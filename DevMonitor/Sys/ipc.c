@@ -2,6 +2,8 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/ucred.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -53,6 +55,10 @@ int dm_ipc_listen(const char *path) {
         close(fd);
         return -1;
     }
+    // Owner-only (0600): on macOS the filesystem permissions of an AF_UNIX socket are enforced on
+    // connect, so this alone keeps another local user from driving the hub (run/stop/build/remove).
+    // The per-connection LOCAL_PEERCRED check in dm_ipc_peer_uid is the belt to this suspenders.
+    chmod(path, S_IRUSR | S_IWUSR);
     if (listen(fd, 16) != 0) {
         close(fd);
         return -1;
@@ -64,6 +70,18 @@ int dm_ipc_accept(int listen_fd) {
     int fd = accept(listen_fd, NULL, NULL);
     dm_cloexec(fd);
     return fd;
+}
+
+int dm_ipc_peer_uid(int fd) {
+    struct xucred cred;
+    socklen_t len = sizeof(cred);
+    if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERCRED, &cred, &len) != 0) {
+        return -1;
+    }
+    if (cred.cr_version != XUCRED_VERSION) {
+        return -1;
+    }
+    return (int)cred.cr_uid;
 }
 
 int dm_ipc_connect(const char *path) {

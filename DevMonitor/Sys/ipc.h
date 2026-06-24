@@ -8,6 +8,10 @@ int dm_ipc_listen(const char *path);
 /// Accept a client connection on `listen_fd`. Returns the client fd, or -1.
 int dm_ipc_accept(int listen_fd);
 
+/// The effective UID of the process connected on `fd` (via LOCAL_PEERCRED), or -1 on error.
+/// The hub uses this to reject connections from another local user.
+int dm_ipc_peer_uid(int fd);
+
 /// Connect to a Unix-domain socket at `path`. Returns the connected fd, or -1.
 int dm_ipc_connect(const char *path);
 

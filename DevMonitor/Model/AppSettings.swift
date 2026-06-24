@@ -125,33 +125,24 @@ struct AppSettings: Codable, Sendable, Equatable {
     ]
 }
 
-/// Loads and saves `AppSettings` as JSON under Application Support.
+/// Loads and saves `AppSettings` as versioned JSON under Application Support, on top of the
+/// corruption-safe `JSONFileStore` (an unreadable file is backed up, never silently reset away).
 @MainActor
 final class SettingsStore {
-    private let fileURL: URL
+    private let store = JSONFileStore<AppSettings>(filename: "settings.json", version: 1)
 
-    init() {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DevMonitor", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("settings.json")
+    /// Load the persisted settings. `corruptBackup` is non-nil only when the file existed but was
+    /// unreadable — settings were reset to defaults and the bad file preserved at that path, so the
+    /// user can be told instead of silently losing every preference.
+    func load() -> (settings: AppSettings, corruptBackup: URL?) {
+        switch store.load() {
+        case .missing:             return (AppSettings(), nil)
+        case .loaded(let s):       return (s, nil)
+        case .corrupt(let backup): return (AppSettings(), backup)
+        }
     }
 
-    func load() -> AppSettings {
-        guard let data = try? Data(contentsOf: fileURL),
-              let settings = try? JSONDecoder().decode(AppSettings.self, from: data)
-        else { return AppSettings() }
-        return settings
-    }
-
-    func save(_ settings: AppSettings) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(settings) else { return }
-        do { try data.write(to: fileURL, options: .atomic) }
-        catch { AppLog.shared.event("SettingsStore: failed to save settings.json — \(error.localizedDescription)") }
-    }
+    func save(_ settings: AppSettings) { store.save(settings) }
 }
 
 /// Browsers installed on this Mac (apps that can open http), by display name.

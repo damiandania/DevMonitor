@@ -46,11 +46,13 @@ final class AppState {
         // already spawned survives, since it runs in its own session). The CLI guards against this;
         // the hub side must too. Set before IPCServer.start() below begins accepting/writing.
         signal(SIGPIPE, SIG_IGN)
-        settings = settingsStore.load()
+        let loadedSettings = settingsStore.load()
+        settings = loadedSettings.settings
         // Apply the saved theme once the run loop is up — NSApp is nil during SwiftUI App.init.
         let theme = settings.theme
         Task { @MainActor in AppSettings.applyAppearance(theme) }
-        projects = store.load()
+        let loadedProjects = store.load()
+        projects = loadedProjects.projects
         // Drop entries whose folder no longer exists (stale/junk paths) so `status`, the sidebar
         // and projects.json stay in sync with reality. Missing folders can never be launched anyway.
         let onDisk = projects.filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -119,6 +121,15 @@ final class AppState {
         // Wire notifications: set the UN delegate (foreground presentation + action routing),
         // register actionable categories, and request authorization.
         Notifier.shared.attach(app: self)
+        // Surface a corrupt store (now that the notifier is attached): the file was backed up and we
+        // started from defaults, so the user knows their settings / projects were reset — and where
+        // the backup is — instead of silently losing them.
+        if let backup = loadedSettings.corruptBackup {
+            route(NotificationPolicy.storeCorrupted(what: "Settings", backup: backup))
+        }
+        if let backup = loadedProjects.corruptBackup {
+            route(NotificationPolicy.storeCorrupted(what: "Project list", backup: backup))
+        }
         // Clean up on quit: stop every supervised server/build so none is left orphaned holding a
         // port — they run in their own session (SETSID) and would otherwise outlive the app.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
@@ -265,21 +276,21 @@ final class AppState {
     /// Stop every supervised server (pressure relief / Doctor "stop dev servers").
     func stopAllSessions() { for s in sessions.values { s.stop() } }
 
-    /// Reap every supervised server and build process tree on app quit, so nothing is left orphaned
-    /// holding a port (they run in their own session via SETSID and would otherwise survive). Runs
-    /// synchronously since the process is terminating: SIGTERM each group, a short grace, then
-    /// SIGKILL. A force-kill of the app can't run this — the next launch's `reapLeftovers` covers it.
+    /// Reap every supervised server, build, worker and preview process tree on app quit, so nothing
+    /// is left orphaned holding a port (they run in their own session via SETSID and would otherwise
+    /// survive). Closes the IPC hub socket first. Runs synchronously since the process is terminating:
+    /// enumerate each leader's FULL tree (session members + `setsid` descendants), SIGTERM all, a
+    /// short grace, then SIGKILL. A force-kill of the app can't run this — the next launch's
+    /// `reapLeftovers` covers it.
     func shutdown() {
-        var pgids: [pid_t] = []
-        pgids += sessions.values.map(\.pid)
-        pgids += builds.values.map(\.pid)
-        pgids += workers.values.map(\.pid)
-        pgids += previews.values.map(\.pid)
-        pgids = pgids.filter { $0 > 0 }
-        guard !pgids.isEmpty else { return }
-        for pg in pgids { killpg(pg, SIGTERM) }
+        ipcServer.stop()
+        let leaders = (sessions.values.map(\.pid) + builds.values.map(\.pid)
+                       + workers.values.map(\.pid) + previews.values.map(\.pid)).filter { $0 > 0 }
+        guard !leaders.isEmpty else { return }
+        let pids = Array(Set(leaders.flatMap { ProcessTree.fullTree(of: $0) }))
+        ProcessSupport.signalTree(pids, SIGTERM)
         usleep(400_000)
-        for pg in pgids { killpg(pg, SIGKILL) }
+        ProcessSupport.signalTree(pids, SIGKILL)
     }
 
     /// Close a server tab in the global terminal: stop the dev server and drop it.

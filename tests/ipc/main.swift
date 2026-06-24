@@ -35,5 +35,31 @@ chk(line != nil, "readLine returned a frame")
 let decoded = line.flatMap { try? JSONDecoder().decode(IPCMessage.self, from: $0) }
 chk(decoded?.type == "ok" && decoded?.message == "launched dm (Nuxt, 8 GB)", "framed write→read roundtrip")
 
+// 4) A8: the hub socket is owner-only (0600) and the LOCAL_PEERCRED check reports our own UID.
+let sockPath = NSTemporaryDirectory() + "dm-ipc-test-\(getpid()).sock"
+unlink(sockPath)
+let lfd = dm_ipc_listen(sockPath)
+chk(lfd >= 0, "ipc: listen on temp socket")
+if lfd >= 0 {
+    var st = stat()
+    if stat(sockPath, &st) == 0 {
+        let perms = st.st_mode & 0o777
+        chk(perms == 0o600, "ipc: socket is 0600 (owner-only)", String(format: "%o", perms))
+    } else { chk(false, "ipc: stat socket") }
+    // AF_UNIX connect queues on the listen backlog, so connect→accept works on one thread.
+    let cfd = dm_ipc_connect(sockPath)
+    chk(cfd >= 0, "ipc: connect to hub")
+    let afd = dm_ipc_accept(lfd)
+    chk(afd >= 0, "ipc: accept client")
+    if afd >= 0 {
+        chk(dm_ipc_peer_uid(afd) == Int32(getuid()),
+            "ipc: peer uid == our uid", "\(dm_ipc_peer_uid(afd)) vs \(getuid())")
+        close(afd)
+    }
+    if cfd >= 0 { close(cfd) }
+    close(lfd)
+    unlink(sockPath)
+}
+
 print(fail == 0 ? "ALL IPC TESTS PASSED" : "\(fail) IPC TEST(S) FAILED")
 exit(Int32(fail))

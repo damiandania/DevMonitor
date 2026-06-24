@@ -78,5 +78,82 @@ guard let sData = try? JSONEncoder().encode(custom),
 }
 chk(sBack == custom, "settings: round-trip preserves all fields")
 
+// ── Project.effectiveHealthPath: defaults to "/", normalizes a leading slash (A6). ──
+chk(Project(name: "h", path: "/tmp/h").effectiveHealthPath == "/", "health: unset → /")
+chk(Project(name: "h", path: "/tmp/h", healthPath: "health").effectiveHealthPath == "/health",
+    "health: bare 'health' → /health")
+chk(Project(name: "h", path: "/tmp/h", healthPath: "/api/health").effectiveHealthPath == "/api/health",
+    "health: absolute path preserved")
+chk(Project(name: "h", path: "/tmp/h", healthPath: "  ").effectiveHealthPath == "/", "health: blank → /")
+
+// ── HeapScaling.next: ladder climbs past 8 GB but is clamped to physical RAM (A2). ──
+chk(HeapScaling.next(after: 4, systemGB: 8) == 6, "heap: 4→6 on 8 GB")
+chk(HeapScaling.next(after: 6, systemGB: 8) == 8, "heap: 6→8 on 8 GB")
+chk(HeapScaling.next(after: 8, systemGB: 8) == nil, "heap: 8→nil on 8 GB (RAM-capped, unchanged)")
+chk(HeapScaling.next(after: 8, systemGB: 32) == 12, "heap: 8→12 on 32 GB (no longer stuck at 8)")
+chk(HeapScaling.next(after: 12, systemGB: 16) == 16, "heap: 12→16 on 16 GB")
+chk(HeapScaling.next(after: 16, systemGB: 16) == nil, "heap: 16→nil on 16 GB (RAM-capped)")
+chk(HeapScaling.next(after: 16, systemGB: 64) == 24, "heap: 16→24 on 64 GB")
+chk(HeapScaling.next(after: 24, systemGB: 64) == nil, "heap: 24 is the top of the ladder")
+
+// ── HeapScaling.looksLikeOOM: fewer false positives (A3). ───────────────────────
+chk(HeapScaling.looksLikeOOM(logLines: [], exitCode: 6), "oom: exit 6 → OOM")
+chk(!HeapScaling.looksLikeOOM(logLines: ["JavaScript heap out of memory"], exitCode: 0),
+    "oom: clean exit 0 is never OOM even if log mentions heap")
+chk(HeapScaling.looksLikeOOM(logLines: ["FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"],
+                             exitCode: 134), "oom: real V8 OOM line → OOM")
+chk(!HeapScaling.looksLikeOOM(logLines: ["error: memory allocation failed for buffer"], exitCode: 1),
+    "oom: lone 'allocation failed' (no fatal/heap marker) is not OOM")
+chk(HeapScaling.looksLikeOOM(logLines: ["FATAL ERROR: something", "Allocation failed"], exitCode: 1),
+    "oom: 'allocation failed' + 'fatal error' → OOM")
+chk(!HeapScaling.looksLikeOOM(logLines: ["compiled the heap snapshot successfully"], exitCode: 1),
+    "oom: unrelated 'heap' mention is not OOM")
+
+// ── JSONFileStore: corruption safety (A1) — must never silently lose data. ──────
+MainActor.assumeIsolated {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("dm-jsonstore-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    // Absent file → .missing (genuine first run, NOT corruption → caller uses defaults quietly).
+    let s1 = JSONFileStore<[Project]>(filename: "projects.json", version: 1, directory: tmp)
+    if case .missing = s1.load() { chk(true, "store: absent file → .missing") }
+    else { chk(false, "store: absent file → .missing") }
+
+    // Round trip through the versioned envelope.
+    s1.save([Project(name: "A", path: "/tmp/a"), Project(name: "B", path: "/tmp/b")])
+    if case .loaded(let back) = s1.load(), back.map(\.name) == ["A", "B"] {
+        chk(true, "store: versioned round trip")
+    } else { chk(false, "store: versioned round trip") }
+
+    // Legacy un-enveloped file (a bare array written before versioning) still loads.
+    let legacyURL = tmp.appendingPathComponent("legacy.json")
+    try? JSONEncoder().encode([Project(name: "Old", path: "/tmp/o")]).write(to: legacyURL)
+    let s2 = JSONFileStore<[Project]>(filename: "legacy.json", version: 1, directory: tmp)
+    if case .loaded(let back) = s2.load(), back.first?.name == "Old" {
+        chk(true, "store: legacy bare-array file still loads")
+    } else { chk(false, "store: legacy bare-array file still loads") }
+
+    // Corrupt file → .corrupt with a preserved backup; the original is moved aside, NOT clobbered.
+    let corruptURL = tmp.appendingPathComponent("corrupt.json")
+    try? Data("{ this is not valid json".utf8).write(to: corruptURL)
+    let s3 = JSONFileStore<[Project]>(filename: "corrupt.json", version: 1, directory: tmp)
+    if case .corrupt(let backup) = s3.load() {
+        chk(backup != nil, "store: corrupt file reported with a backup path")
+        chk(backup.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+            "store: corrupt file preserved on disk (recoverable)")
+        chk(!FileManager.default.fileExists(atPath: corruptURL.path),
+            "store: corrupt original moved aside (next save won't clobber the backup)")
+    } else { chk(false, "store: corrupt file → .corrupt") }
+
+    // Same safety for the settings payload type.
+    let setURL = tmp.appendingPathComponent("settings.json")
+    try? Data("not json at all".utf8).write(to: setURL)
+    let s4 = JSONFileStore<AppSettings>(filename: "settings.json", version: 1, directory: tmp)
+    if case .corrupt = s4.load() { chk(true, "store: corrupt settings → .corrupt") }
+    else { chk(false, "store: corrupt settings → .corrupt") }
+}
+
 print(fail == 0 ? "ALL MODEL TESTS PASSED" : "SOME MODEL TESTS FAILED")
 exit(Int32(fail))

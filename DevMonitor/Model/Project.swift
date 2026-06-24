@@ -70,6 +70,10 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     var memoryAuto: Bool
     /// Optional port override; `nil` = parse from stdout, fallback 3000 (i.e. "auto").
     var port: Int?
+    /// Path the health probe requests; `nil`/empty = "/". Lets an API-only server whose "/" route
+    /// hangs or is absent point the liveness check at a real route (e.g. "/health"). Any HTTP
+    /// response (even 404) counts as alive — the probe measures liveness, not correctness.
+    var healthPath: String?
     /// When true, the package manager / dev command follow detection instead of `packageManager`.
     var packageManagerAuto: Bool
     /// Dev-server heap (GB) used when `memoryAuto` is on: the level last learned by the OOM
@@ -98,6 +102,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         memoryGB: Int = 4,
         memoryAuto: Bool = true,
         port: Int? = nil,
+        healthPath: String? = nil,
         packageManagerAuto: Bool = true,
         autoHeapGB: Int = HeapScaling.firstGB,
         buildMemoryGB: Int = 4,
@@ -116,6 +121,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.memoryGB = memoryGB
         self.memoryAuto = memoryAuto
         self.port = port
+        self.healthPath = healthPath
         self.packageManagerAuto = packageManagerAuto
         self.autoHeapGB = autoHeapGB
         self.buildMemoryGB = buildMemoryGB
@@ -128,7 +134,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     // user already set, for the build too), and the learned autoscaler levels start at firstGB.
     enum CodingKeys: String, CodingKey {
         case id, name, path, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
-        case memoryGB, memoryAuto, port, packageManagerAuto
+        case memoryGB, memoryAuto, port, healthPath, packageManagerAuto
         case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB
     }
 
@@ -147,6 +153,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         memoryGB = try c.decode(Int.self, forKey: .memoryGB)
         memoryAuto = try c.decodeIfPresent(Bool.self, forKey: .memoryAuto) ?? true
         port = try c.decodeIfPresent(Int.self, forKey: .port)
+        healthPath = try c.decodeIfPresent(String.self, forKey: .healthPath)
         packageManagerAuto = try c.decodeIfPresent(Bool.self, forKey: .packageManagerAuto) ?? true
         autoHeapGB = try c.decodeIfPresent(Int.self, forKey: .autoHeapGB) ?? HeapScaling.firstGB
         // Build heap defaults to the dev config of an existing project (decoded just above).
@@ -180,6 +187,12 @@ extension Project {
     /// autoscaler's learned level (`buildAutoHeapGB`, 4→6→8); else the explicit `buildMemoryGB`.
     func effectiveBuildMemoryGB(systemGB: Int? = nil) -> Int {
         Project.clampHeap(buildMemoryAuto ? buildAutoHeapGB : buildMemoryGB, systemGB: systemGB)
+    }
+
+    /// The health-probe path, normalized to a single leading "/" (defaults to "/" when unset).
+    var effectiveHealthPath: String {
+        guard let p = healthPath?.trimmingCharacters(in: .whitespaces), !p.isEmpty else { return "/" }
+        return p.hasPrefix("/") ? p : "/" + p
     }
 
     /// `~/Library/Application Support/DevMonitor/logs` — one file per project lives here.

@@ -77,7 +77,7 @@ final class BuildRunner {
     func stop() {
         guard pid > 0 else { return }
         wasStopped = true
-        ProcessSupport.gracefulKillGroup(pid)
+        ProcessSupport.gracefulKillTree(pid)
     }
 
     private func ingest(_ data: Data) {

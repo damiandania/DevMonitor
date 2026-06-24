@@ -66,5 +66,13 @@ check("detect deno", Detector.detect(path: tmpProject(["deno.json": "{}"])).pack
 let denoCmd = Detector.commands(path: tmpProject(["deno.json": "{\"tasks\":{}}", "package.json": "{\"scripts\":{\"dev\":\"x\"}}"]), packageManager: .deno)
 check("deno dev command", denoCmd.dev == "deno task dev", denoCmd.dev)
 
+// A7: a Deno project keeps its runnable tasks in deno.json "tasks" (no package.json scripts) — the
+// detector must read those so dev/build resolve to real `deno task <name>`s.
+let denoTasksDir = tmpProject(["deno.json": "{\"tasks\":{\"dev\":\"deno run -A --watch main.ts\",\"build\":\"deno run -A build.ts\"}}"])
+let denoDetect = Detector.detect(path: denoTasksDir)
+check("deno tasks: pm", denoDetect.packageManager == .deno, "\(denoDetect.packageManager)")
+check("deno tasks: dev from deno.json tasks", denoDetect.devCommand == "deno task dev", denoDetect.devCommand)
+check("deno tasks: build from deno.json tasks", denoDetect.buildCommand == "deno task build", denoDetect.buildCommand ?? "nil")
+
 print(failures == 0 ? "ALL DETECTOR TESTS PASSED" : "\(failures) DETECTOR TEST(S) FAILED")
 exit(failures == 0 ? 0 : 1)

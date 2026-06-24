@@ -12,14 +12,26 @@ enum ProcessSupport {
         (status & 0x7f) == 0 ? (status >> 8) & 0xff : status
     }
 
-    /// SIGTERM a process *group*, then SIGKILL it after a short grace so a tree that ignores the
-    /// polite signal is still reaped. Fire-and-forget; the escalation runs on a detached task.
-    /// (The dev server and build both run as session leaders, so killing the group reaps the tree.)
-    static func gracefulKillGroup(_ pgid: pid_t, after grace: Duration = .seconds(2)) {
-        killpg(pgid, SIGTERM)
+    /// SIGTERM the whole tree of session leader `leader` — its session members AND any `setsid`
+    /// descendants (which escape a plain `killpg`) — then SIGKILL after a short grace so a tree that
+    /// ignores the polite signal is still reaped. Fire-and-forget; the escalation runs on a detached
+    /// task and re-enumerates so a child spawned during the grace is still caught. Replaces the old
+    /// killpg-only path so a detached worker can't outlive the server/build that started it.
+    static func gracefulKillTree(_ leader: pid_t, after grace: Duration = .seconds(2)) {
+        signalTree(ProcessTree.fullTree(of: leader), SIGTERM)
         Task.detached {
             try? await Task.sleep(for: grace)
-            killpg(pgid, SIGKILL)
+            signalTree(ProcessTree.fullTree(of: leader), SIGKILL)
+        }
+    }
+
+    /// Send `sig` to every pid in `pids` and to each one's process group (so a new group created by a
+    /// `setsid` child is reaped too). Pids ≤ 1 are skipped. Shared by the tree-kill and app shutdown.
+    static func signalTree(_ pids: [pid_t], _ sig: Int32) {
+        for p in Set(pids) where p > 1 {
+            kill(p, sig)
+            let pg = getpgid(p)
+            if pg > 1 { killpg(pg, sig) }
         }
     }
 

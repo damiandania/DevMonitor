@@ -66,6 +66,13 @@ extension AppState {
     func setMemoryGB(_ gb: Int, for id: Project.ID) { mutate(id) { $0.memoryGB = max(1, gb) } }
     func setMemoryAuto(_ auto: Bool, for id: Project.ID) { mutate(id) { $0.memoryAuto = auto } }
     func setPort(_ port: Int?, for id: Project.ID) { mutate(id) { $0.port = (port ?? 0) > 0 ? port : nil } }
+    /// Set the health-probe path (nil/empty = "/"). Applies on the next launch.
+    func setHealthPath(_ path: String?, for id: Project.ID) {
+        mutate(id) { p in
+            let t = path?.trimmingCharacters(in: .whitespaces)
+            p.healthPath = (t?.isEmpty == false && t != "/") ? t : nil
+        }
+    }
     func setBuildMemoryGB(_ gb: Int, for id: Project.ID) { mutate(id) { $0.buildMemoryGB = max(1, gb) } }
     func setBuildMemoryAuto(_ auto: Bool, for id: Project.ID) { mutate(id) { $0.buildMemoryAuto = auto } }
 

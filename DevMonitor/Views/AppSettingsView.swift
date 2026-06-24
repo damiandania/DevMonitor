@@ -284,6 +284,7 @@ private struct ProjectSettings: View {
                 buildMemoryRow
                 portRow
                 packageRow
+                healthPathRow
             }
             Section {
                 LabeledContent("Folder") {
@@ -341,6 +342,20 @@ private struct ProjectSettings: View {
             TextField("3000", value: Binding(get: { live.port }, set: { app.setPort($0, for: project.id) }),
                       format: .number.grouping(.never))
                 .textFieldStyle(.roundedBorder).frame(width: 74)
+        }
+    }
+
+    /// Health-probe path — "auto" means "/". Manual lets an API-only server point the liveness check
+    /// at a real route (e.g. "/health") when "/" hangs or has no handler. Applies on next launch.
+    private var healthPathRow: some View {
+        let auto = Binding(get: { live.healthPath == nil },
+                           set: { isAuto in app.setHealthPath(isAuto ? nil : live.effectiveHealthPath, for: project.id) })
+        return row(icon: "stethoscope", name: "Health path", auto: auto) {
+            Text("/").foregroundStyle(.secondary)
+        } manual: {
+            TextField("/health", text: Binding(get: { live.healthPath ?? "" },
+                                               set: { app.setHealthPath($0, for: project.id) }))
+                .textFieldStyle(.roundedBorder).frame(width: 120)
         }
     }
 

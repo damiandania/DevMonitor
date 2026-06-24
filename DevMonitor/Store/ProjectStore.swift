@@ -1,28 +1,21 @@
 import Foundation
 
-/// Loads and saves the project list as JSON under Application Support.
+/// Loads and saves the project list as versioned JSON under Application Support, on top of the
+/// corruption-safe `JSONFileStore` (an unreadable file is backed up, never silently wiped).
 @MainActor
 final class ProjectStore {
-    private let fileURL: URL
+    private let store = JSONFileStore<[Project]>(filename: "projects.json", version: 1)
 
-    init() {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DevMonitor", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("projects.json")
+    /// Load the persisted projects. `corruptBackup` is non-nil only when the file existed but was
+    /// unreadable — the list was reset to empty and the bad file preserved at that path, so the
+    /// caller can tell the user instead of losing every project without a trace.
+    func load() -> (projects: [Project], corruptBackup: URL?) {
+        switch store.load() {
+        case .missing:             return ([], nil)
+        case .loaded(let p):       return (p, nil)
+        case .corrupt(let backup): return ([], backup)
+        }
     }
 
-    func load() -> [Project] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
-        return (try? JSONDecoder().decode([Project].self, from: data)) ?? []
-    }
-
-    func save(_ projects: [Project]) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(projects) else { return }
-        do { try data.write(to: fileURL, options: .atomic) }
-        catch { AppLog.shared.event("ProjectStore: failed to save projects.json — \(error.localizedDescription)") }
-    }
+    func save(_ projects: [Project]) { store.save(projects) }
 }

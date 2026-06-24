@@ -102,8 +102,8 @@ final class WorkerRunner {
             isRunning = false
             return
         }
-        append(line: "stop: SIGTERM → killpg \(pid)")
-        ProcessSupport.gracefulKillGroup(pid)
+        append(line: "stop: SIGTERM → kill tree \(pid)")
+        ProcessSupport.gracefulKillTree(pid)
         // finish() fires on exit.
     }
 

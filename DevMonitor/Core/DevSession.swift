@@ -198,10 +198,11 @@ final class DevSession {
             let isJS = jsRuntimes.contains(comm)
             let isEditor = editorMarkers.contains { args.contains($0) }
             let onPort = pinnedPort.map { Int(dm_proc_listen_port(p)) == $0 } ?? false
+            let refsPath = Self.args(args, referencePath: project.path)
             // (a) holds the exact port we'll bind (a JS server or this project's process), or
             // (b) a leftover dev-server tree of THIS project still lingering.
-            let portVictim = onPort && !isEditor && (isJS || args.contains(project.path))
-            let projectVictim = isJS && !isEditor && args.contains(project.path)
+            let portVictim = onPort && !isEditor && (isJS || refsPath)
+            let projectVictim = isJS && !isEditor && refsPath
                 && devTokens.contains { args.contains($0) }
             guard portVictim || projectVictim else { continue }
             let pgid = getpgid(p)
@@ -209,6 +210,21 @@ final class DevSession {
             if pgid > 1 { killpg(pgid, SIGKILL) }
             kill(p, SIGKILL)
         }
+    }
+
+    /// Whether `args` references `path` as a whole path component, not merely as a substring — so a
+    /// project at `/p/foo` never reaps a sibling server at `/p/foobar`. The path counts as referenced
+    /// only when the next character after the match is a path separator, whitespace, a quote, or the
+    /// end of the argument string. Static + pure so it's unit-testable without spawning.
+    static func args(_ args: String, referencePath path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        let boundaries: Set<Character> = ["/", " ", "\t", "\n", "\"", "'", ":"]
+        var from = args.startIndex
+        while let r = args.range(of: path, range: from..<args.endIndex) {
+            if r.upperBound == args.endIndex || boundaries.contains(args[r.upperBound]) { return true }
+            from = r.upperBound
+        }
+        return false
     }
 
     /// Send a line of input to the running dev server's stdin.
@@ -235,8 +251,8 @@ final class DevSession {
             return
         }
         let target = pid
-        append(line: "stop: SIGTERM → killpg \(target)")
-        ProcessSupport.gracefulKillGroup(target)
+        append(line: "stop: SIGTERM → kill tree \(target)")
+        ProcessSupport.gracefulKillTree(target)
     }
 
     // MARK: - Output handling
@@ -466,7 +482,7 @@ final class DevSession {
                 // connection and hold it, which would otherwise block this loop for the full (load-
                 // tolerant) timeout and delay the flip to .running. Once healthy, use the long one.
                 let timeout = self.hasBeenHealthy ? self.httpTimeout : self.warmHTTPTimeout
-                let alive = await Self.probe(port: port, timeout: timeout)
+                let alive = await Self.probe(port: port, path: self.project.effectiveHealthPath, timeout: timeout)
                 if Task.isCancelled || self.stopping || self.recycling { continue }
 
                 if alive {
@@ -506,10 +522,13 @@ final class DevSession {
         }
     }
 
-    private static func probe(port: Int, timeout: TimeInterval) async -> Bool {
+    private static func probe(port: Int, path: String = "/", timeout: TimeInterval) async -> Bool {
         // Use "localhost" (not 127.0.0.1): many dev servers bind IPv6 [::1] only, so an IPv4-only
         // probe gets "connection refused" and the server appears stuck in "Launching" forever.
-        guard let url = URL(string: "http://localhost:\(port)/") else { return false }
+        // ANY HTTP response (200, 404, 500, …) means the server is alive — URLSession only throws on
+        // a transport failure (refused/timeout), so this is a liveness check, not a correctness one.
+        guard let url = URL(string: "http://localhost:\(port)\(path.hasPrefix("/") ? path : "/" + path)")
+        else { return false }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
         req.httpMethod = "GET"
@@ -534,7 +553,7 @@ final class DevSession {
         sampleTask?.cancel()
         graceTask?.cancel()
         if pid > 0 {
-            ProcessSupport.gracefulKillGroup(pid)
+            ProcessSupport.gracefulKillTree(pid)
             // handleExit() fires on exit and calls relaunchAfterRecycle().
         } else {
             relaunchAfterRecycle()
