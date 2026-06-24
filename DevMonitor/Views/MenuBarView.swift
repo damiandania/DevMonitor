@@ -88,10 +88,14 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Launch/stop the dev server straight from the header — play when idle, stop when up,
-                // so a project can be started without expanding it.
-                if let dev {
-                    Button(action: dev.onToggle) {
+                // Launch/stop the dev server straight from the header — but ONLY while collapsed:
+                // once expanded, the Dev row below already has this control, so we don't repeat it.
+                // Acting on it keeps the row collapsed (starting a server doesn't auto-expand).
+                if let dev, !isOpen {
+                    Button {
+                        expandedOverride[project.id] = false
+                        dev.onToggle()
+                    } label: {
                         Image(systemName: dev.status.showsStop ? "stop.fill" : "play.fill")
                     }
                     .buttonStyle(.borderless).controlSize(.small)
@@ -100,10 +104,17 @@ struct MenuBarView: View {
             }
 
             if isOpen {
-                VStack(alignment: .leading, spacing: 5) {
+                // Nest the controls in a faint rounded panel, indented under the name, so the child
+                // list reads as a group and doesn't blend into the flat parent rows.
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(controls) { controlRow($0) }
                 }
-                .padding(.leading, 17)   // align under the name, past the chevron
+                .padding(.vertical, 7)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.leading, 18)
+                .padding(.top, 1)
             }
         }
         .animation(.easeInOut(duration: 0.15), value: isOpen)
