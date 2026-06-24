@@ -57,7 +57,7 @@ build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$S
 build_run notifications "$ROOT/tests/notifications/main.swift" \
   "$SRC/Model/NotificationItem.swift" "$SRC/Model/SupervisionEvent.swift" \
   "$SRC/Model/AppSettings.swift" "$SRC/Core/NotificationPolicy.swift" "$SRC/Core/AppLog.swift" \
-  "$SRC/Core/JSONFileStore.swift"
+  "$SRC/Core/JSONFileStore.swift" "$SRC/Model/PersistedEvent.swift" "$SRC/Core/EventStore.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
@@ -68,7 +68,7 @@ build_run session  -enable-bare-slash-regex "$ROOT/tests/session/main.swift" \
   "$SRC/Core/ShellEnvironment.swift" "$SRC/Core/HeapScaling.swift" \
   "$SRC/Core/BuildRunner.swift" "$SRC/Core/ANSI.swift" "$SRC/Core/AppLog.swift" \
   "$SRC/Core/ProcessSupport.swift" "$SRC/Core/LineBuffer.swift" "$SRC/Core/LogNoise.swift" \
-  "$SRC/Core/SpawnedProcess.swift" \
+  "$SRC/Core/SpawnedProcess.swift" "$SRC/Core/LogFilter.swift" \
   "$SYS/metrics.c" "$SYS/spawn.c" -import-objc-header "$HDR"
 build_run advisor "$ROOT/tests/advisor/main.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"

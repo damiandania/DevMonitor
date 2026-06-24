@@ -65,5 +65,33 @@ check(!NotificationThrottle.shouldSuppress(key: "k", now: now, last: nil, window
 check(NotificationThrottle.shouldSuppress(key: "k", now: now, last: now.addingTimeInterval(-5), window: 15), "5s ago within 15s → suppressed")
 check(!NotificationThrottle.shouldSuppress(key: "k", now: now, last: now.addingTimeInterval(-20), window: 15), "20s ago → not suppressed")
 
+// --- EventStore: persist history to JSONL, read back newest-first, rotate by size (C1) ---
+MainActor.assumeIsolated {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("dm-events-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    func ev(_ title: String, _ when: Date) -> PersistedEvent {
+        PersistedEvent(id: UUID(), date: when, category: .failures, urgent: true,
+                       title: title, body: "b", projectID: nil, projectName: "P")
+    }
+    let store = EventStore(directory: tmp, maxBytes: 2_000_000)
+    check(store.load().isEmpty, "events: empty before any append")
+    let t0 = Date()
+    store.append(ev("first", t0))
+    store.append(ev("second", t0.addingTimeInterval(1)))
+    let loaded = store.load()
+    check(loaded.count == 2, "events: two events persisted")
+    check(loaded.first?.title == "second", "events: newest-first ordering")
+    check(loaded.first?.projectName == "P" && loaded.first?.category == .failures, "events: fields round-trip")
+
+    // Rotation: a tiny cap forces a roll to events.jsonl.1; load() still spans the boundary.
+    let small = EventStore(directory: tmp.appendingPathComponent("rot"), maxBytes: 200)
+    for i in 0..<50 { small.append(ev("e\(i)", t0.addingTimeInterval(Double(i)))) }
+    check(FileManager.default.fileExists(atPath: small.fileURL.path + ".1"), "events: rotated to .1 past cap")
+    check(small.load().count >= 2, "events: history spans the rotation boundary")
+}
+
 print(fail == 0 ? "ALL NOTIFICATIONS TESTS PASSED" : "SOME NOTIFICATIONS TESTS FAILED")
 exit(Int32(fail))

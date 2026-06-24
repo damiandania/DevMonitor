@@ -139,6 +139,13 @@ func runSessionTests() async -> Int {
     check("build: stop() still calls onFinish", stopFinished, "finished=\(stopFinished)")
     check("build: stop() logs 'build stopped'", stopBuild.logLines.contains { $0.contains("build stopped") })
 
+    // C3: log search filter — case-insensitive, ANSI-stripped, empty query = everything.
+    let logLines = ["\u{1B}[31mERROR boom\u{1B}[0m", "info: started", "warn: slow"]
+    check("logfilter: empty query keeps all", LogFilter.filter(logLines, query: "").count == 3)
+    check("logfilter: case-insensitive substring", LogFilter.filter(logLines, query: "error") == [logLines[0]])
+    check("logfilter: matches stripped of ANSI", LogFilter.matches("\u{1B}[31mboom\u{1B}[0m", query: "boom"))
+    check("logfilter: no match", LogFilter.filter(logLines, query: "zzz").isEmpty)
+
     // A4: reapLeftovers matches a project path by boundary, not substring — a project at /p/foo must
     // never reap a sibling server at /p/foobar.
     check("path: exact arg match", DevSession.args("node /p/foo/server.js", referencePath: "/p/foo"))

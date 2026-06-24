@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Live, auto-scrolling terminal log. With `onSubmit` set it also shows an input field (used for
 /// the dev server's stdin); without it, it's a read-only viewer (used for the build log).
@@ -10,8 +11,14 @@ struct LogPaneView: View {
     var footer: AnyView? = nil
     /// Terminal appearance: "app" (follow the app theme), "dark", or "light".
     var terminalTheme: String = "dark"
+    /// Suggested filename (without extension) when exporting the log to a file.
+    var exportName: String = "log"
     @State private var input = ""
+    @State private var search = ""
     @Environment(\.colorScheme) private var appScheme
+
+    /// Lines actually shown: filtered by the search query (matched against ANSI-stripped text).
+    private var visibleLines: [String] { LogFilter.filter(lines, query: search) }
 
     /// Resolve the effective terminal scheme — "app" follows the app's appearance.
     private var dark: Bool {
@@ -29,11 +36,36 @@ struct LogPaneView: View {
         let inputBg = dark ? Color(white: 0.12) : Color(white: 0.94)
         let border = (dark ? Color.white : Color.black).opacity(0.08)
 
+        let shown = visibleLines
+
         VStack(spacing: 0) {
+            // Search + export strip. Filtering matches the ANSI-stripped text; export writes the
+            // currently shown lines (so a filtered export saves just the matches).
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
+                TextField("Filter log", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(inputText)
+                if !search.isEmpty {
+                    Text("\(shown.count)/\(lines.count)").font(.caption2).foregroundStyle(.secondary)
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                Button { export(shown) } label: { Image(systemName: "square.and.arrow.up") }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Export the shown log to a file")
+                    .disabled(lines.isEmpty)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(inputBg)
+            Divider()
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        ForEach(Array(shown.enumerated()), id: \.offset) { index, line in
                             Text(ANSI.attributed(line.isEmpty ? " " : line))
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(textColor)
@@ -46,7 +78,7 @@ struct LogPaneView: View {
                 }
                 .scrollIndicators(.hidden)   // no scroll bar in the terminal
                 .background(bgColor)
-                .onChange(of: lines.count) { _, count in
+                .onChange(of: shown.count) { _, count in
                     guard count > 0 else { return }
                     withAnimation(.linear(duration: 0.1)) {
                         proxy.scrollTo(count - 1, anchor: .bottom)
@@ -84,5 +116,15 @@ struct LogPaneView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(border))
         .environment(\.colorScheme, dark ? .dark : .light)
+    }
+
+    /// Save the given lines (ANSI-stripped, so the file is plain text) via a save panel.
+    private func export(_ shown: [String]) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(exportName).log"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let text = shown.map(\.strippedANSI).joined(separator: "\n") + "\n"
+        try? text.write(to: url, atomically: true, encoding: .utf8)
     }
 }

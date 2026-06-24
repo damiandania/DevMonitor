@@ -31,6 +31,10 @@ struct RootSplitView: View {
                             Label("Doctor", systemImage: "stethoscope")
                         }
                         .help("Doctor Claude")
+                        Button { openWindow(id: "history") } label: {
+                            Label("History", systemImage: "clock.arrow.circlepath")
+                        }
+                        .help("Event history (crashes, recycles, builds, pressure)")
                     }
                 }
         }

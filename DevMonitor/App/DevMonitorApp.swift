@@ -37,6 +37,11 @@ struct DevMonitorApp: App {
             DoctorSheet().environment(appState)
         }
         .windowResizability(.contentSize)
+
+        Window("History", id: "history") {
+            HistoryView().environment(appState)
+        }
+        .windowResizability(.contentSize)
     }
 }
 

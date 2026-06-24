@@ -36,6 +36,7 @@ final class AppState {
     @ObservationIgnored private let store = ProjectStore()
     @ObservationIgnored private let settingsStore = SettingsStore()
     @ObservationIgnored private let ipcServer = IPCServer()
+    @ObservationIgnored let eventStore = EventStore()
     let systemSampler = SystemSampler()
 
     init() {
@@ -190,6 +191,11 @@ final class AppState {
     func route(_ item: NotificationItem) {
         recentNotifications.insert(item, at: 0)
         if recentNotifications.count > 5 { recentNotifications.removeLast(recentNotifications.count - 5) }
+        // Persist to the on-disk history (survives restart; the in-app feed only keeps the last 5).
+        let projectName = item.projectID.flatMap { id in projects.first { $0.id == id }?.name }
+        eventStore.append(PersistedEvent(id: item.id, date: item.date, category: item.category,
+                                         urgent: item.severity == .urgent, title: item.title,
+                                         body: item.body, projectID: item.projectID, projectName: projectName))
         guard NotificationPolicy.shouldNotify(item.category, settings) else { return }
         let key = "\(item.category.rawValue)|\(item.projectID?.uuidString ?? "-")|\(item.title)"
         if NotificationThrottle.shouldSuppress(key: key, now: item.date, last: lastNotified[key],
