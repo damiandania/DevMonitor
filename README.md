@@ -37,7 +37,7 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 ## Features
 
 ### 🚀 Detect &amp; launch
-- **Auto-detects** the package manager (npm · pnpm · yarn · bun · deno) and framework (Nuxt · Next · Astro · SvelteKit · Remix · SolidStart · Angular · Qwik · Vite · Express) per project — and launches **any** project that has a `dev` script regardless. Framework-specific env (e.g. `NUXT_IGNORE_LOCK`) is applied only where it belongs.
+- **Auto-detects** the package manager (npm · pnpm · yarn · bun · deno) and framework (Nuxt · Next · Astro · SvelteKit · Remix · SolidStart · Angular · Qwik · Vite · Express) per project — and launches **any** project that has a `dev` script regardless. Framework-specific env (e.g. `NUXT_IGNORE_LOCK` for Nuxt, `ASTRO_DEV_BACKGROUND=0` to keep Astro 7 in the foreground) is applied only where it belongs.
 - **Launches** the dev server with a deterministic heap size (`--max-old-space-size`), streaming its log live.
 - **Per-project settings** (gear on each sidebar row): **Memory / Port / Package**, each with an **Auto** toggle (on by default) — flip it off for a manual value via slider, field, or package picker.
 
@@ -195,6 +195,7 @@ A few non-obvious things this codebase gets right — each found and pinned down
 - **CPU timebase conversion** — `proc_pid_rusage` returns CPU time in *mach* units on Apple Silicon (not nanoseconds); scaled via `mach_timebase_info` (1:1 on Intel).
 - **Spawned servers don't inherit the IPC socket** — `POSIX_SPAWN_CLOEXEC_DEFAULT` (+ `FD_CLOEXEC` on the hub sockets) means a long-lived dev server can't hold the client socket open and block a cold-launch CLI call on `read()`.
 - **Nuxt's dev-lock is agent-only** — `std-env` enables it whenever `CLAUDECODE` / `AI_AGENT` is set, so it fires inside Claude Code terminals. Servers spawn with `NUXT_IGNORE_LOCK=1`, and the app's own LaunchServices environment has no agent vars, so app-spawned servers never lock.
+- **Astro 7 is forced to the foreground** — from v7, `astro dev` *auto-daemonizes* (detaches to the background, parent exits 0) when it detects an AI coding agent. A supervisor that expects a long-lived foreground process would read that instant exit as a crash and relaunch in a loop, so Astro servers spawn with `ASTRO_DEV_BACKGROUND=0` — Dev Monitor *is* the background supervisor.
 - **External dev servers are identified, not just listed** — argv that *looks like* a dev server is labelled *project :port* (project from the path before `/node_modules/`, port from a `proc_pidfdinfo` scan for the LISTENing socket), flagged external, and shown but never supervised.
 - **Notifications can't crash the app** — `UNUserNotificationCenter` can raise an Objective-C `NSException` (which Swift can't `try`/`catch`) on a bundle the daemon rejects, so every notification call is routed through a tiny ObjC `@try/@catch` shim (`dm_try`).
 - **Deterministic heap sizing** — in auto mode it follows the framework default (Nuxt/Next 8 · Astro/Vite 4 · Node 2), never a stale stored value; floored at 2 GB, capped at physical RAM.

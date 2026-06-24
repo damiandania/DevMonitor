@@ -38,6 +38,11 @@ versions use [SemVer](https://semver.org/).
   colour extensions). All 14 test suites stay green. See `docs/ARCHITECTURE.md`.
 
 ### Fixed
+- **Astro 7 dev servers no longer loop-relaunch.** From v7, `astro dev` auto-daemonizes when it
+  detects an AI coding agent — the spawned process detaches and exits 0 immediately, which the
+  supervisor read as a crash, relaunching forever. Astro projects now spawn with
+  `ASTRO_DEV_BACKGROUND=0`, keeping the server in the foreground where Dev Monitor supervises it
+  (the framework-specific env lives in `DevSession.frameworkEnv`, alongside Nuxt's `NUXT_IGNORE_LOCK`).
 - **Build failures now show a banner.** A failed build was delivered to Notification Center silently
   (a `.passive` interruption level); it's now urgent/time-sensitive so it breaks through as a banner,
   while a successful build stays silent.

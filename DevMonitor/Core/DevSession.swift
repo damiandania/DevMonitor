@@ -127,13 +127,8 @@ final class DevSession {
         // whatever is holding the port we'll bind and any stray tree of this project — otherwise
         // the fresh server collides and exits ("code 6").
         reapLeftovers(pinnedPort: pinnedPort)
-        // NUXT_IGNORE_LOCK=1: Dev Monitor is the single authority that supervises one server per
-        // project, so Nuxt's own dev-lock would only get in the way — e.g. a stale `nuxt.lock`
-        // left behind by a SIGKILLed run would block the relaunch. We dedupe ourselves. Only Nuxt
-        // reads this var, so inject it ONLY for Nuxt projects rather than polluting every
-        // framework's environment with it.
-        let nuxtEnv = project.framework == .nuxt ? "NUXT_IGNORE_LOCK=1 " : ""
-        let command = "\(nuxtEnv)NODE_OPTIONS=\(ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
+        let fwEnv = Self.frameworkEnv(for: project.framework)
+        let command = "\(fwEnv)NODE_OPTIONS=\(ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         guard let proc = SpawnedProcess.spawn(command: command, cwd: project.path, wantsStdin: true) else {
@@ -209,6 +204,22 @@ final class DevSession {
             append(line: "cleanup: reaping leftover pid \(p) (\(comm))\(onPort ? " on port \(pinnedPort.map(String.init) ?? "")" : "")")
             if pgid > 1 { killpg(pgid, SIGKILL) }
             kill(p, SIGKILL)
+        }
+    }
+
+    /// Framework-specific environment prefixed before the dev command (only where it belongs, so we
+    /// don't pollute every framework's env):
+    /// - **Nuxt** `NUXT_IGNORE_LOCK=1` — Dev Monitor is the single authority supervising one server
+    ///   per project, so Nuxt's own dev-lock only gets in the way (a stale `nuxt.lock` from a
+    ///   SIGKILLed run would block the relaunch); we dedupe ourselves.
+    /// - **Astro** `ASTRO_DEV_BACKGROUND=0` — Astro 7 auto-daemonizes `astro dev` when it detects an
+    ///   AI coding agent, so the spawned process would exit immediately and Dev Monitor would
+    ///   loop-relaunch it; force the foreground so our one-supervised-process model holds.
+    static func frameworkEnv(for framework: Framework) -> String {
+        switch framework {
+        case .nuxt:  return "NUXT_IGNORE_LOCK=1 "
+        case .astro: return "ASTRO_DEV_BACKGROUND=0 "
+        default:     return ""
         }
     }
 

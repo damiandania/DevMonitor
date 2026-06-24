@@ -139,6 +139,12 @@ func runSessionTests() async -> Int {
     check("build: stop() still calls onFinish", stopFinished, "finished=\(stopFinished)")
     check("build: stop() logs 'build stopped'", stopBuild.logLines.contains { $0.contains("build stopped") })
 
+    // Framework env: Astro 7 must be forced to the foreground (it auto-daemonizes under an AI agent),
+    // Nuxt keeps its lock-ignore, everything else gets no extra env.
+    check("env: astro forces foreground", DevSession.frameworkEnv(for: .astro).contains("ASTRO_DEV_BACKGROUND=0"))
+    check("env: nuxt ignores its dev lock", DevSession.frameworkEnv(for: .nuxt).contains("NUXT_IGNORE_LOCK=1"))
+    check("env: vite gets no extra env", DevSession.frameworkEnv(for: .vite).isEmpty)
+
     // C3: log search filter — case-insensitive, ANSI-stripped, empty query = everything.
     let logLines = ["\u{1B}[31mERROR boom\u{1B}[0m", "info: started", "warn: slow"]
     check("logfilter: empty query keeps all", LogFilter.filter(logLines, query: "").count == 3)
