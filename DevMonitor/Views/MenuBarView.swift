@@ -70,44 +70,16 @@ struct MenuBarView: View {
         let dev = controls.first { $0.kind == "dev" }
 
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 7) {
-                // Tapping the row (chevron · dot · name) expands/collapses.
-                Button {
-                    expandedOverride[project.id] = !isOpen
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                            .frame(width: 10)
-                        StatusDot(color: agg.color, accessibilityLabel: agg.label)
-                        Text(project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Spacer(minLength: 6)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                // Launch/stop the dev server straight from the header — but ONLY while collapsed:
-                // once expanded, the Dev row below already has this control, so we don't repeat it.
-                // Acting on it keeps the row collapsed (starting a server doesn't auto-expand).
-                if let dev, !isOpen {
-                    Button {
-                        expandedOverride[project.id] = false
-                        dev.onToggle()
-                    } label: {
-                        Image(systemName: dev.status.showsStop ? "stop.fill" : "play.fill")
-                    }
-                    .buttonStyle(.borderless).controlSize(.small)
-                    .help((dev.status.showsStop ? "Stop " : "Start ") + project.name)
-                }
-            }
+            ProjectHeaderRow(
+                project: project, isOpen: isOpen, aggColor: agg.color, aggLabel: agg.label, dev: dev,
+                onToggleExpand: { expandedOverride[project.id] = !isOpen },
+                onDev: { expandedOverride[project.id] = false; dev?.onToggle() })
 
             if isOpen {
                 // Nest the controls in a faint rounded panel, indented under the name, so the child
                 // list reads as a group and doesn't blend into the flat parent rows.
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(controls) { controlRow($0) }
+                    ForEach(controls) { ControlRowView(control: $0) }
                 }
                 .padding(.vertical, 7)
                 .padding(.horizontal, 10)
@@ -127,26 +99,6 @@ struct MenuBarView: View {
         if controls.contains(where: { $0.status.isInProgress }) { return (.orange, "Starting") }
         if controls.contains(where: { $0.status.showsStop })    { return (.green, "Running") }
         return (.secondary, "Idle")
-    }
-
-    /// One run-control inside an expanded project: icon · title · status · uptime · play/stop.
-    private func controlRow(_ c: RunControl) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: c.icon).font(.caption2).foregroundStyle(.secondary).frame(width: 14)
-            Text(c.title).font(.subheadline).lineLimit(1)
-            Text(LocalizedStringKey(c.status.label.isEmpty ? "Idle" : c.status.label))
-                .font(.caption.weight(.medium)).foregroundStyle(c.status.color).lineLimit(1)
-            if let started = c.startedAt, c.status.showsStop {
-                Text("· \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            // Play to (re)launch, stop to halt — same icon style either way.
-            Button(action: c.onToggle) {
-                Image(systemName: c.status.showsStop ? "stop.fill" : "play.fill")
-            }
-            .help((c.status.showsStop ? "Stop " : "Start ") + c.title.lowercased())
-            .buttonStyle(.borderless).controlSize(.small)
-        }
     }
 
     private func externalRow(_ row: ProcessRow) -> some View {
@@ -176,10 +128,85 @@ struct MenuBarView: View {
         }
     }
 
-    private static func uptime(since date: Date) -> String {
+    fileprivate static func uptime(since date: Date) -> String {
         let s = Int(Date().timeIntervalSince(date))
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m \(s % 60)s" }
         return "\(s / 3600)h \((s % 3600) / 60)m"
+    }
+}
+
+/// A collapsible project's header row: chevron · status dot · name, plus a dev play/stop button on
+/// the right. The PLAY button is revealed on hover (so idle projects stay clean); a STOP button
+/// (running/starting) is always visible. Shown only while collapsed — when expanded, the Dev row
+/// inside already carries this control. Local hover @State means each row tracks its own hover.
+private struct ProjectHeaderRow: View {
+    let project: Project
+    let isOpen: Bool
+    let aggColor: Color
+    let aggLabel: String
+    let dev: RunControl?
+    let onToggleExpand: () -> Void
+    let onDev: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button(action: onToggleExpand) {
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .frame(width: 10)
+                    StatusDot(color: aggColor, accessibilityLabel: aggLabel)
+                    Text(project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 6)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let dev, !isOpen {
+                let showsStop = dev.status.showsStop
+                Button(action: onDev) {
+                    Image(systemName: showsStop ? "stop.fill" : "play.fill")
+                }
+                .buttonStyle(.borderless).controlSize(.small)
+                .help((showsStop ? "Stop " : "Start ") + project.name)
+                .opacity(showsStop || hovering ? 1 : 0)       // play hides until hover; stop stays
+                .allowsHitTesting(showsStop || hovering)
+            }
+        }
+        .onHover { hovering = $0 }
+    }
+}
+
+/// One run-control inside an expanded project: icon · title · status · uptime · play/stop. The PLAY
+/// button is revealed on hover; a STOP button is always visible.
+private struct ControlRowView: View {
+    let control: RunControl
+    @State private var hovering = false
+
+    var body: some View {
+        let showsStop = control.status.showsStop
+        HStack(spacing: 6) {
+            Image(systemName: control.icon).font(.caption2).foregroundStyle(.secondary).frame(width: 14)
+            Text(control.title).font(.subheadline).lineLimit(1)
+            Text(LocalizedStringKey(control.status.label.isEmpty ? "Idle" : control.status.label))
+                .font(.caption.weight(.medium)).foregroundStyle(control.status.color).lineLimit(1)
+            if let started = control.startedAt, showsStop {
+                Text("· \(MenuBarView.uptime(since: started))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button(action: control.onToggle) {
+                Image(systemName: showsStop ? "stop.fill" : "play.fill")
+            }
+            .buttonStyle(.borderless).controlSize(.small)
+            .help((showsStop ? "Stop " : "Start ") + control.title.lowercased())
+            .opacity(showsStop || hovering ? 1 : 0)       // play hides until hover; stop stays
+            .allowsHitTesting(showsStop || hovering)
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
