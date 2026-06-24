@@ -67,24 +67,37 @@ struct MenuBarView: View {
         let live = controls.contains { $0.isLive }
         let isOpen = expandedOverride[project.id] ?? live
         let agg = aggregate(controls)
+        let dev = controls.first { $0.kind == "dev" }
 
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                expandedOverride[project.id] = !isOpen
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .frame(width: 10)
-                    StatusDot(color: agg.color, accessibilityLabel: agg.label)
-                    Text(project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(LocalizedStringKey(agg.label)).font(.caption.weight(.medium)).foregroundStyle(agg.color).lineLimit(1)
+            HStack(spacing: 7) {
+                // Tapping the row (chevron · dot · name) expands/collapses.
+                Button {
+                    expandedOverride[project.id] = !isOpen
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .frame(width: 10)
+                        StatusDot(color: agg.color, accessibilityLabel: agg.label)
+                        Text(project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Spacer(minLength: 6)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                // Launch/stop the dev server straight from the header — play when idle, stop when up,
+                // so a project can be started without expanding it.
+                if let dev {
+                    Button(action: dev.onToggle) {
+                        Image(systemName: dev.status.showsStop ? "stop.fill" : "play.fill")
+                    }
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .help((dev.status.showsStop ? "Stop " : "Start ") + project.name)
+                }
             }
-            .buttonStyle(.plain)
 
             if isOpen {
                 VStack(alignment: .leading, spacing: 5) {
