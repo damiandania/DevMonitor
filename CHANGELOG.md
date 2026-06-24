@@ -18,6 +18,23 @@ versions use [SemVer](https://semver.org/).
   pick up a new process type automatically.
 - **Terminal run timers.** The terminal pane shows a live uptime for a running server/worker, and for
   a build the elapsed time + a progress bar against the last build's duration as the ETA.
+- **Persistent event history.** Crashes, recycles, OOM retries, builds and pressure events are written
+  to a JSONL log (rotated by size) and shown in a new **History** window — a timeline grouped by day —
+  so the record survives an app restart (the sidebar feed only keeps the last few).
+- **Log search + export.** The terminal pane has a filter field (case-insensitive, ANSI-stripped) and
+  an export-to-file button (`Core/LogFilter`).
+- **Localization (Spanish + French) + in-app language picker.** Settings → Appearance → Language
+  switches the UI **live**, no relaunch (strings live in a `Localizable.xcstrings` catalog, applied
+  via a `\.locale` environment override). VoiceOver labels added across the interactive UI
+  (run-controls, activity meters, process rows, menu bar).
+- **Collapsible menu-bar sections.** The menu bar lists *every* project as a collapsible section
+  (status dot + name). A play/stop button — revealed on hover, with stop always shown — launches or
+  stops the dev server without expanding; expanding reveals all of the project's controls.
+- **Per-project health-probe path.** An API-only server whose `/` route hangs can point the liveness
+  check at a real route (per-project server config). Any HTTP response counts as alive.
+- **Distribution scaffolding** (opt-in, no effect on the default unsigned build): Developer ID signing
+  + notarization in `tools/package-release.sh`, hardened runtime, a Sparkle auto-update hook, a
+  Homebrew cask template, and a tag-triggered release workflow. See `docs/DISTRIBUTION.md`.
 
 ### Changed
 - **Menu-bar status glyph** now turns red when *any* supervised process (dev, worker, build, preview)
@@ -28,9 +45,20 @@ versions use [SemVer](https://semver.org/).
   fire-and-forget acknowledgement. Hub-side only: the existing CLI already reads the socket to EOF,
   so no CLI reinstall is needed.
 - **Heap autoscaling now climbs in fixed steps and is remembered per project.** In auto mode the
-  heap starts at 4 GB and, on an out-of-memory, climbs **4 → 6 → 8** (was: doubled once, then gave
-  up). The learned level is persisted to `projects.json`, so the next launch starts there instead of
-  replaying the OOMs. Policy centralised in `Core/HeapScaling.swift`. See `docs/HEAP-AND-BUILD.md`.
+  heap starts at 4 GB and, on an out-of-memory, climbs **4 → 6 → 8 → 12 → 16 → 24**, clamped to the
+  machine's physical RAM — so a big-RAM Mac keeps climbing instead of giving up at 8 (on an 8 GB Mac
+  the effective ladder is still 4 → 6 → 8). The learned level is persisted to `projects.json`, so the
+  next launch starts there instead of replaying the OOMs. Policy in `Core/HeapScaling.swift`.
+- **Corruption-safe storage.** `projects.json` / `settings.json` are versioned and, if unreadable,
+  backed up to `*.corrupt-<timestamp>` and surfaced via a notification — instead of silently resetting
+  to empty/defaults (shared `Core/JSONFileStore`).
+- **No orphaned processes left behind.** Stop / recycle / quit now kill the *full* tree — session
+  members plus `setsid()` descendants that escape `killpg` — and quit also closes + unlinks the IPC
+  socket. Leftover-reaping matches a project path on a boundary, so `/p/foo` never reaps `/p/foobar`.
+- **IPC hub is owner-only.** The socket is `chmod 0600` and rejects connections from another UID
+  (`LOCAL_PEERCRED`), without breaking the accept loop.
+- **Deno projects resolve their tasks.** The detector reads `deno.json(c)` `tasks`, so `deno task
+  <name>` is correct instead of always falling back to `deno task dev`.
 - **Internal refactor — no behavior change.** The dev-server/build process plumbing is shared in
   `SpawnedProcess` + `ProcessSupport`/`LineBuffer`/`LogNoise`; the `AppState` god object (712 → ~300
   lines) is split into focused extensions (`+Projects`/`+Builds`/`+Doctor`) with `PressureManager`
@@ -38,6 +66,9 @@ versions use [SemVer](https://semver.org/).
   colour extensions). All 14 test suites stay green. See `docs/ARCHITECTURE.md`.
 
 ### Fixed
+- **OOM auto-scaling has fewer false positives.** A clean exit (code 0) is never treated as
+  out-of-memory however the log reads, and a generic "allocation failed" only counts as OOM alongside
+  a fatal-error marker — so a non-OOM crash isn't pointlessly retried with a bigger heap.
 - **Astro 7 dev servers no longer loop-relaunch.** From v7, `astro dev` auto-daemonizes when it
   detects an AI coding agent — the spawned process detaches and exits 0 immediately, which the
   supervisor read as a crash, relaunching forever. Astro projects now spawn with
