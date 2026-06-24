@@ -74,8 +74,6 @@ private struct GeneralSettings: View {
                 }
             } header: {
                 Text("Appearance")
-            } footer: {
-                Text("Language changes take effect after you reopen Dev Monitor.")
             }
             Section("Open in") {
                 Picker("Browser (Open)", selection: browser) {

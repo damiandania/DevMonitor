@@ -12,6 +12,7 @@ struct DevMonitorApp: App {
         Window("Dev Monitor", id: "main") {
             RootSplitView()
                 .environment(appState)
+                .environment(\.locale, appState.uiLocale)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .commands {
@@ -21,25 +22,27 @@ struct DevMonitorApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environment(appState)
+                .environment(\.locale, appState.uiLocale)
         } label: {
             MenuBarStatusIcon()
                 .environment(appState)
+                .environment(\.locale, appState.uiLocale)
         }
         .menuBarExtraStyle(.window)
 
         // Settings and Doctor are real windows (native title bar + traffic-light close button).
         Window("Settings", id: "settings") {
-            AppSettingsView().environment(appState)
+            AppSettingsView().environment(appState).environment(\.locale, appState.uiLocale)
         }
         .windowResizability(.contentSize)
 
         Window("Doctor", id: "doctor") {
-            DoctorSheet().environment(appState)
+            DoctorSheet().environment(appState).environment(\.locale, appState.uiLocale)
         }
         .windowResizability(.contentSize)
 
         Window("History", id: "history") {
-            HistoryView().environment(appState)
+            HistoryView().environment(appState).environment(\.locale, appState.uiLocale)
         }
         .windowResizability(.contentSize)
     }

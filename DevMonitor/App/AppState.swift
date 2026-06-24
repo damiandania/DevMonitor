@@ -28,6 +28,13 @@ final class AppState {
 
     /// App-wide settings (browser, analysis model, …) — the gear at the bottom of the sidebar.
     var settings: AppSettings
+
+    /// Locale the UI renders in: the chosen language, or the system locale for "system". Applied as a
+    /// live `.environment(\.locale,)` override on every scene, so changing the language re-localizes
+    /// the UI immediately (no relaunch) — `AppleLanguages` still pins the choice for the next launch.
+    var uiLocale: Locale {
+        settings.language == "system" ? .autoupdatingCurrent : Locale(identifier: settings.language)
+    }
     /// Browsers installed on this Mac (display names), for the "open in" picker.
     var installedBrowsers: [String] = []
     /// Code editors installed on this Mac, for the "Code" button picker.
