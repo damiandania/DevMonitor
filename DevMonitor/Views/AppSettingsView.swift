@@ -58,17 +58,24 @@ private struct GeneralSettings: View {
     var body: some View {
         Form {
             ClaudeHookSection()
-            Section("Appearance") {
+            Section {
                 Picker("Theme", selection: theme) {
                     ForEach(AppSettings.themes) { t in
-                        Label(t.label, systemImage: t.icon).tag(t.id)
+                        Label(LocalizedStringKey(t.label), systemImage: t.icon).tag(t.id)
                     }
                 }
                 Picker("Terminal", selection: terminalTheme) {
                     ForEach(AppSettings.terminalThemes) { t in
-                        Label(t.label, systemImage: t.icon).tag(t.id)
+                        Label(LocalizedStringKey(t.label), systemImage: t.icon).tag(t.id)
                     }
                 }
+                Picker("Language", selection: language) {
+                    ForEach(AppSettings.languages, id: \.id) { Text(LocalizedStringKey($0.label)).tag($0.id) }
+                }
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Language changes take effect after you reopen Dev Monitor.")
             }
             Section("Open in") {
                 Picker("Browser (Open)", selection: browser) {
@@ -81,7 +88,7 @@ private struct GeneralSettings: View {
             }
             Section("Activity bars") {
                 ForEach(AppSettings.allBars) { bar in
-                    Toggle(bar.label, isOn: barBinding(bar.id))
+                    Toggle(LocalizedStringKey(bar.label), isOn: barBinding(bar.id))
                 }
             }
             Section("AI analysis") {
@@ -142,6 +149,11 @@ private struct GeneralSettings: View {
     }
     private var terminalTheme: Binding<String> {
         .init(get: { app.settings.terminalTheme }, set: { app.settings.terminalTheme = $0; app.persistSettings() })
+    }
+    private var language: Binding<String> {
+        .init(get: { app.settings.language }, set: {
+            app.settings.language = $0; app.persistSettings(); AppSettings.applyLanguage($0)
+        })
     }
 }
 
@@ -375,7 +387,7 @@ private struct ProjectSettings: View {
     /// A settings row: label (left), the auto value or the manual control (right), and the Auto
     /// switch. The switch alone carries the "auto" meaning — the word isn't repeated.
     @ViewBuilder private func row<AutoValue: View, Manual: View>(
-        icon: String, name: String, auto: Binding<Bool>,
+        icon: String, name: LocalizedStringKey, auto: Binding<Bool>,
         @ViewBuilder autoValue: () -> AutoValue, @ViewBuilder manual: () -> Manual
     ) -> some View {
         HStack(spacing: 12) {

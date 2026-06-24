@@ -89,14 +89,14 @@ struct RunControlButton: View {
             // Underlined + clickable → opens the error popover. Being a Button, it consumes the tap
             // so the pill's play/stop gesture doesn't also fire.
             Button { showError = true } label: {
-                Text(label).underline()
+                Text(LocalizedStringKey(label)).underline()
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showError, arrowEdge: .bottom) {
                 ErrorPopover(title: title, detail: error)
             }
         } else {
-            Text(label)
+            Text(LocalizedStringKey(label))
         }
     }
 }

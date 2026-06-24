@@ -19,6 +19,9 @@ struct AppSettings: Codable, Sendable, Equatable {
     var theme: String
     /// Terminal/log appearance: "app" (follow the app theme), "dark", or "light".
     var terminalTheme: String
+    /// UI language: "system" (follow macOS) or a code ("en", "es", "fr"). Applied via AppleLanguages;
+    /// takes effect on the next launch.
+    var language: String
 
     // Notifications — master switch + a toggle per category (see NotificationCategory).
     var notificationsEnabled: Bool
@@ -35,6 +38,7 @@ struct AppSettings: Codable, Sendable, Equatable {
          bars: [String] = AppSettings.defaultBars,
          theme: String = "system",
          terminalTheme: String = "dark",
+         language: String = "system",
          notificationsEnabled: Bool = true,
          notifyFailures: Bool = true,
          notifyRecovery: Bool = true,
@@ -48,6 +52,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.bars = bars
         self.theme = theme
         self.terminalTheme = terminalTheme
+        self.language = language
         self.notificationsEnabled = notificationsEnabled
         self.notifyFailures = notifyFailures
         self.notifyRecovery = notifyRecovery
@@ -57,7 +62,7 @@ struct AppSettings: Codable, Sendable, Equatable {
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
-        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme, terminalTheme
+        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme, terminalTheme, language
         case notificationsEnabled, notifyFailures, notifyRecovery, notifyBuilds, notifyPressure
     }
     init(from decoder: Decoder) throws {
@@ -70,6 +75,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         terminalTheme = try c.decodeIfPresent(String.self, forKey: .terminalTheme) ?? "dark"
+        language = try c.decodeIfPresent(String.self, forKey: .language) ?? "system"
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         notifyFailures = try c.decodeIfPresent(Bool.self, forKey: .notifyFailures) ?? true
         notifyRecovery = try c.decodeIfPresent(Bool.self, forKey: .notifyRecovery) ?? true
@@ -103,6 +109,24 @@ struct AppSettings: Codable, Sendable, Equatable {
         }
         NSApplication.shared.appearance = appearance
     }
+
+    /// Apply the saved UI language by overriding the app's `AppleLanguages`. "system" clears the
+    /// override (follow macOS). The bundle resolves localizations at startup, so a change takes full
+    /// effect on the next launch — call this at launch (to mirror settings.json → defaults) and on
+    /// every change (so the next launch honours it).
+    static func applyLanguage(_ code: String) {
+        if code == "system" {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.set([code], forKey: "AppleLanguages")
+        }
+    }
+
+    /// Languages offered in the picker. Endonyms (English/Español/Français) aren't translated;
+    /// "System" is (via `LocalizedStringKey`).
+    static let languages: [(id: String, label: String)] = [
+        ("system", "System"), ("en", "English"), ("es", "Español"), ("fr", "Français"),
+    ]
 
     /// Models offered for analysis (newest Claude family).
     struct ModelOption: Identifiable, Sendable { let id: String; let label: String }

@@ -49,6 +49,9 @@ final class AppState {
         signal(SIGPIPE, SIG_IGN)
         let loadedSettings = settingsStore.load()
         settings = loadedSettings.settings
+        // Mirror the saved UI language into AppleLanguages so the next launch honours it (and this one
+        // does too if it was already set). "system" clears the override.
+        AppSettings.applyLanguage(settings.language)
         // Apply the saved theme once the run loop is up — NSApp is nil during SwiftUI App.init.
         let theme = settings.theme
         Task { @MainActor in AppSettings.applyAppearance(theme) }

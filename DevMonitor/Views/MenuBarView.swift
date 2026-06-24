@@ -80,7 +80,7 @@ struct MenuBarView: View {
                     StatusDot(color: agg.color, accessibilityLabel: agg.label)
                     Text(project.name).font(.subheadline.weight(.semibold)).lineLimit(1)
                     Spacer(minLength: 6)
-                    Text(agg.label).font(.caption.weight(.medium)).foregroundStyle(agg.color).lineLimit(1)
+                    Text(LocalizedStringKey(agg.label)).font(.caption.weight(.medium)).foregroundStyle(agg.color).lineLimit(1)
                 }
                 .contentShape(Rectangle())
             }
@@ -110,7 +110,7 @@ struct MenuBarView: View {
         HStack(spacing: 6) {
             Image(systemName: c.icon).font(.caption2).foregroundStyle(.secondary).frame(width: 14)
             Text(c.title).font(.subheadline).lineLimit(1)
-            Text(c.status.label.isEmpty ? "Idle" : c.status.label)
+            Text(LocalizedStringKey(c.status.label.isEmpty ? "Idle" : c.status.label))
                 .font(.caption.weight(.medium)).foregroundStyle(c.status.color).lineLimit(1)
             if let started = c.startedAt, c.status.showsStop {
                 Text("· \(Self.uptime(since: started))").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
