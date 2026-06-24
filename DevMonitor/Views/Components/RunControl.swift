@@ -24,6 +24,10 @@ struct RunControl: Identifiable {
     let buildETA: TimeInterval?
     /// Whether a backing runner instance exists — drives whether a terminal tab / menu row shows.
     let isLive: Bool
+    /// Port the server is bound to (dev / preview); nil for a worker or build.
+    let port: Int?
+    /// Package-manager name (npm / pnpm / yarn / bun / deno) — shown in the run-timer footer.
+    let packageManager: String
     let onToggle: () -> Void
     let onClose: () -> Void
 
@@ -36,7 +40,7 @@ struct RunControl: Identifiable {
         if isBuild {
             return status.isInProgress ? .build(since: startedAt, estimate: buildETA) : nil
         }
-        return status.showsStop ? .uptime(since: startedAt) : nil
+        return status.showsStop ? .uptime(since: startedAt, port: port, packageManager: packageManager) : nil
     }
 }
 
@@ -60,6 +64,7 @@ extension AppState {
                 title: "Worker", icon: "gearshape.2.fill", tabID: "w:\(project.id)",
                 status: workerStatus(w), logLines: w?.logLines ?? [], startedAt: w?.startedAt,
                 buildETA: nil, isLive: w != nil,
+                port: nil, packageManager: project.packageManager.rawValue,
                 onToggle: { [weak self] in (w?.isRunning == true) ? self?.stopWorker(project) : self?.startWorker(project) },
                 onClose: { [weak self] in self?.closeWorker(id: project.id) }))
         }
@@ -72,6 +77,7 @@ extension AppState {
                 title: "Build", icon: "hammer.fill", tabID: "b:\(project.id)",
                 status: buildStatus(b), logLines: b?.logLines ?? [], startedAt: b?.startedAt,
                 buildETA: lastBuildSeconds[project.id], isLive: b != nil,
+                port: nil, packageManager: project.packageManager.rawValue,
                 onToggle: { [weak self] in (b?.isRunning == true) ? b?.stop() : self?.runBuild(project) },
                 onClose: { [weak self] in self?.closeBuild(id: project.id) }))
         }
@@ -98,6 +104,7 @@ extension AppState {
             status: sessionStatus(session, running: running),
             logLines: session?.logLines ?? [], startedAt: session?.startedAt,
             buildETA: nil, isLive: session != nil,
+            port: session?.effectivePort, packageManager: project.packageManager.rawValue,
             onToggle: { toggle(active) }, onClose: close)
     }
 

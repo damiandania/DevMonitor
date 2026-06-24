@@ -5,19 +5,36 @@ import SwiftUI
 /// left, a progress bar in the middle, and the ETA (the last build's duration) on the right.
 struct RunTimerBar: View {
     enum Mode {
-        case uptime(since: Date)                            // dev / worker running
-        case build(since: Date, estimate: TimeInterval?)    // build running; estimate = last duration
+        case uptime(since: Date, port: Int?, packageManager: String)   // dev / worker / preview running
+        case build(since: Date, estimate: TimeInterval?)               // build running; estimate = last duration
     }
     let mode: Mode
 
     var body: some View {
         switch mode {
-        case .uptime(let since):
-            HStack(spacing: 6) {
-                Image(systemName: "clock").font(.caption2)
-                Text("Running for").font(.caption)
-                Text(since, style: .timer).font(.caption.monospacedDigit())
-                Spacer(minLength: 0)
+        case .uptime(let since, let port, let pm):
+            // Three even columns: uptime · port · package manager.
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock").font(.caption2)
+                    Text("Running for").font(.caption)
+                    Text(since, style: .timer).font(.caption.monospacedDigit())
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "network").font(.caption2)
+                    Text(port.map { ":\($0)" } ?? "—").font(.caption.monospacedDigit())
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .help("Port the server is bound to")
+
+                HStack(spacing: 5) {
+                    Image(systemName: "shippingbox").font(.caption2)
+                    Text(pm).font(.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .help("Package manager")
             }
             .foregroundStyle(.secondary)
 
