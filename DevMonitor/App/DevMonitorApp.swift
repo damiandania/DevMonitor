@@ -48,65 +48,71 @@ struct DevMonitorApp: App {
     }
 }
 
-/// The menu-bar icon: the app glyph (template, adapts to the menu bar) with its centre circle tinted
-/// by aggregate server health — red (any failed) ▸ orange (any launching/recycling) ▸ green (all up)
-/// ▸ black (nothing running). Geometry mirrors the source SVG (240×240, circle r≈41 at centre).
+/// The menu-bar icon: the logo's 7-dot constellation, drawn one dot per *live* process — each tinted
+/// by that process's OWN status (running green ▸ starting orange ▸ failed/stopped red). So two
+/// servers, one green and one red, show as two differently-coloured dots instead of a single
+/// aggregate dot that's red whenever anything is red. The first process takes the centre slot; each
+/// further one fills a scattered slot (fixed order, so dots don't flicker); past 7 they're not shown.
+/// Nothing running → one dim centre dot.
 struct MenuBarStatusIcon: View {
     @Environment(AppState.self) private var app
 
     private static let iconSize: CGFloat = 18                 // menu-bar glyph size (points)
-    private static let dotRatio = 2 * 41.197 / 240.0         // circle ÷ viewBox (≈0.343)
+    private static let dotRadiusRatio: CGFloat = 0.115        // dot radius ÷ icon size
 
-    /// Centre-dot colour by aggregate health. Idle uses the icon's own colour (`labelColor`) so the
-    /// dot blends into the body — the icon just looks solid when nothing is running.
-    private var dotColor: NSColor {
-        switch app.serversHealth {
-        case .red:    return .systemRed
-        case .orange: return .systemOrange
-        case .green:  return .systemGreen
-        case .idle:   return .labelColor
-        }
+    /// Dot-slot centres (normalized, SVG top-down y — from `logo.svg`), in a fixed *scattered* order:
+    /// centre, then corners and edges. Index = the Nth live process.
+    private static let slots: [(x: CGFloat, y: CGFloat)] = [
+        (0.500, 0.500),  // centre — the first process
+        (0.830, 0.326),  // top-right
+        (0.170, 0.686),  // bottom-left
+        (0.169, 0.326),  // top-left
+        (0.831, 0.684),  // bottom-right
+        (0.500, 0.171),  // top
+        (0.500, 0.830),  // bottom
+    ]
+
+    /// One colour per live run-control (dev/worker/build/preview, any project), by its own status.
+    /// Stable order, capped at the slot count.
+    private var dotColors: [NSColor] {
+        app.projects.flatMap { app.runControls(for: $0) }
+            .filter(\.isLive)
+            // By launch time → the first/oldest process holds the centre slot and each newer one fills
+            // the next scattered slot (tabID breaks ties so the order stays stable between renders).
+            .sorted { ($0.startedAt ?? .distantPast, $0.tabID) < ($1.startedAt ?? .distantPast, $1.tabID) }
+            .prefix(Self.slots.count)
+            .map { NSColor($0.status.color) }
     }
 
     var body: some View {
-        // A drawing-handler NSImage is THE way to do a menu-bar icon: it sizes correctly (a SwiftUI
-        // vector label renders huge) and AppKit re-runs the handler whenever the status item redraws,
-        // so `labelColor` tracks the menu bar's light/dark appearance with no observer — and no
-        // SwiftUI snapshot loop (that pegged the main thread and hung the app). A new NSImage is built
-        // whenever `serversHealth` changes (the captured dot colour differs).
-        Image(nsImage: Self.icon(dot: dotColor))
+        // A drawing-handler NSImage is THE way to do a menu-bar icon: it sizes correctly and AppKit
+        // re-runs the handler on redraw, so `labelColor` tracks the menu bar's light/dark appearance.
+        // A new NSImage is built whenever the dot colours change (a process starts/stops/changes state).
+        let colors = dotColors
+        return Image(nsImage: Self.icon(dots: colors))
             .renderingMode(.original)
             .accessibilityLabel("Dev Monitor")
-            .accessibilityValue(healthLabel)
+            .accessibilityValue(colors.isEmpty ? "idle"
+                : "\(colors.count) active process\(colors.count == 1 ? "" : "es")")
     }
 
-    /// Spoken aggregate health for the menu-bar item, so VoiceOver conveys what the dot colour shows.
-    private var healthLabel: String {
-        switch app.serversHealth {
-        case .red:    return "attention needed"
-        case .orange: return "starting"
-        case .green:  return "running"
-        case .idle:   return "idle"
-        }
-    }
-
-    private static func icon(dot: NSColor) -> NSImage {
+    /// Draw one filled dot per live process at its scatter slot. With nothing running, a single dim
+    /// centre dot (adapts to the menu bar's light/dark via `labelColor`).
+    private static func icon(dots: [NSColor]) -> NSImage {
         let size = iconSize
-        let body = NSImage(named: "navbar-body")
-        return NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-            // 1) the glyph body, tinted to the menu-bar label colour (adapts light/dark).
-            if let body {
-                body.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-                NSColor.labelColor.set()
-                NSGraphicsContext.current?.compositingOperation = .sourceAtop
-                NSBezierPath(rect: rect).fill()
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let r = size * dotRadiusRatio
+            func draw(_ slot: (x: CGFloat, y: CGFloat), _ color: NSColor) {
+                color.setFill()
+                let cx = slot.x * size
+                let cy = (1 - slot.y) * size   // SVG is top-down; AppKit drawing is bottom-up
+                NSBezierPath(ovalIn: NSRect(x: cx - r, y: cy - r, width: 2 * r, height: 2 * r)).fill()
             }
-            // 2) the centre dot.
-            NSGraphicsContext.current?.compositingOperation = .sourceOver
-            dot.setFill()
-            let d = size * dotRatio
-            NSBezierPath(ovalIn: NSRect(x: rect.midX - d / 2, y: rect.midY - d / 2,
-                                        width: d, height: d)).fill()
+            if dots.isEmpty {
+                draw(slots[0], .labelColor.withAlphaComponent(0.55))
+            } else {
+                for (i, color) in dots.enumerated() where i < slots.count { draw(slots[i], color) }
+            }
             return true
         }
     }
