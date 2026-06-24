@@ -2,7 +2,7 @@ name: release
 
 # Build, (optionally) sign + notarize, and publish the release artifacts when a v* tag is pushed.
 # Signing/notarization run only when the repo secrets are present, so a tag without them still
-# produces (unsigned) artifacts instead of failing the job.
+# produces (unsigned) artifacts instead of failing the job. (Does NOT run on branch pushes.)
 on:
   push:
     tags: ["v*"]
@@ -14,35 +14,36 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    # Secrets are mapped to env here so steps can gate on `env.*` — the `secrets` context is not
+    # allowed in a step `if:`. Each is empty when unset, so signing/notarization skip gracefully.
+    env:
+      DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}                    # "Developer ID Application: … (TEAMID)"
+      DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}            # base64 of the .p12
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      AC_APPLE_ID: ${{ secrets.AC_APPLE_ID }}
+      AC_TEAM_ID: ${{ secrets.AC_TEAM_ID }}
+      AC_PASSWORD: ${{ secrets.AC_PASSWORD }}                      # app-specific password
     steps:
       - uses: actions/checkout@v4
 
       - name: Install xcodegen
         run: brew install xcodegen
 
-      # Import the Developer ID cert into a temporary keychain (only if the secret is set).
+      # Import the Developer ID cert into a temporary keychain (only when the secret is set).
       - name: Import signing certificate
-        if: ${{ secrets.DEVELOPER_ID_P12 != '' }}
-        env:
-          P12: ${{ secrets.DEVELOPER_ID_P12 }}            # base64 of the .p12
-          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        if: env.DEVELOPER_ID_P12 != ''
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           security create-keychain -p actions "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p actions "$KEYCHAIN"
-          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_P12_PASSWORD" \
             -T /usr/bin/codesign
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN"
 
       - name: Package release
-        env:
-          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}        # "Developer ID Application: … (TEAMID)"
-          AC_APPLE_ID: ${{ secrets.AC_APPLE_ID }}
-          AC_TEAM_ID: ${{ secrets.AC_TEAM_ID }}
-          AC_PASSWORD: ${{ secrets.AC_PASSWORD }}           # app-specific password
         run: bash tools/package-release.sh
 
       - name: Publish GitHub Release
