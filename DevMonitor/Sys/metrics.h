@@ -68,4 +68,9 @@ int dm_proc_args(pid_t pid, char *buf, int size);
 /// Used to identify a dev server started outside the app (e.g. "MiddleSpace :3001").
 int dm_proc_listen_port(pid_t pid);
 
+/// Best-effort average CPU / SoC temperature in °C, read from the Apple Silicon thermal sensors via
+/// the IOKit HID event system. Returns -1 when no sensor is readable (e.g. unsupported hardware).
+/// No root or entitlement required.
+double dm_cpu_temperature(void);
+
 #endif /* DM_METRICS_H */

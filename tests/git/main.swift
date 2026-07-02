@@ -1,6 +1,6 @@
 import Foundation
 
-// Tests GitInfo.branch — parsing .git/HEAD (branch ref, detached SHA, non-repo).
+// Tests GitInfo.branch — parsing .git/HEAD (branch ref, detached SHA, non-repo, linked worktree).
 
 var fail = 0
 func chk(_ c: Bool, _ l: String, _ d: String = "") {
@@ -22,6 +22,22 @@ let detached = tmpRepo("dm-git-det", head: "0123456789abcdef0123\n")
 chk(GitInfo.branch(for: detached) == "0123456", "detached HEAD → short SHA", GitInfo.branch(for: detached) ?? "nil")
 
 chk(GitInfo.branch(for: "/no/such/dm-git-xyz") == nil, "non-repo path → nil")
+
+// Linked worktree: `.git` is a FILE ("gitdir: <path>") and HEAD lives in that pointed-at dir.
+func tmpWorktree(_ name: String, head: String) -> String {
+    let gitdir = NSTemporaryDirectory() + name + "-gitdir"
+    let wt = NSTemporaryDirectory() + name + "-wt"
+    for d in [gitdir, wt] { try? FileManager.default.removeItem(atPath: d) }
+    try? FileManager.default.createDirectory(atPath: gitdir, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(atPath: wt, withIntermediateDirectories: true)
+    try? head.write(toFile: gitdir + "/HEAD", atomically: true, encoding: .utf8)
+    try? "gitdir: \(gitdir)\n".write(toFile: wt + "/.git", atomically: true, encoding: .utf8)
+    return wt
+}
+
+let worktree = tmpWorktree("dm-git", head: "ref: refs/heads/feature/login\n")
+chk(GitInfo.branch(for: worktree) == "feature/login", "branch from linked worktree (.git file)",
+    GitInfo.branch(for: worktree) ?? "nil")
 
 print(fail == 0 ? "ALL GIT TESTS PASSED" : "\(fail) GIT TEST(S) FAILED")
 exit(Int32(fail))

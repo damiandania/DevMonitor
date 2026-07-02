@@ -1,15 +1,123 @@
 import Foundation
 
 enum GitInfo {
-    /// Current branch from `.git/HEAD` (or a short SHA if detached). nil if not a git repo.
+    /// One entry of `git worktree list` — a checkout directory pinned to a branch (or detached).
+    struct Worktree: Identifiable, Hashable, Sendable {
+        var path: String
+        var branch: String?      // short branch name; nil when detached
+        var isCurrent: Bool
+        var id: String { path }
+        var name: String { URL(fileURLWithPath: path).lastPathComponent }
+    }
+
+    /// Current branch for a project path. Handles both a normal clone (`.git` is a directory) and a
+    /// linked worktree (`.git` is a file pointing at the real gitdir). nil if not a git repo.
     static func branch(for projectPath: String) -> String? {
-        let headPath = projectPath + "/.git/HEAD"
-        guard let content = try? String(contentsOfFile: headPath, encoding: .utf8) else { return nil }
+        guard let head = headPath(for: projectPath),
+              let content = try? String(contentsOfFile: head, encoding: .utf8) else { return nil }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefix = "ref: refs/heads/"
-        if trimmed.hasPrefix(prefix) {
-            return String(trimmed.dropFirst(prefix.count))
-        }
+        if trimmed.hasPrefix(prefix) { return String(trimmed.dropFirst(prefix.count)) }
         return trimmed.isEmpty ? nil : String(trimmed.prefix(7))  // detached HEAD
+    }
+
+    /// Resolve the path to the `HEAD` file, following the worktree `.git`-file pointer when present.
+    /// A linked worktree's `.git` is a regular file `gitdir: <abs path to .git/worktrees/<name>>`.
+    private static func headPath(for projectPath: String) -> String? {
+        let gitPath = projectPath + "/.git"
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir) else { return nil }
+        if isDir.boolValue { return gitPath + "/HEAD" }
+        guard let pointer = try? String(contentsOfFile: gitPath, encoding: .utf8) else { return nil }
+        let line = pointer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("gitdir:") else { return nil }
+        let dir = String(line.dropFirst("gitdir:".count)).trimmingCharacters(in: .whitespaces)
+        return dir + "/HEAD"
+    }
+
+    /// All worktrees of the repo `projectPath` belongs to, via `git worktree list --porcelain`.
+    /// Empty if not a git repo or git is unavailable. Blocking — call off the main thread.
+    static func worktrees(for projectPath: String) -> [Worktree] {
+        guard let out = run(["worktree", "list", "--porcelain"], cwd: projectPath) else { return [] }
+        var result: [Worktree] = []
+        var path: String?
+        var branch: String?
+        var detached = false
+        func flush() {
+            guard let p = path else { return }
+            result.append(Worktree(path: p, branch: detached ? nil : branch, isCurrent: sameDir(p, projectPath)))
+            path = nil; branch = nil; detached = false
+        }
+        for raw in out.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("worktree ") { flush(); path = String(line.dropFirst("worktree ".count)) }
+            else if line.hasPrefix("branch ") {
+                let ref = String(line.dropFirst("branch ".count))   // e.g. refs/heads/main
+                branch = ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : ref
+            }
+            else if line == "detached" { detached = true }
+            else if line.isEmpty { flush() }
+        }
+        flush()
+        return result
+    }
+
+    /// Create a new worktree. `branch` is checked out, or created from HEAD with `-b` when
+    /// `createBranch`. Returns nil on success, or git's stderr message on failure. Blocking — call
+    /// off the main thread.
+    @discardableResult
+    static func addWorktree(repoPath: String, at newPath: String, branch: String, createBranch: Bool) -> String? {
+        let args = ["worktree", "add"] + (createBranch ? ["-b", branch, newPath] : [newPath, branch])
+        let r = runResult(args, cwd: repoPath)
+        if r.status == 0 { return nil }
+        return r.stderr.isEmpty ? "git exited with status \(r.status)" : r.stderr
+    }
+
+    /// Local branch names (most-recently-committed first) as `git switch` targets. Blocking — call
+    /// off the main thread.
+    static func localBranches(for projectPath: String) -> [String] {
+        guard let out = run(["for-each-ref", "--format=%(refname:short)", "--sort=-committerdate", "refs/heads"],
+                            cwd: projectPath) else { return [] }
+        return out.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// Switch the working tree to `branch` (`git switch`). Returns nil on success, or git's stderr
+    /// message on failure (e.g. uncommitted changes, or the branch is already checked out in another
+    /// worktree). Blocking — call off the main thread.
+    @discardableResult
+    static func switchBranch(repoPath: String, to branch: String) -> String? {
+        let r = runResult(["switch", branch], cwd: repoPath)
+        if r.status == 0 { return nil }
+        return r.stderr.isEmpty ? "git exited with status \(r.status)" : r.stderr
+    }
+
+    // MARK: - Process plumbing
+
+    private static func sameDir(_ a: String, _ b: String) -> Bool {
+        URL(fileURLWithPath: a).standardizedFileURL.path == URL(fileURLWithPath: b).standardizedFileURL.path
+    }
+
+    private static func run(_ args: [String], cwd: String) -> String? {
+        let r = runResult(args, cwd: cwd)
+        return r.status == 0 ? r.stdout : nil
+    }
+
+    /// Run `git -C <cwd> <args>` and capture status/stdout/stderr. Outputs here are tiny (worktree
+    /// listing/creation), so reading each pipe to EOF before `waitUntilExit` is safe.
+    private static func runResult(_ args: [String], cwd: String) -> (status: Int32, stdout: String, stderr: String) {
+        let git = "/usr/bin/git"
+        guard FileManager.default.isExecutableFile(atPath: git) else { return (127, "", "git not found at \(git)") }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: git)
+        proc.arguments = ["-C", cwd] + args
+        let out = Pipe(); let err = Pipe()
+        proc.standardOutput = out; proc.standardError = err
+        do { try proc.run() } catch { return (127, "", "\(error)") }
+        let oData = out.fileHandleForReading.readDataToEndOfFile()
+        let eData = err.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return (proc.terminationStatus,
+                String(data: oData, encoding: .utf8) ?? "",
+                String(data: eData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
     }
 }

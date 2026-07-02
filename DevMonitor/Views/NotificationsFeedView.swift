@@ -5,6 +5,7 @@ import SwiftUI
 /// related project (or the pressure tab for machine-wide events).
 struct NotificationsFeedView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
         if !app.recentNotifications.isEmpty {
@@ -18,7 +19,9 @@ struct NotificationsFeedView: View {
                             Text(n.title).lineLimit(1)
                             Spacer(minLength: 8)
                             Text(n.date, format: .relative(presentation: .numeric))
-                                .foregroundStyle(.secondary).lineLimit(1)
+                                .font(.caption)
+                                .foregroundStyle(controlActiveState == .inactive ? .quaternary : .tertiary)
+                                .lineLimit(1)
                         }
                         .contentShape(Rectangle())
                     }

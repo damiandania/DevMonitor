@@ -136,13 +136,14 @@ struct AppSettings: Codable, Sendable, Equatable {
         .init(id: "claude-opus-4-8", label: "Opus 4.8 — deep"),
     ]
 
-    /// Activity bars: CPU/Memory/Swap on by default; the rest are optional.
-    static let defaultBars = ["cpu", "memory", "swap"]
+    /// Activity bars: CPU/Memory/Swap/Temperature on by default; the rest are optional.
+    static let defaultBars = ["cpu", "memory", "swap", "temp"]
     struct Bar: Identifiable, Sendable { let id: String; let label: String }
     static let allBars: [Bar] = [
         .init(id: "cpu", label: "CPU"),
         .init(id: "memory", label: "Memory"),
         .init(id: "swap", label: "Swap"),
+        .init(id: "temp", label: "Temperature"),
         .init(id: "load", label: "Load average"),
         .init(id: "devcpu", label: "Dev server CPU"),
         .init(id: "devmem", label: "Dev server memory"),

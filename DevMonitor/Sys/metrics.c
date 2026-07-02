@@ -12,6 +12,84 @@
 #include <netinet/in.h>
 #include <netinet/tcp_fsm.h>
 #include <arpa/inet.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+// --- CPU temperature via the private IOKit HID event-system API (Apple Silicon thermal sensors).
+// These symbols live in IOKit.framework but are absent from the public SDK headers, so we
+// forward-declare them here. IOKit is pulled in by `import IOKit` on the Swift side (autolink).
+// Reading temperature sensors needs no root and no entitlement.
+typedef struct __DMIOHIDEvent *DMIOHIDEventRef;
+typedef struct __DMIOHIDServiceClient *DMIOHIDServiceClientRef;
+typedef struct __DMIOHIDEventSystemClient *DMIOHIDEventSystemClientRef;
+
+extern DMIOHIDEventSystemClientRef IOHIDEventSystemClientCreate(CFAllocatorRef allocator);
+extern int       IOHIDEventSystemClientSetMatching(DMIOHIDEventSystemClientRef client, CFDictionaryRef match);
+extern CFArrayRef IOHIDEventSystemClientCopyServices(DMIOHIDEventSystemClientRef client);
+extern CFTypeRef  IOHIDServiceClientCopyProperty(DMIOHIDServiceClientRef service, CFStringRef key);
+extern DMIOHIDEventRef IOHIDServiceClientCopyEvent(DMIOHIDServiceClientRef service, int64_t type,
+                                                   int32_t options, int64_t timestamp);
+extern double     IOHIDEventGetFloatValue(DMIOHIDEventRef event, int32_t field);
+
+#define DM_HID_TEMPERATURE_TYPE  15                          // kIOHIDEventTypeTemperature
+#define DM_HID_TEMPERATURE_FIELD (DM_HID_TEMPERATURE_TYPE << 16)  // IOHIDEventFieldBase(type)
+
+// Heuristic: does this sensor's product name look like a CPU/SoC sensor (vs battery, NAND, …)?
+static int dm_name_is_cpu(const char *n) {
+    return strstr(n, "CPU")  || strstr(n, "SOC")  || strstr(n, "PMGR") ||
+           strstr(n, "eACC") || strstr(n, "pACC");
+}
+
+double dm_cpu_temperature(void) {
+    static DMIOHIDEventSystemClientRef client = NULL;
+    if (client == NULL) {
+        client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+        if (client == NULL) return -1;
+        int page = 0xff00;   // kHIDPage_AppleVendor
+        int usage = 5;       // kHIDUsage_AppleVendor_TemperatureSensor
+        CFNumberRef pageNum  = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &page);
+        CFNumberRef usageNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &usage);
+        const void *keys[] = { CFSTR("PrimaryUsagePage"), CFSTR("PrimaryUsage") };
+        const void *vals[] = { pageNum, usageNum };
+        CFDictionaryRef match = CFDictionaryCreate(kCFAllocatorDefault, keys, vals, 2,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        IOHIDEventSystemClientSetMatching(client, match);
+        CFRelease(match); CFRelease(pageNum); CFRelease(usageNum);
+    }
+
+    CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
+    if (services == NULL) return -1;
+
+    CFIndex n = CFArrayGetCount(services);
+    double cpuSum = 0, allSum = 0;
+    int cpuCount = 0, allCount = 0;
+
+    for (CFIndex i = 0; i < n; i++) {
+        DMIOHIDServiceClientRef svc = (DMIOHIDServiceClientRef)CFArrayGetValueAtIndex(services, i);
+        if (svc == NULL) continue;
+
+        DMIOHIDEventRef ev = IOHIDServiceClientCopyEvent(svc, DM_HID_TEMPERATURE_TYPE, 0, 0);
+        if (ev == NULL) continue;
+        double t = IOHIDEventGetFloatValue(ev, DM_HID_TEMPERATURE_FIELD);
+        CFRelease(ev);
+        if (!(t > 0 && t < 150)) continue;   // ignore implausible readings
+
+        allSum += t; allCount++;
+
+        CFStringRef name = (CFStringRef)IOHIDServiceClientCopyProperty(svc, CFSTR("Product"));
+        if (name) {
+            char buf[128];
+            if (CFStringGetCString(name, buf, sizeof(buf), kCFStringEncodingUTF8) && dm_name_is_cpu(buf)) {
+                cpuSum += t; cpuCount++;
+            }
+            CFRelease(name);
+        }
+    }
+    CFRelease(services);
+
+    if (cpuCount > 0) return cpuSum / cpuCount;   // average of the CPU/SoC sensors
+    if (allCount > 0) return allSum / allCount;   // fallback: average of every thermal sensor
+    return -1;
+}
 
 // rusage CPU times are in mach absolute-time units; this scales them to ns.
 // On Intel the timebase is 1:1 (no-op); on Apple Silicon it is ~125/3.

@@ -21,7 +21,7 @@ struct DoctorSheet: View {
             switch self {
             case .heavy: return "gauge.with.dots.needle.67percent"
             case .devMonitor: return "stethoscope"
-            case .memory: return "memorychip"
+            case .memory: return "memorychip.fill"
             }
         }
     }

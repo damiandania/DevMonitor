@@ -31,7 +31,7 @@ struct ActivityView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("Activity", systemImage: "cpu").font(.headline)
+            Label("Activity", systemImage: "cpu.fill").font(.headline)
             Spacer()
             if expanded {
                 Toggle(isOn: $percentOfMachine) {
@@ -85,10 +85,10 @@ struct ActivityView: View {
             switch id {
             case "cpu":
                 return Meter(id: id, title: "CPU", percent: s.systemCPU,
-                             detail: "\(Int(s.systemCPU))%", color: .blue, icon: "cpu")
+                             detail: "\(Int(s.systemCPU))%", color: .blue, icon: "cpu.fill")
             case "memory":
                 return Meter(id: id, title: "Memory", percent: s.systemMemPercent,
-                             detail: ratio(s.systemMemUsed, s.totalMem), color: .indigo, icon: "memorychip")
+                             detail: ratio(s.systemMemUsed, s.totalMem), color: .indigo, icon: "memorychip.fill")
             case "swap":
                 return Meter(id: id, title: "Swap", percent: s.systemSwapPercent,
                              detail: s.systemSwapTotal > 0 ? ratio(s.systemSwapUsed, s.systemSwapTotal) : "off",
@@ -98,10 +98,16 @@ struct ActivityView: View {
                              detail: String(format: "%.2f", s.loadAverage), color: .teal, icon: "speedometer")
             case "devcpu":
                 return Meter(id: id, title: "Dev CPU", percent: min(100, s.devTreeCPU / Double(s.coreCount)),
-                             detail: "\(Int(s.devTreeCPU))%", color: .green, icon: "server.rack")
+                             detail: "\(Int(s.devTreeCPU))%", color: .green, icon: "xserve")
             case "devmem":
                 return Meter(id: id, title: "Dev RAM", percent: s.totalMem > 0 ? s.devTreeMem / s.totalMem * 100 : 0,
-                             detail: String(format: "%.0f MB", s.devTreeMem / 1_048_576), color: .green, icon: "server.rack")
+                             detail: String(format: "%.0f MB", s.devTreeMem / 1_048_576), color: .green, icon: "xserve")
+            case "temp":
+                let t = s.cpuTemperature
+                // Map °C onto the 0–100 bar with 90 °C = full, so 45 °C reads as exactly half.
+                return Meter(id: id, title: "Temp", percent: t > 0 ? min(100, t / 90 * 100) : 0,
+                             detail: t > 0 ? "\(Int(t.rounded()))°C" : "—",
+                             color: Self.tempColor(t), icon: "thermometer")
             default:
                 return nil
             }
@@ -130,9 +136,21 @@ struct ActivityView: View {
         case "load":   desc = "1-minute load average"
         case "devcpu": desc = "CPU used by the dev-server process tree"
         case "devmem": desc = "Memory used by the dev-server process tree"
+        case "temp":   desc = "Average CPU / SoC temperature"
         default:       desc = m.title
         }
         return "\(desc) — \(m.detail)"
+    }
+
+    /// Temperature tile colour: green cool → red hot; gray when no sensor is readable (t < 0).
+    private static func tempColor(_ t: Double) -> Color {
+        switch t {
+        case ..<0:  return .gray
+        case ..<60: return .green
+        case ..<80: return .yellow
+        case ..<90: return .orange
+        default:    return .red
+        }
     }
 }
 

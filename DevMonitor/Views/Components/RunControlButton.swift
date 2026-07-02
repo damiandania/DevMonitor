@@ -61,6 +61,8 @@ struct RunControlButton: View {
                 stateLabel
             }
             .font(.callout)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)   // never wrap "Preview" → "Pre-view"
             // Blink just the text (not the whole pill) while launching/building.
             .pulsing(active: status.isInProgress)
         }

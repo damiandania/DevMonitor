@@ -317,7 +317,7 @@ private struct ProjectSettings: View {
 
     private var memoryRow: some View {
         let auto = Binding(get: { live.memoryAuto }, set: { app.setMemoryAuto($0, for: project.id) })
-        return row(icon: "memorychip", name: "Memory", auto: auto) {
+        return row(icon: "memorychip.fill", name: "Memory", auto: auto) {
             Text("\(app.effectiveMemoryGB(for: live)) GB").foregroundStyle(.secondary)
         } manual: {
             Picker("", selection: Binding(get: { live.memoryGB },

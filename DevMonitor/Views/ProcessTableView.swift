@@ -169,10 +169,10 @@ private struct ProcessRowView: View {
 
     @ViewBuilder private var icon: some View {
         if row.isDevServer {
-            Image(systemName: "server.rack").foregroundStyle(.tint)
+            Image(systemName: "xserve").foregroundStyle(.tint)
         } else if row.isExternalDev {
             // Same glyph as a managed server, but purple = running outside the app.
-            Image(systemName: "server.rack").foregroundStyle(Color.indigo)
+            Image(systemName: "xserve").foregroundStyle(Color.indigo)
         } else if row.isWorker {
             // A "gears" glyph marks a background worker — distinct from the server's rack and the
             // build's hammer.

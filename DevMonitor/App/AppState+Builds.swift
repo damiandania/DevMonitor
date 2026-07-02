@@ -114,7 +114,7 @@ extension AppState {
             }
             let code = build.result ?? -1
             // Remember a successful build's duration as the ETA for the next build's progress bar.
-            if code == 0, let d = build.duration { lastBuildSeconds[project.id] = d }
+            if code == 0, let d = build.duration { setLastBuildSeconds(d, for: project.id) }
             let isAuto = projects.first(where: { $0.id == project.id })?.buildMemoryAuto ?? false
             guard code != 0, isAuto,
                   HeapScaling.looksLikeOOM(logLines: build.logLines, exitCode: code),

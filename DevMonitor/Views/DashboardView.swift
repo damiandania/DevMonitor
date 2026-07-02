@@ -15,7 +15,7 @@ struct DashboardView: View {
                 ProjectIconView(project: project, size: 30)
                 Text(project.name).font(.title2.bold()).lineLimit(1)
                     .help(project.path)
-                if let branch = GitInfo.branch(for: project.path) { branchPill(branch) }
+                BranchWorktreeMenu(project: project)
                 Spacer()
             }
             Divider()
@@ -29,19 +29,6 @@ struct DashboardView: View {
             }
         }
         .dmCard()
-    }
-
-    @ViewBuilder private func branchPill(_ branch: String) -> some View {
-        HStack(spacing: 4) {
-            Image("github").resizable().renderingMode(.template)
-                .aspectRatio(contentMode: .fit).frame(width: 11, height: 11)
-            Text(branch)
-        }
-        .font(.caption.weight(.medium))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 7).padding(.vertical, 2)
-        .background(.quaternary, in: Capsule())
-        .help("Current Git branch: \(branch)")
     }
 }
 

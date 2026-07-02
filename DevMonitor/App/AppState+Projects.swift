@@ -33,6 +33,33 @@ extension AppState {
         return project
     }
 
+    /// Add every project found under `root`: the folder itself when it's a project, otherwise a
+    /// bounded scan of its subfolders (skipping dependency/output dirs, and never descending INTO a
+    /// folder already identified as a project). De-dupes via `addProject`; selects the first found.
+    /// Returns the projects added or re-focused. Lets the user drop a whole parent folder (e.g. `~/Dev`)
+    /// and pick up all its projects at once.
+    @discardableResult
+    func addProjects(under root: String, maxDepth: Int = 3) -> [Project] {
+        let fm = FileManager.default
+        let skip: Set<String> = ["node_modules", "dist", "build", ".next", ".nuxt", ".output",
+                                 "vendor", "target", "Pods", ".svelte-kit", "coverage", ".turbo", ".git"]
+        var found: [String] = []
+        func scan(_ dir: String, _ depth: Int) {
+            if Detector.isProject(path: dir) { found.append(dir); return }  // a project — don't go inside it
+            guard depth < maxDepth, let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
+            for name in entries.sorted() where !name.hasPrefix(".") && !skip.contains(name) {
+                let child = dir + "/" + name
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: child, isDirectory: &isDir), isDir.boolValue else { continue }
+                scan(child, depth + 1)
+            }
+        }
+        scan(root, 0)
+        let added = found.compactMap { addProject(path: $0) }
+        if let first = added.first { selectedProjectID = first.id }
+        return added
+    }
+
     /// Backfill / refresh each project's `workerCommand` and `previewCommand` from its package.json on
     /// launch — so a project saved before those existed gains them when the script is present, and
     /// they stay in sync if scripts are later added or removed. Persists only on an actual change.
@@ -82,6 +109,10 @@ extension AppState {
 
     /// Persist the build heap level learned by the OOM autoscaler (AUTO mode).
     func setBuildAutoHeapGB(_ gb: Int, for id: Project.ID) { mutate(id) { $0.buildAutoHeapGB = gb } }
+
+    /// Persist the last successful build's wall-clock duration — the ETA for the next build's
+    /// progress bar. Survives relaunch/reinstall (it rides along in projects.json).
+    func setLastBuildSeconds(_ seconds: TimeInterval, for id: Project.ID) { mutate(id) { $0.lastBuildSeconds = seconds } }
 
     /// Manually override the package manager → regenerate the dev/build commands for it.
     func setPackageManager(_ pm: PackageManager, for id: Project.ID) {

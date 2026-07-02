@@ -40,7 +40,7 @@ enum Framework: String, Codable, Sendable, CaseIterable {
     var symbolName: String {
         switch self {
         case .nuxt, .next, .astro, .sveltekit, .remix, .solid, .angular, .qwik, .vite: return "globe"
-        case .express, .node: return "server.rack"
+        case .express, .node: return "xserve"
         case .unknown: return "questionmark.circle"
         }
     }
@@ -88,6 +88,11 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     /// Build heap (GB) used when `buildMemoryAuto` is on: the level last learned by the build OOM
     /// autoscaler — starts at 4, climbs 4→6→8 on OOM, persisted.
     var buildAutoHeapGB: Int
+    /// Wall-clock seconds the last successful build took — the ETA for the next build's progress bar.
+    /// Learned and persisted (like `autoHeapGB`), so the bar shows an estimate immediately after a
+    /// relaunch or reinstall instead of running blind until the session's first build finishes. `nil`
+    /// until the first successful build.
+    var lastBuildSeconds: TimeInterval?
 
     init(
         id: UUID = UUID(),
@@ -107,7 +112,8 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         autoHeapGB: Int = HeapScaling.firstGB,
         buildMemoryGB: Int = 4,
         buildMemoryAuto: Bool = true,
-        buildAutoHeapGB: Int = HeapScaling.firstGB
+        buildAutoHeapGB: Int = HeapScaling.firstGB,
+        lastBuildSeconds: TimeInterval? = nil
     ) {
         self.id = id
         self.name = name
@@ -127,6 +133,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.buildMemoryGB = buildMemoryGB
         self.buildMemoryAuto = buildMemoryAuto
         self.buildAutoHeapGB = buildAutoHeapGB
+        self.lastBuildSeconds = lastBuildSeconds
     }
 
     // Custom decoding so projects.json written before these fields still loads. New build-heap
@@ -135,7 +142,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, path, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
         case memoryGB, memoryAuto, port, healthPath, packageManagerAuto
-        case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB
+        case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB, lastBuildSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -160,6 +167,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         buildMemoryGB = try c.decodeIfPresent(Int.self, forKey: .buildMemoryGB) ?? memoryGB
         buildMemoryAuto = try c.decodeIfPresent(Bool.self, forKey: .buildMemoryAuto) ?? memoryAuto
         buildAutoHeapGB = try c.decodeIfPresent(Int.self, forKey: .buildAutoHeapGB) ?? HeapScaling.firstGB
+        lastBuildSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .lastBuildSeconds)
     }
 }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import IOKit   // links IOKit.framework (autolink) so metrics.c's temperature-sensor read resolves
 
 /// One row in the system process table.
 struct ProcessRow: Identifiable, Sendable {
@@ -28,6 +29,7 @@ final class SystemSampler {
     private(set) var systemSwapTotal: Double = 0  // bytes
     var systemSwapPercent: Double { systemSwapTotal > 0 ? systemSwapUsed / systemSwapTotal * 100 : 0 }
     private(set) var loadAverage: Double = 0      // 1-minute load average
+    private(set) var cpuTemperature: Double = -1  // °C, or -1 when no thermal sensor is readable
     /// The managed dev-server tree's aggregated CPU% (per-core) and memory, for optional bars.
     var devTreeCPU: Double { processes.first { $0.isDevServer }?.cpuPerCore ?? 0 }
     var devTreeMem: Double { processes.first { $0.isDevServer }?.memBytes ?? 0 }
@@ -94,6 +96,7 @@ final class SystemSampler {
             systemSwapTotal = Double(sysSwap.total)
         }
         loadAverage = dm_load_avg()
+        cpuTemperature = dm_cpu_temperature()
 
         let now = DispatchTime.now().uptimeNanoseconds
         var pids = [pid_t](repeating: 0, count: 8192)

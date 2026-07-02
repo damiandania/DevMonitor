@@ -15,10 +15,6 @@ final class AppState {
     var builds: [Project.ID: BuildRunner] = [:]
     /// One long-running background worker per project, keyed by project id.
     var workers: [Project.ID: WorkerRunner] = [:]
-    /// Wall-clock seconds the last successful build took, per project — the ETA for the next build's
-    /// progress bar. In-memory (resets on relaunch; the bar just runs without an ETA until the first
-    /// build of the session finishes).
-    var lastBuildSeconds: [Project.ID: TimeInterval] = [:]
     /// One production-build preview server per project — a DevSession running the project's preview
     /// command, so it reuses all the server supervision (port, health, logs).
     var previews: [Project.ID: DevSession] = [:]

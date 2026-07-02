@@ -51,7 +51,7 @@ extension AppState {
         var out: [RunControl] = []
 
         // Dev server — always present.
-        out.append(serverControl(kind: "dev", rank: 0, title: "Dev", icon: "server.rack",
+        out.append(serverControl(kind: "dev", rank: 0, title: "Dev", icon: "xserve",
             prefix: "s", running: "Running", session: sessions[project.id], project: project,
             toggle: { [weak self] active in active ? self?.stop(project) : self?.launch(project) },
             close: { [weak self] in self?.closeServer(id: project.id) }))
@@ -76,7 +76,7 @@ extension AppState {
                 kind: "build", rank: 2, projectID: project.id, projectName: project.name,
                 title: "Build", icon: "hammer.fill", tabID: "b:\(project.id)",
                 status: buildStatus(b), logLines: b?.logLines ?? [], startedAt: b?.startedAt,
-                buildETA: lastBuildSeconds[project.id], isLive: b != nil,
+                buildETA: project.lastBuildSeconds, isLive: b != nil,
                 port: nil, packageManager: project.packageManager.rawValue,
                 onToggle: { [weak self] in (b?.isRunning == true) ? b?.stop() : self?.runBuild(project) },
                 onClose: { [weak self] in self?.closeBuild(id: project.id) }))
