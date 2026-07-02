@@ -56,8 +56,15 @@ double dm_cpu_temperature(void) {
         CFRelease(match); CFRelease(pageNum); CFRelease(usageNum);
     }
 
-    CFArrayRef services = IOHIDEventSystemClientCopyServices(client);
-    if (services == NULL) return -1;
+    // The matching sensor-service list doesn't change between reads, so copy it once and reuse it
+    // (this is called every sampling tick; re-copying the array each time was the dominant cost).
+    // If a read ever yields no valid sensor, the list is dropped and re-copied on the next call —
+    // covering the rare case where the services went stale (e.g. across a sleep/wake).
+    static CFArrayRef services = NULL;
+    if (services == NULL) {
+        services = IOHIDEventSystemClientCopyServices(client);
+        if (services == NULL) return -1;
+    }
 
     CFIndex n = CFArrayGetCount(services);
     double cpuSum = 0, allSum = 0;
@@ -84,7 +91,11 @@ double dm_cpu_temperature(void) {
             CFRelease(name);
         }
     }
-    CFRelease(services);
+    if (allCount == 0) {
+        // No sensor answered — the cached list may be stale; refresh it on the next call.
+        CFRelease(services);
+        services = NULL;
+    }
 
     if (cpuCount > 0) return cpuSum / cpuCount;   // average of the CPU/SoC sensors
     if (allCount > 0) return allSum / allCount;   // fallback: average of every thermal sensor

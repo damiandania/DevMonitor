@@ -81,10 +81,14 @@ final class BuildRunner {
     }
 
     private func ingest(_ data: Data) {
-        for line in lineBuffer.ingest(data) {
-            if LogNoise.isShellNoise(line) { continue }
-            logLines.append(line)
-            if logLines.count > maxLogLines { logLines.removeFirst(logLines.count - maxLogLines) }
+        // One observable mutation per chunk (not per line) — `logLines` is observed, so per-line
+        // appends re-render every observing view once per line. Trim with slack, in chunks:
+        // a per-line removeFirst is O(count) each time once the cap is reached.
+        let fresh = lineBuffer.ingest(data).filter { !LogNoise.isShellNoise($0) }
+        guard !fresh.isEmpty else { return }
+        logLines.append(contentsOf: fresh)
+        if logLines.count > maxLogLines + 200 {
+            logLines.removeFirst(logLines.count - maxLogLines)
         }
     }
 

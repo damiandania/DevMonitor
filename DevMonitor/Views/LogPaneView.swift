@@ -80,9 +80,8 @@ struct LogPaneView: View {
                 .background(bgColor)
                 .onChange(of: shown.count) { _, count in
                     guard count > 0 else { return }
-                    withAnimation(.linear(duration: 0.1)) {
-                        proxy.scrollTo(count - 1, anchor: .bottom)
-                    }
+                    // No animation: appends arrive in bursts and queued scroll animations pile up.
+                    proxy.scrollTo(count - 1, anchor: .bottom)
                 }
             }
 

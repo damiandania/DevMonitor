@@ -75,21 +75,21 @@ final class AppState {
         selectedProjectID = projects.first?.id
         ipcServer.start(app: self)
         systemSampler.start()
+        // The callbacks hand the sampler LEADER pids only — tree membership is resolved during the
+        // sampler's background pass (one sid-grouping sweep for everything), never on the main actor.
         systemSampler.devServerInfo = { [weak self] in
             guard let self else { return [] }
             // One entry PER supervised server — dev servers AND production-build previews (both are
             // DevSessions) — each its own table row. id = -pid so the synthetic row never collides
             // with a real pid and skips enrichment.
-            var rows: [(id: Int32, pids: Set<Int32>, label: String)] = []
+            var rows: [(id: Int32, leader: pid_t, label: String)] = []
             for s in self.sessions.values where s.pid > 0 {
-                let pids = Set(ProcessTree.sessionMembers(of: s.pid))
-                let label = s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")
-                if !pids.isEmpty { rows.append((id: -s.pid, pids: pids, label: label)) }
+                rows.append((id: -s.pid, leader: s.pid,
+                             label: s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")))
             }
             for p in self.previews.values where p.pid > 0 {
-                let pids = Set(ProcessTree.sessionMembers(of: p.pid))
-                let label = p.project.name + " · preview" + (p.effectivePort.map { " :\($0)" } ?? "")
-                if !pids.isEmpty { rows.append((id: -p.pid, pids: pids, label: label)) }
+                rows.append((id: -p.pid, leader: p.pid,
+                             label: p.project.name + " · preview" + (p.effectivePort.map { " :\($0)" } ?? "")))
             }
             return rows
         }
@@ -97,11 +97,8 @@ final class AppState {
             guard let self else { return nil }
             let live = self.builds.values.filter { $0.isRunning && $0.pid > 0 }
             guard !live.isEmpty else { return nil }
-            var pids = Set<Int32>()
-            for b in live { pids.formUnion(ProcessTree.sessionMembers(of: b.pid)) }
-            guard !pids.isEmpty else { return nil }
             let label = live.count == 1 ? "Build · \(live.first?.project.name ?? "build")" : "\(live.count) builds"
-            return (pids, label)
+            return (leaders: live.map(\.pid), label: label)
         }
         systemSampler.workerInfo = { [weak self] in
             guard let self else { return [] }
@@ -109,11 +106,7 @@ final class AppState {
             // id = -pid so the synthetic row never collides with a real pid and skips enrichment.
             return self.workers.values
                 .filter { $0.isRunning && $0.pid > 0 }
-                .map { w -> (id: Int32, pids: Set<Int32>, label: String) in
-                    (id: -w.pid, pids: Set(ProcessTree.sessionMembers(of: w.pid)),
-                     label: "\(w.project.name) · worker")
-                }
-                .filter { !$0.pids.isEmpty }
+                .map { (id: -$0.pid, leader: $0.pid, label: "\($0.project.name) · worker") }
         }
         pressure = PressureManager(app: self)
         systemSampler.onStuck = { [weak self] in self?.pressure.evaluate() }

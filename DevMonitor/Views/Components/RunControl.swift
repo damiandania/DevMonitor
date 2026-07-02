@@ -17,7 +17,11 @@ struct RunControl: Identifiable {
     /// Terminal-selection id, e.g. "s:<projectID>" / "w:" / "b:" / "p:".
     let tabID: String
     let status: RunStatus
-    let logLines: [String]
+    /// Lazy accessor for the runner's log. A closure, NOT the array: `logLines` is appended to on
+    /// every output line, so embedding the array here would make every status surface (menu-bar
+    /// icon, tab strip, dashboard pills) observe it and re-render per line during chatty output.
+    /// Only the pane that actually renders the log should call this.
+    let logLines: () -> [String]
     let startedAt: Date?
     /// For the build control: seconds the last successful build took (the progress-bar ETA); nil
     /// for the others, which use a plain uptime counter.
@@ -62,7 +66,7 @@ extension AppState {
             out.append(RunControl(
                 kind: "worker", rank: 1, projectID: project.id, projectName: project.name,
                 title: "Worker", icon: "gearshape.2.fill", tabID: "w:\(project.id)",
-                status: workerStatus(w), logLines: w?.logLines ?? [], startedAt: w?.startedAt,
+                status: workerStatus(w), logLines: { w?.logLines ?? [] }, startedAt: w?.startedAt,
                 buildETA: nil, isLive: w != nil,
                 port: nil, packageManager: project.packageManager.rawValue,
                 onToggle: { [weak self] in (w?.isRunning == true) ? self?.stopWorker(project) : self?.startWorker(project) },
@@ -75,7 +79,7 @@ extension AppState {
             out.append(RunControl(
                 kind: "build", rank: 2, projectID: project.id, projectName: project.name,
                 title: "Build", icon: "hammer.fill", tabID: "b:\(project.id)",
-                status: buildStatus(b), logLines: b?.logLines ?? [], startedAt: b?.startedAt,
+                status: buildStatus(b), logLines: { b?.logLines ?? [] }, startedAt: b?.startedAt,
                 buildETA: project.lastBuildSeconds, isLive: b != nil,
                 port: nil, packageManager: project.packageManager.rawValue,
                 onToggle: { [weak self] in (b?.isRunning == true) ? b?.stop() : self?.runBuild(project) },
@@ -102,7 +106,7 @@ extension AppState {
             kind: kind, rank: rank, projectID: project.id, projectName: project.name,
             title: title, icon: icon, tabID: "\(prefix):\(project.id)",
             status: sessionStatus(session, running: running),
-            logLines: session?.logLines ?? [], startedAt: session?.startedAt,
+            logLines: { session?.logLines ?? [] }, startedAt: session?.startedAt,
             buildETA: nil, isLive: session != nil,
             port: session?.effectivePort, packageManager: project.packageManager.rawValue,
             onToggle: { toggle(active) }, onClose: close)

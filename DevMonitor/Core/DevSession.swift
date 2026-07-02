@@ -28,6 +28,7 @@ final class DevSession {
     var onHeapEscalated: (@MainActor (Int) -> Void)?
 
     private let maxLogLines = 2000
+    private let trimSlack = 200
     private var lineBuffer = LineBuffer()
     private var process: SpawnedProcess?
     private var graceTask: Task<Void, Never>?
@@ -41,6 +42,11 @@ final class DevSession {
     private let maxHistory = 120
     private var sampleTask: Task<Void, Never>?
     private var tick = 0
+    /// Cached session-tree membership: enumerating it means a getsid() scan over every pid on the
+    /// machine, and the tree churns slowly after launch — so it's refreshed every few ticks
+    /// (`treeRefreshTicks`), not per 1 s sample. Dead pids in between just read as invalid stats.
+    private var treePids: [pid_t] = []
+    private let treeRefreshTicks = 5
     private var prevTreeCPUns: Int64 = 0
     private var prevWall: UInt64 = 0
     private var prevSysTicks: dm_cpu_ticks?
@@ -269,36 +275,48 @@ final class DevSession {
     // MARK: - Output handling
 
     private func ingest(_ data: Data) {
-        for line in lineBuffer.ingest(data) { handle(line: line) }
+        var fresh: [String] = []
+        for line in lineBuffer.ingest(data) {
+            let clean = line.strippedANSI
+            if LogNoise.isShellNoise(clean) { continue }
+            scanPort(clean)
+            fresh.append(line)
+        }
+        append(lines: fresh)
     }
 
-    private func handle(line: String) {
-        let clean = line.strippedANSI
-        if LogNoise.isShellNoise(clean) { return }
-        append(line: line)
-        // Match the port in a URL the server prints, incl. IPv6 hosts in brackets — Vite/Nuxt dev
-        // print "Local: http://localhost:3000/", but a Nitro/node *preview* prints
-        // "Listening on http://[::]:3000", whose bracketed host the simpler pattern missed.
+    /// Match the port in a URL the server prints, incl. IPv6 hosts in brackets — Vite/Nuxt dev
+    /// print "Local: http://localhost:3000/", but a Nitro/node *preview* prints
+    /// "Listening on http://[::]:3000", whose bracketed host the simpler pattern missed.
+    ///
+    /// NOTE: we do NOT flip to .running on the "ready" log line — the server is usually
+    /// still compiling and not accepting HTTP yet. .running is set by the first successful
+    /// health probe (startHealth), which is what prevents the recycle-during-warm-up loop.
+    private func scanPort(_ clean: String) {
         if detectedPort == nil,
            let match = clean.firstMatch(of: /https?:\/\/(?:\[[^\]]*\]|[^\s:\/]+):(\d{2,5})/),
            let port = Int(match.1) {
             detectedPort = port
             lastKnownPort = port
         }
-        // NOTE: we do NOT flip to .running on the "ready" log line — the server is usually
-        // still compiling and not accepting HTTP yet. .running is set by the first successful
-        // health probe (startHealth), which is what prevents the recycle-during-warm-up loop.
     }
 
-    private func append(line: String) {
-        logLines.append(line)
-        if logLines.count > maxLogLines {
+    /// Append a whole chunk's lines as ONE observable mutation and ONE file write — `logLines` is
+    /// observed, so per-line appends would re-render every observing view once per line during
+    /// chatty output. Trimming keeps some slack and cuts in chunks: `removeFirst` is O(count) and
+    /// shifts every kept row's ForEach offset, so doing it per line is quadratic-ish at the cap.
+    private func append(lines: [String]) {
+        guard !lines.isEmpty else { return }
+        logLines.append(contentsOf: lines)
+        if logLines.count > maxLogLines + trimSlack {
             logLines.removeFirst(logLines.count - maxLogLines)
         }
-        if let data = (line.strippedANSI + "\n").data(using: .utf8) {
+        if let data = lines.map({ $0.strippedANSI + "\n" }).joined().data(using: .utf8) {
             logFile?.write(data)
         }
     }
+
+    private func append(line: String) { append(lines: [line]) }
 
     /// Mirrors this project's session log (ANSI-stripped) to its OWN file so it can be followed live
     /// from a terminal (`dev-monitor logs [path]`) and so one project's output never clobbers
@@ -410,6 +428,7 @@ final class DevSession {
         prevWall = 0
         prevSysTicks = nil
         tick = 0
+        treePids.removeAll()
         history.removeAll()
         sampleTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -425,7 +444,10 @@ final class DevSession {
         var treeCPUns: Int64 = 0
         var treeMem: Int64 = 0
         if pid > 0 {
-            for p in ProcessTree.sessionMembers(of: pid) {
+            if treePids.isEmpty || tick % treeRefreshTicks == 0 {
+                treePids = ProcessTree.sessionMembers(of: pid)
+            }
+            for p in treePids {
                 let st = dm_proc_stat_for(p)
                 if st.valid == 1 {
                     treeCPUns += st.cpu_time_ns

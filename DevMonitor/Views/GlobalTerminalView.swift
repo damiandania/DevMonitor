@@ -71,7 +71,7 @@ struct GlobalTerminalView: View {
         case .pressure:
             ScrollView { PressureSuggestionsView().frame(maxWidth: .infinity, alignment: .leading) }
         case .control(let c):
-            LogPaneView(lines: c.logLines,
+            LogPaneView(lines: c.logLines(),
                         footer: c.timerMode.map { AnyView(RunTimerBar(mode: $0)) },
                         terminalTheme: app.settings.terminalTheme)
         }

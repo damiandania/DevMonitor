@@ -3,9 +3,29 @@ import SwiftUI
 /// Minimal ANSI SGR parser: turns a line with ANSI color escapes into a colored
 /// AttributedString, and strips escapes for plain-text matching.
 enum ANSI {
+    /// Parse cache: the log pane re-evaluates its visible rows on every appended batch, so without
+    /// this the same escape sequences are re-parsed over and over. A line's parse never changes, so
+    /// it's keyed by the raw line. Plain lines (no escapes) skip the cache — wrapping them is cheap.
+    // nonisolated(unsafe): NSCache is documented thread-safe; it just predates Sendable.
+    nonisolated(unsafe) private static let cache: NSCache<NSString, ParsedLine> = {
+        let c = NSCache<NSString, ParsedLine>()
+        c.countLimit = 4096   // ~two full panes' worth of lines
+        return c
+    }()
+    private final class ParsedLine {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
     static func attributed(_ input: String) -> AttributedString {
         guard input.contains("\u{1b}[") else { return AttributedString(input) }
+        if let hit = cache.object(forKey: input as NSString) { return hit.value }
+        let parsed = parse(input)
+        cache.setObject(ParsedLine(parsed), forKey: input as NSString)
+        return parsed
+    }
 
+    private static func parse(_ input: String) -> AttributedString {
         var result = AttributedString()
         var color: Color?
         var bold = false

@@ -110,15 +110,23 @@ final class WorkerRunner {
     // MARK: - Output handling
 
     private func ingest(_ data: Data) {
-        for line in lineBuffer.ingest(data) {
-            if LogNoise.isShellNoise(line.strippedANSI) { continue }
-            append(line: line)
-        }
+        // One observable mutation per chunk (not per line) — see BuildRunner.ingest.
+        let fresh = lineBuffer.ingest(data).filter { !LogNoise.isShellNoise($0.strippedANSI) }
+        guard !fresh.isEmpty else { return }
+        logLines.append(contentsOf: fresh)
+        trimLog()
     }
 
     private func append(line: String) {
         logLines.append(line)
-        if logLines.count > maxLogLines { logLines.removeFirst(logLines.count - maxLogLines) }
+        trimLog()
+    }
+
+    /// Trim with slack, in chunks — a per-line removeFirst is O(count) each time at the cap.
+    private func trimLog() {
+        if logLines.count > maxLogLines + 200 {
+            logLines.removeFirst(logLines.count - maxLogLines)
+        }
     }
 
     private func finish(code: Int32) {
