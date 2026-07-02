@@ -45,5 +45,51 @@ print("INFO leader=\(pid) children=\(n): \(Array(kids[0..<max(0, min(n, 8))]))")
 chk("child enumeration finds children", n >= 1, "n=\(n)")
 killpg(pid, SIGKILL); var st: Int32 = 0; waitpid(pid, &st, 0); close(fd)
 
+// 6) CPU temperature — called twice to exercise the cached sensor-service list. Apple Silicon
+// reads a plausible °C; Intel/VMs may have no readable sensor (-1 both times); never crashes.
+let temp1 = dm_cpu_temperature()
+let temp2 = dm_cpu_temperature()
+chk("cpu temperature plausible (cached services)",
+    (temp1 == -1 && temp2 == -1) || (temp1 > 0 && temp1 < 150 && temp2 > 0 && temp2 < 150),
+    "t1=\(temp1) t2=\(temp2)")
+
+// 7) process name / argv for self
+var nameBuf = [CChar](repeating: 0, count: 256)
+let selfName = Int(dm_proc_name(getpid(), &nameBuf, 256)) > 0 ? String(cString: nameBuf) : ""
+chk("proc name for self", selfName.contains("metrics"), "name=\(selfName)")
+var argsBuf = [CChar](repeating: 0, count: 4096)
+let selfArgs = Int(dm_proc_args(getpid(), &argsBuf, 4096)) > 0 ? String(cString: argsBuf) : ""
+chk("proc args for self", selfArgs.contains("metrics"), "args=\(selfArgs.prefix(80))")
+
+// 8) session enumeration contains self
+var sess = [pid_t](repeating: 0, count: 1024)
+let sn = Int(dm_session_pids(getsid(getpid()), &sess, 1024))
+chk("session pids include self", (0..<sn).contains { sess[$0] == getpid() }, "n=\(sn)")
+
+// 9) listen-port detection against a real ephemeral listener in this process
+let sock = socket(AF_INET, SOCK_STREAM, 0)
+var sin = sockaddr_in()
+sin.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+sin.sin_family = sa_family_t(AF_INET)
+sin.sin_port = 0                                  // ephemeral — the kernel picks a free port
+sin.sin_addr.s_addr = inet_addr("127.0.0.1")
+var bindOK = false
+withUnsafePointer(to: &sin) { p in
+    p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bindOK = bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+    }
+}
+_ = listen(sock, 1)
+var bound = sockaddr_in()
+var blen = socklen_t(MemoryLayout<sockaddr_in>.size)
+withUnsafeMutablePointer(to: &bound) { p in
+    p.withMemoryRebound(to: sockaddr.self, capacity: 1) { _ = getsockname(sock, $0, &blen) }
+}
+let boundPort = Int(UInt16(bigEndian: bound.sin_port))
+chk("listener bound", bindOK && boundPort > 0, "port=\(boundPort)")
+chk("listen port detected", Int(dm_proc_listen_port(getpid())) == boundPort,
+    "detected=\(dm_proc_listen_port(getpid())) expected=\(boundPort)")
+close(sock)
+
 print(fail == 0 ? "ALL METRICS TESTS PASSED" : "\(fail) METRICS TEST(S) FAILED")
 exit(fail == 0 ? 0 : 1)

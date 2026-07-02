@@ -152,6 +152,87 @@ func runSessionTests() async -> Int {
     check("logfilter: matches stripped of ANSI", LogFilter.matches("\u{1B}[31mboom\u{1B}[0m", query: "boom"))
     check("logfilter: no match", LogFilter.filter(logLines, query: "zzz").isEmpty)
 
+    // C4: LineBuffer — reassembly of partial lines across chunks, exactly as process output arrives.
+    var lb = LineBuffer()
+    check("linebuffer: holds a partial line", lb.ingest(Data("ab".utf8)).isEmpty)
+    check("linebuffer: completes across chunks", lb.ingest(Data("c\ndef\ng".utf8)) == ["abc", "def"])
+    check("linebuffer: flushes the held tail next", lb.ingest(Data("h\n".utf8)) == ["gh"])
+    check("linebuffer: empty lines preserved", lb.ingest(Data("\n\nx\n".utf8)) == ["", "", "x"])
+    var lbReset = LineBuffer()
+    _ = lbReset.ingest(Data("partial".utf8))
+    lbReset.reset()
+    check("linebuffer: reset drops the partial", lbReset.ingest(Data("done\n".utf8)) == ["done"])
+    var lbBad = LineBuffer()
+    check("linebuffer: invalid UTF-8 chunk dropped", lbBad.ingest(Data([0xFF, 0xFE, 0x0A])).isEmpty)
+
+    // C5: ANSI parsing — content preserved, styles applied, and the parse cache returns stable
+    // results (the second call for the same line is served from the cache).
+    let colored = "\u{1B}[31mred\u{1B}[0m plain \u{1B}[1mbold\u{1B}[22m"
+    let a1 = ANSI.attributed(colored)
+    let a2 = ANSI.attributed(colored)
+    check("ansi: characters preserved", String(a1.characters) == "red plain bold",
+          String(a1.characters))
+    check("ansi: cached result identical", a1 == a2)
+    check("ansi: a run carries the colour", a1.runs.contains { $0.foregroundColor != nil })
+    check("ansi: bold run marked", a1.runs.contains { $0.inlinePresentationIntent == .stronglyEmphasized })
+    check("ansi: plain passthrough", String(ANSI.attributed("hello").characters) == "hello")
+    check("ansi: unterminated escape doesn't crash",
+          String(ANSI.attributed("\u{1B}[31").characters).isEmpty)
+    check("ansi: strippedANSI", "\u{1B}[1;32mok\u{1B}[0m".strippedANSI == "ok")
+
+    // C6: log trim (chunked, with slack) — a 5000-line build stays within maxLogLines(4000)+slack,
+    // drops the OLDEST lines (the "$ command" header is long gone) and keeps the tail intact.
+    let bigBuild = BuildRunner(project: Project(name: "big", path: "/tmp",
+        buildCommand: "sh -c 'seq 1 5000; exit 0'"))
+    bigBuild.start(memoryGB: 2)
+    try? await Task.sleep(for: .seconds(3))
+    check("trim: build finished", bigBuild.result == 0, "result=\(String(describing: bigBuild.result))")
+    check("trim: count within cap+slack",
+          bigBuild.logLines.count >= 4000 && bigBuild.logLines.count <= 4201,
+          "count=\(bigBuild.logLines.count)")
+    check("trim: oldest lines dropped", bigBuild.logLines.first?.hasPrefix("$") == false,
+          "first=\(bigBuild.logLines.first ?? "nil")")
+    check("trim: tail intact", bigBuild.logLines.contains { $0 == "5000" })
+    check("trim: finish line appended", bigBuild.logLines.last?.contains("build finished") == true)
+
+    // C7: dev-session trim — same chunked-slack behaviour on the server log path (cap 2000).
+    let spamSession = DevSession(project: Project(name: "spam", path: "/tmp",
+        devCommand: "sh -c 'seq 1 5000; sleep 30'", memoryGB: 2))
+    spamSession.start(memoryGB: 2)
+    try? await Task.sleep(for: .seconds(3))
+    check("trim: dev log within cap+slack",
+          spamSession.logLines.count >= 2000 && spamSession.logLines.count <= 2200,
+          "count=\(spamSession.logLines.count)")
+    check("trim: dev tail intact", spamSession.logLines.contains { $0 == "5000" })
+    spamSession.stop()
+    try? await Task.sleep(for: .seconds(2.6))
+
+    // C8: worker runner — run, stdin round-trip, deliberate stop (≠ crash), and a crash exit code.
+    let okWorker = WorkerRunner(project: Project(name: "w", path: "/tmp",
+        workerCommand: "sh -c 'echo W_OK; read line; echo GOT_$line; sleep 20'"))
+    okWorker.start(memoryGB: 2)
+    try? await Task.sleep(for: .seconds(1.5))
+    check("worker: running", okWorker.isRunning)
+    check("worker: log captured", okWorker.logLines.contains { $0.contains("W_OK") })
+    okWorker.sendInput("ping")
+    try? await Task.sleep(for: .seconds(1))
+    check("worker: stdin echoed back", okWorker.logLines.contains { $0.contains("GOT_ping") })
+    check("worker: input logged", okWorker.logLines.contains { $0.contains("> ping") })
+    okWorker.stop()
+    try? await Task.sleep(for: .seconds(3))
+    check("worker: stopped", !okWorker.isRunning)
+    check("worker: deliberate stop is not a crash", !okWorker.didCrash)
+    check("worker: 'worker stopped' logged", okWorker.logLines.contains { $0 == "worker stopped" })
+
+    let crashWorker = WorkerRunner(project: Project(name: "wc", path: "/tmp",
+        workerCommand: "sh -c 'echo boom; exit 7'"))
+    crashWorker.start(memoryGB: 2)
+    try? await Task.sleep(for: .seconds(2))
+    check("worker: crash flagged", crashWorker.didCrash)
+    check("worker: crash exit code", crashWorker.lastExitCode == 7,
+          "code=\(String(describing: crashWorker.lastExitCode))")
+    check("worker: crash logged", crashWorker.logLines.contains { $0.contains("worker crashed (code 7)") })
+
     // A4: reapLeftovers matches a project path by boundary, not substring — a project at /p/foo must
     // never reap a sibling server at /p/foobar.
     check("path: exact arg match", DevSession.args("node /p/foo/server.js", referencePath: "/p/foo"))
@@ -167,6 +248,10 @@ func runSessionTests() async -> Int {
         try? await Task.sleep(for: .seconds(1.0))
         let tree = ProcessTree.fullTree(of: proc.pid)
         check("tree: fullTree includes leader + children", tree.count >= 3, "count=\(tree.count)")
+        let members = ProcessTree.sessionMembers(of: proc.pid)
+        check("tree: sessionMembers includes the leader", members.contains(proc.pid), "n=\(members.count)")
+        check("tree: sessionMembers of a dead pid is just itself", ProcessTree.sessionMembers(of: 3_999_999) == [3_999_999])
+        check("tree: sessionMembers of pid ≤ 0 is empty", ProcessTree.sessionMembers(of: 0).isEmpty)
         ProcessSupport.gracefulKillTree(proc.pid)
         try? await Task.sleep(for: .seconds(3.5))   // SIGTERM + 2s grace + SIGKILL + reap
         let aliveAfter = tree.filter { kill($0, 0) == 0 }
