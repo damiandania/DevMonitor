@@ -93,5 +93,22 @@ MainActor.assumeIsolated {
     check(small.load().count >= 2, "events: history spans the rotation boundary")
 }
 
+// --- WebhookNotifier: URL validation + Slack/Discord-compatible payload (pure) ---
+check(WebhookNotifier.isValid("https://hooks.slack.com/services/T/B/X"), "webhook: https URL valid")
+check(WebhookNotifier.isValid("http://localhost:9000/hook"), "webhook: http URL valid")
+check(!WebhookNotifier.isValid(""), "webhook: empty invalid")
+check(!WebhookNotifier.isValid("not a url"), "webhook: junk invalid")
+check(!WebhookNotifier.isValid("ftp://x/y"), "webhook: non-http scheme invalid")
+check(!WebhookNotifier.isValid("https://"), "webhook: no host invalid")
+do {
+    let data = WebhookNotifier.payload(title: "Build failed", body: "MiddleSpace build failed.")
+    let obj = try! JSONSerialization.jsonObject(with: data) as! [String: String]
+    check(obj["text"] == "Build failed — MiddleSpace build failed.", "webhook: Slack `text` = title — body")
+    check(obj["content"] == obj["text"], "webhook: Discord `content` matches `text`")
+    let bare = WebhookNotifier.payload(title: "Swap 70% full", body: "")
+    let bareObj = try! JSONSerialization.jsonObject(with: bare) as! [String: String]
+    check(bareObj["text"] == "Swap 70% full", "webhook: empty body → just the title")
+}
+
 print(fail == 0 ? "ALL NOTIFICATIONS TESTS PASSED" : "SOME NOTIFICATIONS TESTS FAILED")
 exit(Int32(fail))

@@ -31,6 +31,9 @@ struct AppSettings: Codable, Sendable, Equatable {
     var notifyRecovery: Bool
     var notifyBuilds: Bool
     var notifyPressure: Bool
+    /// Optional Slack/Discord/incoming-webhook URL. When set, every notification that passes the
+    /// category policy is also POSTed here. Empty = off.
+    var notifyWebhookURL: String
 
     init(browser: String? = nil,
          editor: String? = nil,
@@ -46,7 +49,8 @@ struct AppSettings: Codable, Sendable, Equatable {
          notifyFailures: Bool = true,
          notifyRecovery: Bool = true,
          notifyBuilds: Bool = true,
-         notifyPressure: Bool = true) {
+         notifyPressure: Bool = true,
+         notifyWebhookURL: String = "") {
         self.browser = browser
         self.editor = editor
         self.analysisModel = analysisModel
@@ -62,12 +66,13 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.notifyRecovery = notifyRecovery
         self.notifyBuilds = notifyBuilds
         self.notifyPressure = notifyPressure
+        self.notifyWebhookURL = notifyWebhookURL
     }
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
         case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, showCharts, theme, terminalTheme, language
-        case notificationsEnabled, notifyFailures, notifyRecovery, notifyBuilds, notifyPressure
+        case notificationsEnabled, notifyFailures, notifyRecovery, notifyBuilds, notifyPressure, notifyWebhookURL
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -86,6 +91,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         notifyRecovery = try c.decodeIfPresent(Bool.self, forKey: .notifyRecovery) ?? true
         notifyBuilds = try c.decodeIfPresent(Bool.self, forKey: .notifyBuilds) ?? true
         notifyPressure = try c.decodeIfPresent(Bool.self, forKey: .notifyPressure) ?? true
+        notifyWebhookURL = try c.decodeIfPresent(String.self, forKey: .notifyWebhookURL) ?? ""
     }
 
     static let defaultModel = "claude-haiku-4-5"

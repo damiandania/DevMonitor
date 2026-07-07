@@ -57,7 +57,8 @@ build_run model    "$ROOT/tests/model/main.swift" "$SRC/Model/Project.swift" "$S
 build_run notifications "$ROOT/tests/notifications/main.swift" \
   "$SRC/Model/NotificationItem.swift" "$SRC/Model/SupervisionEvent.swift" \
   "$SRC/Model/AppSettings.swift" "$SRC/Core/NotificationPolicy.swift" "$SRC/Core/AppLog.swift" \
-  "$SRC/Core/JSONFileStore.swift" "$SRC/Model/PersistedEvent.swift" "$SRC/Core/EventStore.swift"
+  "$SRC/Core/JSONFileStore.swift" "$SRC/Model/PersistedEvent.swift" "$SRC/Core/EventStore.swift" \
+  "$SRC/Core/WebhookNotifier.swift"
 build_run sampler  "$ROOT/tests/sampler/main.swift" "$SRC/Core/SystemSampler.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift" \
   "$SRC/Model/SystemMetricPoint.swift" "$SRC/Core/MetricChartMath.swift" \

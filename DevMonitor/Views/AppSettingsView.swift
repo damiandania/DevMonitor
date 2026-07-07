@@ -197,6 +197,20 @@ private struct NotificationsSettings: View {
                     .disabled(!app.settings.notificationsEnabled)
                 }
             }
+            Section {
+                TextField("https://hooks.slack.com/… or Discord webhook", text: webhookURL)
+                    .textContentType(.URL).autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+                if !app.settings.notifyWebhookURL.isEmpty && !WebhookNotifier.isValid(app.settings.notifyWebhookURL) {
+                    Label("Not a valid http(s) URL — won't be sent.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Webhook")
+            } footer: {
+                Text("Also POST every enabled notification to this Slack/Discord/incoming webhook. "
+                     + "One JSON body carries both `text` (Slack) and `content` (Discord). Leave empty to disable.")
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Notifications")
@@ -213,6 +227,10 @@ private struct NotificationsSettings: View {
     private var master: Binding<Bool> {
         .init(get: { app.settings.notificationsEnabled },
               set: { app.settings.notificationsEnabled = $0; app.persistSettings() })
+    }
+    private var webhookURL: Binding<String> {
+        .init(get: { app.settings.notifyWebhookURL },
+              set: { app.settings.notifyWebhookURL = $0.trimmingCharacters(in: .whitespaces); app.persistSettings() })
     }
 
     private func categoryBinding(_ c: NotificationCategory) -> Binding<Bool> {

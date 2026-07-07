@@ -215,6 +215,11 @@ final class AppState {
                                                window: NotificationThrottle.defaultWindow) { return }
         lastNotified[key] = item.date
         Notifier.shared.post(item)
+        // Mirror the same (policy-passed, throttled) notification to an external webhook if one is
+        // configured — Slack / Discord / any incoming webhook. Best-effort, off the main actor.
+        if !settings.notifyWebhookURL.isEmpty {
+            WebhookNotifier.post(urlString: settings.notifyWebhookURL, title: item.title, body: item.body)
+        }
     }
 
     /// Notification action: relaunch the project's server and bring the window forward.

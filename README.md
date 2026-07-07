@@ -41,9 +41,11 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 - **Auto-detects** the package manager (npm · pnpm · yarn · bun · deno) and framework (Nuxt · Next · Astro · SvelteKit · Remix · SolidStart · Angular · Qwik · Vite · Express) per project — and launches **any** project that has a `dev` script regardless. Framework-specific env (e.g. `NUXT_IGNORE_LOCK` for Nuxt, `ASTRO_DEV_BACKGROUND=0` to keep Astro 7 in the foreground) is applied only where it belongs.
 - **Launches** the dev server with a deterministic heap size (`--max-old-space-size`), streaming its log live.
 - **Per-project settings** (gear on each sidebar row): **Memory / Port / Package**, each with an **Auto** toggle (on by default) — flip it off for a manual value via slider, field, or package picker.
+- **Per-project environment variables** — an editor of `KEY`/`value` rows, injected (shell-safe) into the dev server, preview, build, and worker on their next launch. The app's own `PORT` / `NODE_OPTIONS` win on a name clash.
 
 ### 📊 Live activity &amp; metrics
 - System **CPU / Memory / Swap** bars plus an Activity-Monitor-style table showing **only** the processes with real impact.
+- **Live timeline charts** (Swift Charts) — a collapsible section graphs whole-machine CPU/Memory/Swap over the last ~5 minutes, and each project's dashboard shows its supervised tree's **CPU & RAM** history (hover to read a point). Toggle with **Show timeline charts** in Settings.
 - **Every supervised server is its own identified row** — *MiddleSpace :3000* in **blue** — trees are never merged. A dev server running **outside** the app is identified the same way in **purple** (*MiddleSpace :3001*) so you can tell it apart at a glance; it's shown, not supervised. Detection is **runtime-based**: *any* Node / Bun / Deno process listening on a port shows up (Express, Fastify, Nest, plain `node`, …), not just the known frameworks.
 - CPU is per-core (100% = one core, like Activity Monitor); a **"% of machine"** toggle re-expresses it as a share of total capacity.
 - Generic helpers (`node`, *Code Helper*) are named from each extension's own `package.json` `displayName` — e.g. *Vue (Official)*, *ESLint*, *Tailwind CSS IntelliSense*.
@@ -60,6 +62,7 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 - **Inactive memory is purged.** The system memory cache is released (`purge`) before a build and again mid-build under pressure — often a 1–2 GB swing — so a heavy build doesn't push the machine into swap exhaustion and a kernel SIGKILL (jetsam).
 - **Orphaned dev processes auto-close.** A dev server detected by its real binary in argv (`…/.bin/nuxt`, `vite/bin/vite`, `next dev`, …) that isn't in the managed tree is killed (SIGTERM → SIGKILL) and a **notification** lists what was closed. The managed server, editor, and system are excluded.
 - **Everything else stays a suggestion.** A sidebar panel surfaces other heavy processes — a fast **Haiku** evaluation of what's worth killing — each with a red **skull** button you press yourself. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself) are never suggested or auto-closed.
+- **Warns before you dig the hole.** Starting a server whose heap won't fit in free RAM — or when swap is already high — posts a **low-memory warning** (it never blocks the launch, just tells you), and a distinct **high-swap** alert fires once when swap climbs past ~60% so you can close idle projects before the Mac starts to stutter.
 
 ### 🔨 Build runner — tuned for tight RAM
 - Runs the project's build as a **separate tracked tree** with its own Activity row and terminal tab; the **Build** button becomes a red **Stop build** while running. The CLI's `build` is **synchronous** — it waits for the build and reports the exit code plus a ✅/❌ verdict (so an agent or a script gets the real result).
@@ -77,7 +80,9 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 - Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f`. **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. → [CLI reference](#command-line-interface)
 
 ### 🤖 Claude integration
-- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw `npm run dev` / `nuxt dev` / framework builds and redirects to `dev-monitor`, so every terminal's servers land in one supervised place. → [`integrations/claude/`](integrations/claude/)
+- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw dev servers (`npm run dev` / `nuxt dev` / …), framework **builds**, and production **previews** (`npm run preview` / `next start` / …), redirecting each to the matching `dev-monitor` command so every terminal's servers land in one supervised place. → [`integrations/claude/`](integrations/claude/)
+- **Agents coordinate instead of colliding** — if a build is in flight, `dev-monitor up`/`preview` won't interrupt it: it reports the build (elapsed + ETA), and with `--wait` **queues behind it** and starts the server once the build finishes. `status --json` exposes `building` so another Claude can see and wait.
+- **External alerts** — set a **Slack / Discord / incoming-webhook** URL in Settings and every notification that passes your category toggles is also POSTed there (one JSON body carries both Slack's `text` and Discord's `content`). Best-effort — a down webhook never affects supervision.
 - **Live Scan** (read-only) — the Doctor **watches** Dev Monitor + the machine for a chosen window (1 / 2 / 5 min, with a progress bar), then `claude` returns a **copyable** report: what every process is and *who it belongs to*, the activity over the window, any errors/bugs (correlated to the app's own source), and concrete improvement points. Never edits anything (`--permission-mode plan`, write tools disallowed).
 - **Project diagnosis** (read-only) — one click explains why a project's server or build failed, reading its config + the supervisor's failure context; the report is copyable.
 - **Resource advisor** (read-only) — Claude ranks the machine's heavy processes and proposes actions. Managed processes stop with one tap; **foreign processes are only closed after explicit confirmation — never auto-killed.**
@@ -137,9 +142,10 @@ While the app is running it hosts a local hub (Unix socket). Any terminal — or
 
 | Command | What it does |
 |---|---|
-| `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent**; `--gb N` pins the heap; `--wait` blocks until HTTP-ready and prints the URL. |
+| `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent**; `--gb N` pins the heap; `--wait` blocks until HTTP-ready and prints the URL. If a build is running, `--wait` **queues behind it**; without `--wait` it reports the build and exits (never interrupts it). |
+| `dev-monitor preview [path] [--gb N] [--wait]` | Serve the **production build** (needs a `preview`/`start` script). Same build-coordination as `up`. |
 | `dev-monitor build [path]` | Build **alongside** the dev server (leaves it running); adds a build tab. |
-| `dev-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath`. |
+| `dev-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath` · `building` · `buildElapsed` · `buildETA`. |
 | `dev-monitor stop [path] [--all]` | Stop one server (default: cwd), or `--all`. |
 | `dev-monitor restart [path]` | Relaunch from **any** state — including `Failed` / `Idle`. |
 | `dev-monitor remove [path]` | Stop and **forget** the project. Aliases: `rm`, `forget`. |
