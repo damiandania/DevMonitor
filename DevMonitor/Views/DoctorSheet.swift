@@ -331,13 +331,7 @@ private struct ProjectDiagnosisDetail: View {
         if app.isDiagnosingProject {
             Loading("Asking Claude…")
         } else if let report = app.projectDiagnosis {
-            ScrollView {
-                Text(DoctorSheet.markdown(report.text))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-            }
-            CostFooter(isError: report.isError, cost: report.costUSD)
+            ReportPane(report: report)
         } else if let project {
             Idle("Diagnose why \(project.name)'s server or build failed — reads its logs and config (read-only). Press Analyze.")
         } else {
@@ -353,7 +347,6 @@ private struct ProjectDiagnosisDetail: View {
 /// a determinate progress bar; while Claude reasons it shows a spinner.
 private struct LiveScanDetail: View {
     @Environment(AppState.self) private var app
-    @State private var copied = false
 
     var body: some View {
         switch app.liveScan.phase {
@@ -399,6 +392,20 @@ private struct LiveScanDetail: View {
     }
 
     private func result(_ report: ClaudeRunner.Report) -> some View {
+        ReportPane(report: report)
+    }
+}
+
+// MARK: - shared
+
+/// A finished Claude report: full-height scrollable markdown + a "Copy report" button + the
+/// cost/error footer. Shared by the Doctor's Project and Live Scan tabs so both render — and copy —
+/// identically (and neither gets visually clipped at the bottom).
+private struct ReportPane: View {
+    let report: ClaudeRunner.Report
+    @State private var copied = false
+
+    var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 Text(DoctorSheet.markdown(report.text))
@@ -406,6 +413,7 @@ private struct LiveScanDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack {
                 Button {
                     NSPasteboard.general.clearContents()
@@ -424,8 +432,6 @@ private struct LiveScanDetail: View {
         }
     }
 }
-
-// MARK: - shared
 
 private struct Idle: View {
     let text: String

@@ -75,6 +75,7 @@ build_run advisor "$ROOT/tests/advisor/main.swift" \
   "$SRC/Core/ResourceAdvisor.swift" "$SRC/Core/ClaudeRunner.swift"
 build_run sleepguard "$ROOT/tests/sleepguard/main.swift" "$SRC/Core/SleepGuard.swift"
 build_run charts "$ROOT/tests/charts/main.swift" "$SRC/Core/MetricChartMath.swift"
+build_run memguard "$ROOT/tests/memguard/main.swift" "$SRC/Core/MemoryGuard.swift"
 build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/dev-monitor/ArgParse.swift"
 build_run git    "$ROOT/tests/git/main.swift" "$SRC/Core/GitInfo.swift"
 build_run hook   "$ROOT/tests/hook/main.swift" "$SRC/Core/ClaudeHookInstaller.swift"

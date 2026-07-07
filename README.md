@@ -44,9 +44,10 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 
 ### 📊 Live activity &amp; metrics
 - System **CPU / Memory / Swap** bars plus an Activity-Monitor-style table showing **only** the processes with real impact.
-- **Every supervised server is its own identified row** — *MiddleSpace :3000* in **blue** — trees are never merged. A dev server running **outside** the app is identified the same way in **purple** (*MiddleSpace :3001*) so you can tell it apart at a glance; it's shown, not supervised.
+- **Every supervised server is its own identified row** — *MiddleSpace :3000* in **blue** — trees are never merged. A dev server running **outside** the app is identified the same way in **purple** (*MiddleSpace :3001*) so you can tell it apart at a glance; it's shown, not supervised. Detection is **runtime-based**: *any* Node / Bun / Deno process listening on a port shows up (Express, Fastify, Nest, plain `node`, …), not just the known frameworks.
 - CPU is per-core (100% = one core, like Activity Monitor); a **"% of machine"** toggle re-expresses it as a share of total capacity.
 - Generic helpers (`node`, *Code Helper*) are named from each extension's own `package.json` `displayName` — e.g. *Vue (Official)*, *ESLint*, *Tailwind CSS IntelliSense*.
+- **Claude Code's own shells are surfaced** — every `/bin/zsh -c` its Bash tool runs, with background **monitors** (polling loops it leaves watching for a condition) labelled apart from one-shot shells (red, Claude mark). They're **closeable** right from the table.
 
 ### 🩺 Health, recovery &amp; resilience
 - **Hang detection + auto-recycle** — HTTP-probes the server; after consecutive failures it kills the whole process tree (orphans included) and relaunches.
@@ -67,7 +68,7 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 - **Frees RAM aggressively around the build**: `purge`s inactive/cached memory (before, and again under pressure during), surfaces the resource advisor to close heavy non-essential apps, watches memory pressure to act **before** the kernel jetsams the build, and runs Node with `--optimize-for-size`. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
 
 ### 🖥️ Global terminal &amp; menu bar
-- **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*).
+- **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*). **Claude Code's shells and monitors get tabs too** — each tab shows the command/script it runs and a **Stop** button.
 - **Global Activity** — the meters and process list always reflect the whole machine, not just the selected project.
 - **Menu-bar item** (`MenuBarExtra`) — lists every **online server** (live status/uptime + Stop/Restart), every **build** in progress, and any **external** dev servers, plus a Launch button and a CPU/memory snapshot — without opening the window.
 - **Appearance** — app-wide **Theme** (System / Light / Dark) and a separate **Terminal** theme for the log panes.
@@ -77,7 +78,8 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 
 ### 🤖 Claude integration
 - **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw `npm run dev` / `nuxt dev` / framework builds and redirects to `dev-monitor`, so every terminal's servers land in one supervised place. → [`integrations/claude/`](integrations/claude/)
-- **Diagnose** (read-only) — a toolbar button runs the logged-in `claude` against Dev Monitor's *own* source to explain its internal errors. Never edits anything (`--permission-mode plan`, write tools disallowed).
+- **Live Scan** (read-only) — the Doctor **watches** Dev Monitor + the machine for a chosen window (1 / 2 / 5 min, with a progress bar), then `claude` returns a **copyable** report: what every process is and *who it belongs to*, the activity over the window, any errors/bugs (correlated to the app's own source), and concrete improvement points. Never edits anything (`--permission-mode plan`, write tools disallowed).
+- **Project diagnosis** (read-only) — one click explains why a project's server or build failed, reading its config + the supervisor's failure context; the report is copyable.
 - **Resource advisor** (read-only) — Claude ranks the machine's heavy processes and proposes actions. Managed processes stop with one tap; **foreign processes are only closed after explicit confirmation — never auto-killed.**
 
 ---
@@ -228,7 +230,7 @@ When adding a feature, prefer extracting its decision logic into a pure (ideally
 | **P4** — Notifications | Native notifications (crash/hang/recycle/build) with sound |
 | **P5** — Build runner | Run the project's build script as a tracked tree |
 | **P6** — Hub + CLI + docs | Unix-socket hub + `dev-monitor` CLI + auto-start |
-| **P7** — Claude reports | Read-only "Diagnose" report about Dev Monitor itself |
+| **P7** — Claude reports | Read-only **Live Scan** (timed observation → copyable report), per-project failure diagnosis, and Claude-shell/monitor identification |
 | **P8** — Polish &amp; dist | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (ad-hoc signing) |
 | **P9** — Resource advisor | Claude-recommended actions on heavy processes; confirm before closing foreign |
 | **P9b** — Pressure auto-kill | Stuck-machine detection → auto-closes orphaned dev processes; others surfaced via fast Haiku eval + manual skull |

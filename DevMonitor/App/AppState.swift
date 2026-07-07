@@ -74,6 +74,11 @@ final class AppState {
         installedBrowsers = BrowserList.installed()
         installedEditors = EditorList.installed()
         selectedProjectID = projects.first?.id
+        // Richer startup line than a bare "Dev Monitor started" — version + project count + physical
+        // RAM, so a post-mortem (or the Doctor's Live Scan) has context about the machine and load.
+        let ramGB = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+        let version = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
+        AppLog.shared.event("Startup: Dev Monitor \(version) · \(projects.count) project(s) · \(ramGB) GB RAM")
         ipcServer.start(app: self)
         systemSampler.start()
         // The callbacks hand the sampler LEADER pids only — tree membership is resolved during the
@@ -116,11 +121,15 @@ final class AppState {
         liveScan = LiveScan(app: self)
         systemSampler.onStuck = { [weak self] in self?.pressure.evaluate() }
         // Refresh the pressure suggestions every 30s: prune dead processes, clear once the machine
-        // recovers (the yellow tab disappears), or re-evaluate while still stuck.
+        // recovers (the yellow tab disappears), or re-evaluate while still stuck. Also edge-check
+        // swap: warn once when it climbs past the high-swap threshold (distinct from the stuck-machine
+        // pressure alert), recommending the user close idle projects before it starts thrashing.
         Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
-                self?.pressure.tick()
+                guard let self else { return }
+                self.pressure.tick()
+                self.checkSwapPressure()
             }
         }
         // Wire notifications: set the UN delegate (foreground presentation + action routing),
@@ -269,7 +278,38 @@ final class AppState {
         // there instead of replaying 4→6→8.
         session.onHeapEscalated = { [weak self] gb in self?.setAutoHeapGB(gb, for: project.id) }
         sessions[project.id] = session
-        session.start(memoryGB: effectiveMemoryGB(for: project))
+        let heapGB = effectiveMemoryGB(for: project)
+        session.start(memoryGB: heapGB)
+        warnLowMemory(heapGB: heapGB, name: project.name, projectID: project.id)
+    }
+
+    /// Warn — never block (per the user's chosen behaviour) — when starting a process that will
+    /// claim `heapGB` risks heavy swapping on this RAM-constrained Mac. Posts a passive `.pressure`
+    /// notification (feed + history + a silent banner if that category is on); the server still
+    /// starts. No-op when there's enough headroom. See `MemoryGuard.launchWarning`.
+    private func warnLowMemory(heapGB: Int, name: String, projectID: Project.ID) {
+        guard let msg = MemoryGuard.launchWarning(
+            heapGB: heapGB, memUsed: systemSampler.systemMemUsed, memTotal: systemSampler.totalMem,
+            swapUsed: systemSampler.systemSwapUsed, swapTotal: systemSampler.systemSwapTotal)
+        else { return }
+        route(NotificationItem(title: "Low memory — starting \(name)", body: msg,
+                               category: .pressure, severity: .passive, projectID: projectID, action: .none))
+    }
+
+    /// Edge-triggered high-swap warning: fires ONCE when system swap climbs past the threshold, and
+    /// re-arms only after it drops back down (hysteresis) — so a slow swap creep is surfaced before it
+    /// freezes the Mac, without spamming. Distinct from the stuck-machine pressure alert. Called from
+    /// the 30 s tick. See `MemoryGuard.swapCrossing`.
+    @ObservationIgnored private var swapWarned = false
+    private func checkSwapPressure() {
+        let r = MemoryGuard.swapCrossing(swapPercent: systemSampler.systemSwapPercent, wasWarned: swapWarned)
+        swapWarned = r.warned
+        guard r.warn else { return }
+        let pct = Int(systemSampler.systemSwapPercent)
+        route(NotificationItem(
+            title: "Swap \(pct)% full",
+            body: "The Mac is leaning on swap. Close idle projects or heavy apps before starting more servers, or it may start to stutter.",
+            category: .pressure, severity: .passive, projectID: nil, action: .open))
     }
 
     /// Stop the supervised server for one project.
@@ -329,7 +369,9 @@ final class AppState {
         if let existing = workers[project.id], existing.isRunning { return }
         let worker = WorkerRunner(project: project)
         workers[project.id] = worker
-        worker.start(memoryGB: effectiveMemoryGB(for: project))
+        let heapGB = effectiveMemoryGB(for: project)
+        worker.start(memoryGB: heapGB)
+        warnLowMemory(heapGB: heapGB, name: "\(project.name) · worker", projectID: project.id)
     }
 
     /// Stop the background worker for one project.
@@ -355,7 +397,9 @@ final class AppState {
         stopSiblings(of: "preview", for: project)   // only one of dev/build/preview runs per project
         let preview = DevSession(project: project, commandOverride: cmd)
         previews[project.id] = preview
-        preview.start(memoryGB: effectiveBuildMemoryGB(for: project))
+        let heapGB = effectiveBuildMemoryGB(for: project)
+        preview.start(memoryGB: heapGB)
+        warnLowMemory(heapGB: heapGB, name: "\(project.name) · preview", projectID: project.id)
     }
 
     /// Stop the preview server for one project.
