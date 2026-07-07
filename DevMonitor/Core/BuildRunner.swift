@@ -43,7 +43,8 @@ final class BuildRunner {
         // V8 flags like --optimize-for-size are REJECTED ("not allowed in NODE_OPTIONS") and make
         // node exit immediately (code 9), failing every build. Keep it to --max-old-space-size.
         let nodeOpts = ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)
-        let command = "NODE_OPTIONS='\(nodeOpts)' FORCE_COLOR=0 exec \(buildCommand)"
+        let userEnv = ProcessSupport.envAssignments(project.env)
+        let command = "\(userEnv)NODE_OPTIONS='\(nodeOpts)' FORCE_COLOR=0 exec \(buildCommand)"
         logLines = ["$ \(command)  (cwd: \(project.path))"]
         lineBuffer.reset()
         result = nil

@@ -21,13 +21,25 @@ let rows = [
 ]
 let agg = SystemSampler.aggregate(
     rows: rows,
-    devs: [(id: -1, pids: [100, 101], label: "MiddleSpace :3000")],
+    devs: [(id: -1, pids: [100, 101], label: "MiddleSpace :3000", isPreview: false)],
     build: (pids: [200], label: "Build · MiddleSpace"),
     coreCount: 8, totalMem: 8 * GB, topN: 40)
 
 let devRow = agg.first { $0.id == -1 }
 chk(devRow != nil && devRow!.isDevServer, "aggregate: dev row present + flagged")
+chk(devRow?.isPreview == false, "aggregate: a plain dev row is not flagged preview")
 chk(devRow?.cpuPerCore == 80, "aggregate: dev CPU summed (50+30)", "\(devRow?.cpuPerCore ?? -1)")
+
+// A preview session is still an isDevServer row (so it's always shown, keeps its accent colour,
+// etc.) but ALSO carries isPreview, so the UI can swap the server icon for an eye instead of
+// appending " · preview" text to the name.
+let aggPreview = SystemSampler.aggregate(
+    rows: [ProcessRow(id: 700, name: "node", cpuPerCore: 10, memBytes: 50 * MB)],
+    devs: [(id: -3, pids: [700], label: "MiddleSpace :3000", isPreview: true)],
+    build: nil, coreCount: 8, totalMem: 8 * GB, topN: 40)
+let previewRow = aggPreview.first { $0.id == -3 }
+chk(previewRow != nil && previewRow!.isDevServer && previewRow!.isPreview,
+    "aggregate: preview row is a dev-server row ALSO flagged preview", "\(String(describing: previewRow))")
 let buildRow = agg.first { $0.id == -2 }
 chk(buildRow != nil && buildRow!.isBuild, "aggregate: build row identified like the server")
 chk(buildRow?.cpuPerCore == 80, "aggregate: build CPU", "\(buildRow?.cpuPerCore ?? -1)")
@@ -56,16 +68,38 @@ chk(workerRow?.cpuPerCore == 35, "aggregate: worker CPU summed (20+15)", "\(work
 chk(workerRow?.memBytes == 200 * MB, "aggregate: worker mem summed", "\(workerRow?.memBytes ?? -1)")
 chk(!aggWorker.contains { $0.id == 400 || $0.id == 401 }, "aggregate: worker members not double-listed")
 
+// An identified external dev server ALWAYS shows, even when idle (below the busy/heavy impact
+// threshold) — same guarantee as a supervised row, since it would otherwise vanish from the
+// Activity table the moment it goes quiet (e.g. an idle preview server).
+let aggExternal = SystemSampler.aggregate(
+    rows: [
+        ProcessRow(id: 500, name: "MiddleSpace · preview :3200", cpuPerCore: 0.1, memBytes: 20 * MB,
+                  isExternalDev: true),
+        ProcessRow(id: 501, name: "idle", cpuPerCore: 0.1, memBytes: 20 * MB),   // plain other, same size
+    ],
+    devs: [], build: nil, coreCount: 8, totalMem: 8 * GB, topN: 40)
+chk(aggExternal.contains { $0.id == 500 && $0.isExternalDev }, "aggregate: idle external dev server still shown")
+chk(!aggExternal.contains { $0.id == 501 }, "aggregate: an equally-light plain process is still filtered")
+
+// External dev servers are exempt from topN too (always shown, like a supervised row).
+let manyExternals = (0..<3).map {
+    ProcessRow(id: Int32(600 + $0), name: "ext\($0)", cpuPerCore: 0, memBytes: 0, isExternalDev: true)
+}
+let aggExternalCap = SystemSampler.aggregate(
+    rows: manyExternals, devs: [], build: nil, coreCount: 8, totalMem: 8 * GB, topN: 1)
+chk(manyExternals.allSatisfy { ext in aggExternalCap.contains { $0.id == ext.id } },
+    "aggregate: external dev servers all survive a tight topN")
+
 // A supervised dev row is ALWAYS shown, even when its tree has no live stats this tick.
 let aggGhost = SystemSampler.aggregate(
-    rows: [], devs: [(id: -7, pids: [999], label: "ghost :3000")], build: nil,
+    rows: [], devs: [(id: -7, pids: [999], label: "ghost :3000", isPreview: false)], build: nil,
     coreCount: 8, totalMem: 8 * GB, topN: 40)
 chk(aggGhost.contains { $0.id == -7 && $0.cpuPerCore == 0 }, "aggregate: idle dev still shown at 0")
 
 // topN caps only the unsupervised tail; supervised rows always survive the cap.
 let manyHeavy = (0..<6).map { ProcessRow(id: Int32(500 + $0), name: "hog\($0)", cpuPerCore: 100, memBytes: GB) }
 let aggCap = SystemSampler.aggregate(
-    rows: manyHeavy, devs: [(id: -1, pids: [], label: "dev")], build: nil,
+    rows: manyHeavy, devs: [(id: -1, pids: [], label: "dev", isPreview: false)], build: nil,
     coreCount: 8, totalMem: 8 * GB, topN: 3)
 chk(aggCap.filter { $0.id >= 500 }.count == 3, "aggregate: others capped at topN", "\(aggCap.count) rows")
 chk(aggCap.contains { $0.id == -1 }, "aggregate: supervised row survives the cap")
@@ -133,8 +167,8 @@ chk(r.pressure == .normal && r.hotSince == nil, "pressure: full memory WITHOUT s
 // Rows + system stats materialize, a supervised leader resolves to its own row via the single
 // sid-grouping sweep (this process is the leader), and a dead leader drops out instead of crashing.
 let live = SystemSampler()
-live.devServerInfo = { [(id: -900, leader: getpid(), label: "suite"),
-                        (id: -901, leader: 3_999_999, label: "dead")] }
+live.devServerInfo = { [(id: -900, leader: getpid(), label: "suite", isPreview: false),
+                        (id: -901, leader: 3_999_999, label: "dead", isPreview: false)] }
 live.start()
 try? await Task.sleep(for: .seconds(5))   // ≥2 ticks at 2 s
 chk(!live.processes.isEmpty, "live: processes populated", "\(live.processes.count) rows")
@@ -147,6 +181,14 @@ chk(liveDev != nil && liveDev!.isDevServer && liveDev!.name == "suite",
     "live: supervised row resolved from leader via sid grouping", liveDev?.name ?? "missing")
 chk(liveDev.map { $0.memBytes > 0 } ?? false, "live: supervised tree stats non-zero")
 chk(!live.processes.contains { $0.id == -901 }, "live: dead leader dropped")
+
+// Timeline history ring buffer: fills after the first (delta-less) tick, ids are monotonic, and
+// values fall in sane ranges. At ~2 Hz over 5 s we expect ≥1 point (first tick skipped).
+chk(!live.history.isEmpty, "live: history buffer populated", "\(live.history.count) pts")
+let ids = live.history.map(\.id)
+chk(ids == ids.sorted() && Set(ids).count == ids.count, "live: history ids strictly monotonic", "\(ids)")
+chk(live.history.allSatisfy { $0.systemCPU >= 0 && $0.systemCPU <= 100 && $0.memTotal > 0 },
+    "live: history points in sane ranges")
 
 print(fail == 0 ? "ALL SAMPLER TESTS PASSED" : "SOME SAMPLER TESTS FAILED")
 exit(Int32(fail))

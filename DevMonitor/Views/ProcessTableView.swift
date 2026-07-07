@@ -121,9 +121,11 @@ private struct ProcessRowView: View {
 
     /// Spoken row label: the process name plus its category (the hover help, first line).
     private var accessibilityLabel: String {
+        if row.isPreview { return "\(row.name), supervised preview server" }
         if row.isDevServer { return "\(row.name), supervised dev server" }
         if row.isWorker { return "\(row.name), supervised worker" }
         if row.isExternalDev { return "\(row.name), external dev server" }
+        if row.isClaude { return "\(row.name), Claude Code shell" }
         if row.isBuild { return "\(row.name), build" }
         if row.isExtension { return "\(row.name), editor extension" }
         return row.name
@@ -133,7 +135,7 @@ private struct ProcessRowView: View {
     /// other real process is killed by pid. Critical system processes and the editor (anything
     /// `ResourceAdvisor` protects) get no button, so a stray hover-click can't take down the session.
     private var killable: Bool {
-        if row.isDevServer || row.isBuild || row.isWorker || row.isExternalDev { return true }
+        if row.isDevServer || row.isBuild || row.isWorker || row.isExternalDev || row.isClaude { return true }
         return row.id > 0 && !ResourceAdvisor.isProtected(row.name)
     }
 
@@ -152,15 +154,18 @@ private struct ProcessRowView: View {
         if row.isDevServer { return "Stop \(row.name)" }
         if row.isWorker { return "Stop \(row.name)" }
         if row.isBuild { return "Stop the build" }
+        if row.isClaude { return "Stop this Claude shell (pid \(row.id))" }
         return "Kill \(row.name) (pid \(row.id))"
     }
 
     /// Full process name (it truncates in the middle) plus its category, shown on hover.
     private var rowHelp: String {
         let kind: String
-        if row.isDevServer { kind = " — supervised dev server" }
+        if row.isPreview { kind = " — supervised preview server" }
+        else if row.isDevServer { kind = " — supervised dev server" }
         else if row.isWorker { kind = " — supervised worker" }
         else if row.isExternalDev { kind = " — external dev server (not supervised)" }
+        else if row.isClaude { kind = " — Claude Code shell (not supervised)" }
         else if row.isBuild { kind = " — build" }
         else if row.isExtension { kind = " — VS Code extension" }
         else { kind = "" }
@@ -168,11 +173,20 @@ private struct ProcessRowView: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if row.isDevServer {
+        if row.isPreview {
+            // Matches the Preview run-control's own icon (RunControl.swift) — an eye instead of the
+            // server rack, so a preview row doesn't need " · preview" appended to its name to read
+            // as one.
+            Image(systemName: "eye.fill").foregroundStyle(.tint)
+        } else if row.isDevServer {
             Image(systemName: "xserve").foregroundStyle(.tint)
         } else if row.isExternalDev {
             // Same glyph as a managed server, but purple = running outside the app.
             Image(systemName: "xserve").foregroundStyle(Color.indigo)
+        } else if row.isClaude {
+            // Claude Code's own shells/monitors — the Claude mark (asset), tinted red like the name.
+            Image("ClaudeLogo").resizable().scaledToFit()
+                .frame(width: 12, height: 12).foregroundStyle(.red)
         } else if row.isWorker {
             // A "gears" glyph marks a background worker — distinct from the server's rack and the
             // build's hammer.
@@ -188,7 +202,10 @@ private struct ProcessRowView: View {
         }
     }
 
-    private var emphasized: Bool { row.isDevServer || row.isWorker || row.isExternalDev || row.isBuild }
+    // Claude rows are deliberately NOT emphasized — red text but no tinted highlight (see nameColor).
+    private var emphasized: Bool {
+        row.isDevServer || row.isWorker || row.isExternalDev || row.isBuild
+    }
 
     private var accent: Color {
         if row.isDevServer { return .accentColor }
@@ -198,7 +215,11 @@ private struct ProcessRowView: View {
         return .primary
     }
 
-    private var nameColor: Color { emphasized ? accent : .primary }
+    // Claude shells/monitors: red name, but not "emphasized" so they get no background highlight.
+    private var nameColor: Color {
+        if row.isClaude { return .red }
+        return emphasized ? accent : .primary
+    }
 
     private var rowBackground: Color {
         if emphasized { return accent.opacity(0.10) }

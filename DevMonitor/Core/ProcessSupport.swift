@@ -41,4 +41,20 @@ enum ProcessSupport {
     static func nodeHeapFlag(memoryGB: Int) -> String {
         "--max-old-space-size=\(memoryGB * 1024)"
     }
+
+    /// Inline shell assignments — `KEY='value' KEY2='value2' ` (trailing space when non-empty) — for
+    /// a project's user-defined env vars, prepended ahead of the app's own env (NODE_OPTIONS / PORT /
+    /// FORCE_COLOR) when launching through `zsh -lc`. Values are single-quoted with embedded single
+    /// quotes escaped (`'\''`), so spaces, `$`, and quotes pass through literally. Entries with an
+    /// empty/whitespace key are skipped. Placed FIRST so the app's operational vars still win on a
+    /// key clash (the heap injection can't be broken by a stray user NODE_OPTIONS).
+    static func envAssignments(_ env: [Project.EnvVar]) -> String {
+        let parts = env.compactMap { pair -> String? in
+            let key = pair.key.trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { return nil }
+            let escaped = pair.value.replacingOccurrences(of: "'", with: "'\\''")
+            return "\(key)='\(escaped)'"
+        }
+        return parts.isEmpty ? "" : parts.joined(separator: " ") + " "
+    }
 }

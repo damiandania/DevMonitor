@@ -72,21 +72,37 @@ final class IPCServer {
                 .sorted { $0.name < $1.name }
                 .map { p -> IPCServerInfo in
                     let s = app.sessions[p.id]
+                    let preview = app.previews[p.id]
+                    // Dev and preview are mutually exclusive per project (stopSiblings) — surface
+                    // whichever is actually active, so a running preview shows up in `status`/`--wait`
+                    // too, instead of always reporting the (idle) dev session.
+                    let active = (s?.state.isActive == true) ? s : (preview?.state.isActive == true ? preview : s)
+                    let build = app.builds[p.id]
+                    let building = build?.isRunning ?? false
                     return IPCServerInfo(
                         name: p.name, path: p.path,
-                        state: s?.state.label ?? "Idle",
-                        port: s?.effectivePort ?? p.port,
+                        state: active?.state.label ?? "Idle",
+                        port: active?.effectivePort ?? p.port,
                         logPath: p.logFileURL.path,
-                        ready: s?.isReady ?? false,
-                        url: s.flatMap { $0.isReady ? $0.url : nil },
-                        pid: (s?.pid).flatMap { $0 > 0 ? Int($0) : nil },
-                        exitCode: (s?.lastExitCode).map { Int($0) },
-                        lastError: s?.lastError)
+                        ready: active?.isReady ?? false,
+                        url: active.flatMap { $0.isReady ? $0.url : nil },
+                        pid: (active?.pid).flatMap { $0 > 0 ? Int($0) : nil },
+                        exitCode: (active?.lastExitCode).map { Int($0) },
+                        lastError: active?.lastError,
+                        building: building ? true : nil,
+                        buildElapsed: building ? build?.startedAt.map { Date().timeIntervalSince($0) } : nil,
+                        buildETA: building ? p.lastBuildSeconds : nil)
                 }
             IPCIO.write(client, IPCMessage(type: "status", servers: servers))
 
         case "run", "up":
             guard let project = resolveProject(req, app: app, client: client) else { return }
+            // Don't interrupt an in-flight build: launching a dev server stops siblings (incl. the
+            // build). Report it as "busy" so the CLI/another Claude waits it out (with --wait) instead
+            // of aborting the build. See buildBusyMessage.
+            if let busy = Self.buildBusyMessage(project, app: app) {
+                IPCIO.write(client, IPCMessage(type: "busy", message: busy)); return
+            }
             // An explicit --gb means "use exactly this heap" → pin it AND turn auto off, otherwise
             // auto mode would override it with the framework default.
             if let gb = req.gb {
@@ -112,6 +128,35 @@ final class IPCServer {
             IPCIO.write(client, IPCMessage(type: "ok",
                 message: "launched \(toLaunch.name) (\(toLaunch.framework.displayName), \(gb) GB\(capNote))"))
 
+        case "preview":
+            guard let project = resolveProject(req, app: app, client: client) else { return }
+            guard project.previewCommand != nil else {
+                IPCIO.write(client, IPCMessage(type: "error",
+                    message: "no preview command for \(project.name) — needs a `preview` script (or a `start` script alongside `dev`)"))
+                return
+            }
+            if let busy = Self.buildBusyMessage(project, app: app) {
+                IPCIO.write(client, IPCMessage(type: "busy", message: busy)); return
+            }
+            // An explicit --gb overrides the BUILD heap (previews serve the production build), and
+            // turns auto off, mirroring how `up --gb` pins the dev-server heap.
+            if let gb = req.gb {
+                app.setBuildMemoryGB(gb, for: project.id)
+                app.setBuildMemoryAuto(false, for: project.id)
+            }
+            app.selectedProjectID = project.id
+            if let existing = app.previews[project.id], existing.state.isActive {
+                let port = existing.effectivePort.map { " on :\($0)" } ?? ""
+                IPCIO.write(client, IPCMessage(type: "ok", message: "\(project.name) preview already running\(port)"))
+                return
+            }
+            guard let toLaunch = app.projects.first(where: { $0.id == project.id }) else {
+                IPCIO.write(client, IPCMessage(type: "error", message: "project vanished before launch")); return
+            }
+            app.startPreview(toLaunch)
+            let gb = app.effectiveBuildMemoryGB(for: toLaunch)
+            IPCIO.write(client, IPCMessage(type: "ok", message: "launched \(toLaunch.name) preview (\(gb) GB)"))
+
         case "build":
             guard let project = resolveProject(req, app: app, client: client) else { return }
             app.selectedProjectID = project.id
@@ -136,6 +181,7 @@ final class IPCServer {
                 IPCIO.write(client, IPCMessage(type: "ok", message: "stopped all servers"))
             } else if let path = req.path, let project = app.projects.first(where: { $0.path == path }) {
                 app.stop(project)
+                app.stopPreview(project)   // preview and dev are mutually exclusive — stop whichever runs
                 IPCIO.write(client, IPCMessage(type: "ok", message: "stopped \(project.name)"))
             } else {
                 IPCIO.write(client, IPCMessage(type: "error",
@@ -187,5 +233,17 @@ final class IPCServer {
             IPCIO.write(client, IPCMessage(type: "error", message: "could not add project")); return nil
         }
         return project
+    }
+
+    /// If a build is running for `project`, an agent-friendly "busy" message (elapsed + ETA) telling
+    /// the caller to wait rather than interrupt it; nil when no build is running. Starting a dev /
+    /// preview server stops the build (mutual exclusion), so `up`/`preview` short-circuit on this.
+    private static func buildBusyMessage(_ project: Project, app: AppState) -> String? {
+        guard let b = app.builds[project.id], b.isRunning else { return nil }
+        let elapsed = b.startedAt.map { Int(Date().timeIntervalSince($0)) } ?? 0
+        let eta = project.lastBuildSeconds.map { " (~\(Int($0))s total)" } ?? ""
+        return "\(project.name) is building — \(elapsed)s elapsed\(eta). Not starting the server so the "
+            + "build isn't interrupted. Re-run with --wait to start it automatically when the build "
+            + "finishes, or watch `dev-monitor status`."
     }
 }

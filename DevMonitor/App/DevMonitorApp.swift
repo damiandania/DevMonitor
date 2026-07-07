@@ -13,7 +13,7 @@ struct DevMonitorApp: App {
             RootSplitView()
                 .environment(appState)
                 .environment(\.locale, appState.uiLocale)
-                .frame(minWidth: 900, minHeight: 600)
+                .frame(minWidth: 800, minHeight: 600)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -53,7 +53,7 @@ struct DevMonitorApp: App {
 /// servers, one green and one red, show as two differently-coloured dots instead of a single
 /// aggregate dot that's red whenever anything is red. The first process takes the centre slot; each
 /// further one fills a scattered slot (fixed order, so dots don't flicker); past 7 they're not shown.
-/// Unused slots stay white, so the full constellation is always visible.
+/// Unused slots use `labelColor` so they adapt like every other menu-bar icon (black/white).
 struct MenuBarStatusIcon: View {
     @Environment(AppState.self) private var app
 
@@ -97,15 +97,13 @@ struct MenuBarStatusIcon: View {
     }
 
     /// Draw the full 7-dot constellation: the first N slots take live processes' status colours, the
-    /// rest stay **white** (the resting/unused slots), so the logo is always visible and you can read
-    /// both how many processes run and how each is doing.
+    /// rest stay `labelColor` (resting/unused), so the logo is always visible.
     private static func icon(dots: [NSColor]) -> NSImage {
         let size = iconSize
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
             let r = size * dotRadiusRatio
             for (i, slot) in slots.enumerated() {
-                // Used slot → that process's status colour; unused slot → white.
-                let color = i < dots.count ? dots[i] : NSColor.white
+                let color = i < dots.count ? dots[i] : NSColor.labelColor
                 color.setFill()
                 let cx = slot.x * size
                 let cy = (1 - slot.y) * size   // SVG is top-down; AppKit drawing is bottom-up

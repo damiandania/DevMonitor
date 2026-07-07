@@ -89,6 +89,44 @@ check(!ResourceAdvisor.looksLikeDevServer(argv: "/Applications/Google Chrome.app
       "orphan: does NOT match a Chrome renderer")
 check(!ResourceAdvisor.looksLikeDevServer(argv: "yes"), "orphan: does NOT match a bare command")
 
+// A build/prepare/lint invocation matches a framework's bare binary-path pattern too (e.g.
+// `.bin/nuxt`), but it's a one-shot step, not a server — must NOT be mislabeled as one (it would
+// otherwise show as a fake "server" row in the Activity table, offered a kill button, etc).
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/nuxt build"),
+      "orphan: does NOT match a nuxt BUILD (bare binary path + build)")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/nuxt/bin/nuxt.mjs build"),
+      "orphan: does NOT match a nuxt BUILD via the resolved .mjs binary path")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/nuxt prepare"),
+      "orphan: does NOT match nuxt prepare")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/.bin/vite build"),
+      "orphan: does NOT match a vite BUILD")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/.bin/next build"),
+      "orphan: does NOT match a next BUILD")
+check(!ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/.bin/astro build"),
+      "orphan: does NOT match an astro BUILD")
+// The explicit "<fw> dev"/"<fw> preview" patterns still work fine on their own (no bare-path
+// ambiguity), and a bare-path match with NO build-ish token alongside it still passes.
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/nuxt preview"),
+      "orphan: still matches nuxt preview (bare path, no build token)")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /x/node_modules/.bin/next start"),
+      "orphan: still matches next start (bare path, no build token)")
+
+// A preview/production server that skips the framework CLI entirely (runs the built bundle
+// directly) must still be identified — this is what an unsupervised `npm run preview`-style
+// process looks like in `ps`/argv (e.g. Nuxt/Nitro's `node .output/server/index.mjs`).
+check(ResourceAdvisor.looksLikeDevServer(argv: "node --env-file=.env /Users/d/proj/.output/server/index.mjs"),
+      "orphan: matches a Nitro (Nuxt) preview bundle")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/.next/standalone/server.js"),
+      "orphan: matches a Next.js standalone bundle")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/.svelte-kit/output/server/index.js"),
+      "orphan: matches a SvelteKit adapter-node bundle")
+// The framework-CLI preview subcommands already match via the bare binary-path entries (no "dev"
+// qualifier), so they don't need a bundle-path pattern of their own.
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/nuxt preview"),
+      "orphan: matches nuxt preview (via the bare binary path)")
+check(ResourceAdvisor.looksLikeDevServer(argv: "node /Users/d/proj/node_modules/.bin/next start"),
+      "orphan: matches next start (via the bare binary path)")
+
 // --- memorySnapshotText: RAM/swap lines + biggest consumer first ---
 let memProcs = [
     ResourceAdvisor.Proc(pid: 1, name: "Small", cpuPerCore: 0, memMB: 100, managedDev: false),

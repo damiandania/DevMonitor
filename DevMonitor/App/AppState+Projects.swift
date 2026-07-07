@@ -110,6 +110,10 @@ extension AppState {
     /// Persist the build heap level learned by the OOM autoscaler (AUTO mode).
     func setBuildAutoHeapGB(_ gb: Int, for id: Project.ID) { mutate(id) { $0.buildAutoHeapGB = gb } }
 
+    /// Replace the project's user-defined environment variables (injected on the next launch of any
+    /// supervised run). Kept verbatim/ordered — trimming/skip-empty happens at injection time.
+    func setEnv(_ env: [Project.EnvVar], for id: Project.ID) { mutate(id) { $0.env = env } }
+
     /// Persist the last successful build's wall-clock duration — the ETA for the next build's
     /// progress bar. Survives relaunch/reinstall (it rides along in projects.json).
     func setLastBuildSeconds(_ seconds: TimeInterval, for id: Project.ID) { mutate(id) { $0.lastBuildSeconds = seconds } }

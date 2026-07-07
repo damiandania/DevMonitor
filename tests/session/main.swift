@@ -233,6 +233,21 @@ func runSessionTests() async -> Int {
           "code=\(String(describing: crashWorker.lastExitCode))")
     check("worker: crash logged", crashWorker.logLines.contains { $0.contains("worker crashed (code 7)") })
 
+    // C9: env-var injection — ProcessSupport.envAssignments builds shell-safe inline assignments.
+    check("env: empty → no prefix", ProcessSupport.envAssignments([]).isEmpty)
+    let simple = ProcessSupport.envAssignments([.init(key: "API_URL", value: "http://x")])
+    check("env: single pair + trailing space", simple == "API_URL='http://x' ", "[\(simple)]")
+    let multi = ProcessSupport.envAssignments([.init(key: "A", value: "1"), .init(key: "B", value: "2")])
+    check("env: ordered, space-separated", multi == "A='1' B='2' ", "[\(multi)]")
+    let spaces = ProcessSupport.envAssignments([.init(key: "MSG", value: "hello world")])
+    check("env: value with spaces stays one token (quoted)", spaces == "MSG='hello world' ", "[\(spaces)]")
+    let quoted = ProcessSupport.envAssignments([.init(key: "Q", value: "a'b")])
+    check("env: embedded single-quote escaped", quoted == "Q='a'\\''b' ", "[\(quoted)]")
+    let dollar = ProcessSupport.envAssignments([.init(key: "P", value: "$HOME/x")])
+    check("env: dollar not expanded (single-quoted)", dollar == "P='$HOME/x' ", "[\(dollar)]")
+    let skip = ProcessSupport.envAssignments([.init(key: "  ", value: "v"), .init(key: "OK", value: "y")])
+    check("env: blank keys skipped", skip == "OK='y' ", "[\(skip)]")
+
     // A4: reapLeftovers matches a project path by boundary, not substring — a project at /p/foo must
     // never reap a sibling server at /p/foobar.
     check("path: exact arg match", DevSession.args("node /p/foo/server.js", referencePath: "/p/foo"))

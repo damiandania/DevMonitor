@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The "Doctor" window. Sidebar = the three analyses; detail = an Apple-style list of processes to
 /// close (Heavy / Memory) or a text diagnosis (Dev Monitor). The big circular Analyze button sits in
@@ -6,21 +7,26 @@ import SwiftUI
 struct DoctorSheet: View {
     @Environment(AppState.self) private var app
     @State private var section: Section = .heavy
+    /// Which project the "Project" tab diagnoses. nil = follow the sidebar selection; set by the
+    /// in-tab picker so the Doctor window can target any project on its own.
+    @State private var projectID: Project.ID?
 
     enum Section: String, CaseIterable, Identifiable {
-        case heavy, devMonitor, memory
+        case heavy, project, liveScan, memory
         var id: String { rawValue }
         var title: String {
             switch self {
             case .heavy: return "Heavy Processes"
-            case .devMonitor: return "Dev Monitor"
+            case .project: return "Project"
+            case .liveScan: return "Live Scan"
             case .memory: return "Memory & RAM"
             }
         }
         var icon: String {
             switch self {
             case .heavy: return "gauge.with.dots.needle.67percent"
-            case .devMonitor: return "stethoscope"
+            case .project: return "ladybug.fill"
+            case .liveScan: return "waveform.path.ecg"
             case .memory: return "memorychip.fill"
             }
         }
@@ -66,8 +72,10 @@ struct DoctorSheet: View {
             AdviceList(advice: app.advice, busy: app.isAdvising,
                        idle: "Analyze the machine's heaviest processes and what's safe to close.",
                        freeAllTitle: nil)
-        case .devMonitor:
-            DiagnosisDetail()
+        case .project:
+            ProjectDiagnosisDetail(projectID: $projectID)
+        case .liveScan:
+            LiveScanDetail()
         case .memory:
             AdviceList(advice: app.memoryAdvice, busy: app.isGeneratingMemory,
                        idle: "Find the biggest memory hogs and what to close to free RAM.",
@@ -80,28 +88,32 @@ struct DoctorSheet: View {
     private func busy(_ s: Section) -> Bool {
         switch s {
         case .heavy: return app.isAdvising
-        case .devMonitor: return app.isGeneratingReport
+        case .project: return app.isDiagnosingProject
+        case .liveScan: return app.isLiveScanning
         case .memory: return app.isGeneratingMemory
         }
     }
     private func hasResult(_ s: Section) -> Bool {
         switch s {
         case .heavy: return app.advice != nil
-        case .devMonitor: return app.diagnosticReport != nil
+        case .project: return app.projectDiagnosis != nil
+        case .liveScan: return app.liveScanReport != nil
         case .memory: return app.memoryAdvice != nil
         }
     }
     private func start(_ s: Section) {
         switch s {
         case .heavy: app.generateAdvice()
-        case .devMonitor: app.generateReport()
+        case .project: app.diagnoseProject(projectID: projectID ?? app.selectedProjectID)
+        case .liveScan: app.startLiveScan()
         case .memory: app.generateMemory()
         }
     }
     private func stop(_ s: Section) {
         switch s {
         case .heavy: app.stopAdvice()
-        case .devMonitor: app.stopReport()
+        case .project: app.stopProjectDiagnosis()
+        case .liveScan: app.stopLiveScan()
         case .memory: app.stopMemory()
         }
     }
@@ -283,14 +295,42 @@ private struct AdviceList: View {
 
 }
 
-// MARK: - Dev Monitor diagnosis (text report)
+// MARK: - Project failure diagnosis (text report on the selected project)
 
-private struct DiagnosisDetail: View {
+private struct ProjectDiagnosisDetail: View {
     @Environment(AppState.self) private var app
+    /// nil = follow the sidebar selection (the picker shows/overrides it).
+    @Binding var projectID: Project.ID?
+
+    private var effectiveID: Project.ID? { projectID ?? app.selectedProjectID }
+    private var project: Project? { app.projects.first { $0.id == effectiveID } }
+
     var body: some View {
-        if app.isGeneratingReport {
+        VStack(spacing: 0) {
+            picker
+            Divider()
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// Pick which project to diagnose — defaults to the sidebar selection, but the Doctor window can
+    /// target any project on its own. (Press Analyze in the toolbar to run it.)
+    private var picker: some View {
+        HStack(spacing: 8) {
+            Text("Project").font(.callout).foregroundStyle(.secondary)
+            Picker("", selection: Binding(get: { effectiveID }, set: { projectID = $0 })) {
+                ForEach(app.projects) { p in Text(p.name).tag(p.id as Project.ID?) }
+            }
+            .labelsHidden().fixedSize()
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    @ViewBuilder private var content: some View {
+        if app.isDiagnosingProject {
             Loading("Asking Claude…")
-        } else if let report = app.diagnosticReport {
+        } else if let report = app.projectDiagnosis {
             ScrollView {
                 Text(DoctorSheet.markdown(report.text))
                     .textSelection(.enabled)
@@ -298,8 +338,89 @@ private struct DiagnosisDetail: View {
                     .padding()
             }
             CostFooter(isError: report.isError, cost: report.costUSD)
+        } else if let project {
+            Idle("Diagnose why \(project.name)'s server or build failed — reads its logs and config (read-only). Press Analyze.")
         } else {
-            Idle("Diagnose Dev Monitor's own internal errors (read-only).")
+            Idle("Add a project first, then pick it above to diagnose why its server or build failed.")
+        }
+    }
+}
+
+// MARK: - Live Scan (timed observation → copyable report)
+
+/// Watches Dev Monitor + the machine for a chosen window (progress bar), then shows Claude's
+/// structured, copyable report. Idle state offers the observation duration; while observing it shows
+/// a determinate progress bar; while Claude reasons it shows a spinner.
+private struct LiveScanDetail: View {
+    @Environment(AppState.self) private var app
+    @State private var copied = false
+
+    var body: some View {
+        switch app.liveScan.phase {
+        case .observing: observing
+        case .analyzing: Loading("Analyzing with Claude…")
+        case .idle:
+            if let report = app.liveScanReport { result(report) } else { idle }
+        }
+    }
+
+    private var observing: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "waveform.path.ecg").font(.largeTitle)
+                .foregroundStyle(.tint).symbolEffect(.pulse)
+            Text("Observing Dev Monitor & the machine…").font(.headline)
+            ProgressView(value: app.liveScan.progress).frame(maxWidth: 320)
+            Text("\(app.liveScan.elapsed)s / \(app.liveScan.duration)s — watching processes, activity and internal errors")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+    }
+
+    private var idle: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(.secondary)
+            Text("Watch Dev Monitor live for a couple of minutes, then get a copyable report: what "
+                 + "every process is and who it belongs to, the activity, any errors or bugs, and "
+                 + "improvement points. Read-only.")
+                .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 430)
+            Picker("Observe for", selection: durationBinding) {
+                Text("1 min").tag(60)
+                Text("2 min").tag(120)
+                Text("5 min").tag(300)
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 260)
+            Text("Press ▶ to start").font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+    }
+
+    private var durationBinding: Binding<Int> {
+        Binding(get: { app.liveScan.duration }, set: { app.liveScan.duration = $0 })
+    }
+
+    private func result(_ report: ClaudeRunner.Report) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                Text(DoctorSheet.markdown(report.text))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            HStack {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(report.text, forType: .string)
+                    copied = true
+                } label: {
+                    Label(copied ? "Copied" : "Copy report",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+            }
+            .padding(.horizontal).padding(.top, 6)
+            .onChange(of: report.text) { copied = false }
+            CostFooter(isError: report.isError, cost: report.costUSD)
         }
     }
 }

@@ -93,6 +93,18 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     /// relaunch or reinstall instead of running blind until the session's first build finishes. `nil`
     /// until the first successful build.
     var lastBuildSeconds: TimeInterval?
+    /// User-defined environment variables injected (inline, `KEY='value'`) ahead of every supervised
+    /// run — dev server, preview, build, and worker. Ordered so the editor list is stable. Empty by
+    /// default; the app never sets these itself (it only manages PORT/NODE_OPTIONS/FORCE_COLOR).
+    var env: [EnvVar]
+
+    /// One `KEY=value` pair. Ordered (array, not dict) so the editor rows don't reshuffle.
+    struct EnvVar: Codable, Hashable, Sendable, Identifiable {
+        var id: UUID = UUID()
+        var key: String
+        var value: String
+        enum CodingKeys: String, CodingKey { case key, value }   // id is ephemeral, not persisted
+    }
 
     init(
         id: UUID = UUID(),
@@ -113,7 +125,8 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         buildMemoryGB: Int = 4,
         buildMemoryAuto: Bool = true,
         buildAutoHeapGB: Int = HeapScaling.firstGB,
-        lastBuildSeconds: TimeInterval? = nil
+        lastBuildSeconds: TimeInterval? = nil,
+        env: [EnvVar] = []
     ) {
         self.id = id
         self.name = name
@@ -134,6 +147,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.buildMemoryAuto = buildMemoryAuto
         self.buildAutoHeapGB = buildAutoHeapGB
         self.lastBuildSeconds = lastBuildSeconds
+        self.env = env
     }
 
     // Custom decoding so projects.json written before these fields still loads. New build-heap
@@ -142,7 +156,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, path, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
         case memoryGB, memoryAuto, port, healthPath, packageManagerAuto
-        case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB, lastBuildSeconds
+        case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB, lastBuildSeconds, env
     }
 
     init(from decoder: Decoder) throws {
@@ -168,6 +182,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         buildMemoryAuto = try c.decodeIfPresent(Bool.self, forKey: .buildMemoryAuto) ?? memoryAuto
         buildAutoHeapGB = try c.decodeIfPresent(Int.self, forKey: .buildAutoHeapGB) ?? HeapScaling.firstGB
         lastBuildSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .lastBuildSeconds)
+        env = try c.decodeIfPresent([EnvVar].self, forKey: .env) ?? []
     }
 }
 
@@ -217,5 +232,36 @@ extension Project {
         let slug = String(name.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "-" })
         let trimmed = slug.isEmpty ? "project" : String(slug.prefix(40))
         return Project.logsDirectory.appendingPathComponent("\(trimmed)-\(id.uuidString.prefix(8)).log")
+    }
+
+    /// How many `.log` files sit in `directory` and the bytes they occupy — for the "Clear logs"
+    /// affordance (label + confirm text). `directory` defaults to `logsDirectory`; tests pass a temp.
+    static func logsSummary(in directory: URL = logsDirectory) -> (count: Int, bytes: Int) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+        else { return (0, 0) }
+        return files.filter { $0.pathExtension == "log" }.reduce(into: (0, 0)) { acc, url in
+            acc.0 += 1
+            acc.1 += (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+    }
+
+    /// Delete every `.log` file in `directory`, returning how many were removed and the bytes freed.
+    /// Best-effort: an unremovable file is skipped. Safe while servers run — a live supervisor keeps
+    /// writing to its now-unlinked file (the entry just disappears from the folder), and a fresh log
+    /// is recreated on the next launch. `directory` defaults to `logsDirectory`; tests pass a temp.
+    @discardableResult
+    static func clearLogs(in directory: URL = logsDirectory) -> (removed: Int, bytes: Int) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+        else { return (0, 0) }
+        var removed = 0, bytes = 0
+        for url in files where url.pathExtension == "log" {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            if (try? fm.removeItem(at: url)) != nil { removed += 1; bytes += size }
+        }
+        return (removed, bytes)
     }
 }

@@ -115,21 +115,41 @@ enum ResourceAdvisor {
         protectedNames.contains { name.localizedCaseInsensitiveContains($0) }
     }
 
-    /// Argv fragments that unambiguously identify a JS/TS dev server (its actual binary), used to
-    /// detect *orphaned* dev processes (a dev server not in Dev Monitor's managed tree) for safe
-    /// automatic closing. Kept specific (the binary path / `<fw> dev`) to avoid false positives
-    /// like editor language servers that merely mention a framework.
+    /// Argv fragments that unambiguously identify a JS/TS dev OR preview server (its actual binary,
+    /// or — for a preview/production server — its build-output bundle path), used to detect
+    /// *orphaned* processes (not in Dev Monitor's managed tree) for safe automatic closing and for
+    /// labelling an unsupervised one in the Activity table. Kept specific (the binary path / `<fw>
+    /// dev` / a framework's own bundle layout) to avoid false positives like editor language servers
+    /// that merely mention a framework. `nuxt preview`/`next start`/`vite preview`/`astro preview`
+    /// already match via their bare binary-path entries below (no "dev"-only qualifier); the
+    /// `.output/server/`-style entries additionally catch a preview that skips the CLI entirely and
+    /// runs the built bundle directly (e.g. Nitro's `node .output/server/index.mjs`).
     static let orphanDevPatterns = [
         "nuxt dev", "/.bin/nuxt", "nuxt/bin/nuxt",
         "next dev", "/.bin/next", "next/dist/bin/next",
         "vite/bin/vite", "/.bin/vite",
         "astro dev", "/.bin/astro",
         "ng serve", "webpack-dev-server", "remix vite:dev",
+        ".output/server/",       // Nitro build output (Nuxt, Analog, SolidStart, …)
+        ".next/standalone/",     // Next.js standalone build output
+        ".svelte-kit/output/",   // SvelteKit adapter-node build output
+    ]
+
+    /// Subcommands that never bind a port and exit on their own — a build, prepare or lint step, not
+    /// a server. The bare binary-path entries above (`.bin/nuxt`, `vite/bin/vite`, …) match ANY
+    /// subcommand of that framework, so without this veto a `nuxt build`/`nuxt prepare` in progress
+    /// gets mislabeled as a running dev/preview server (it shows in the Activity table, is offered as
+    /// "kill", etc). Checked as a whole argv TOKEN (not a substring) so it can't misfire on part of a
+    /// path or flag name.
+    private static let nonServerSubcommands: Set<String> = [
+        "build", "generate", "prepare", "lint", "typecheck", "test", "format",
     ]
 
     static func looksLikeDevServer(argv: String) -> Bool {
         let a = argv.lowercased()
-        return orphanDevPatterns.contains { a.contains($0) }
+        guard orphanDevPatterns.contains(where: { a.contains($0) }) else { return false }
+        let tokens = a.split(separator: " ")
+        return !tokens.contains { nonServerSubcommands.contains(String($0)) }
     }
 
     /// Fast (Haiku) evaluation during a stall: which processes are safe to kill right now.

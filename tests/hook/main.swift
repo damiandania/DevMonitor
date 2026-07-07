@@ -27,6 +27,45 @@ chk(after.contains("keep-me"), "preserves unrelated hook")
 chk(after.contains("\"model\""), "preserves unrelated top-level key")
 chk(after.contains(ClaudeHookInstaller.scriptName), "settings references our script")
 
+// Behavioural coverage of the installed script itself: pipe a synthetic PreToolUse payload in and
+// check the real exit code / stderr, so a regex change is caught even if it only breaks at runtime.
+func runHook(_ command: String, cwd: String = "/tmp/proj") -> (exit: Int32, stderr: String) {
+    let payload = try! JSONSerialization.data(withJSONObject: ["tool_input": ["command": command], "cwd": cwd])
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/bash")
+    proc.arguments = [ClaudeHookInstaller.scriptURL.path]
+    let inPipe = Pipe(), errPipe = Pipe()
+    proc.standardInput = inPipe
+    proc.standardError = errPipe
+    proc.standardOutput = Pipe()
+    try? proc.run()
+    inPipe.fileHandleForWriting.write(payload)
+    inPipe.fileHandleForWriting.closeFile()
+    proc.waitUntilExit()
+    let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return (proc.terminationStatus, err)
+}
+
+// PREVIEW_RE: a raw preview launch is blocked and routed to `dev-monitor preview`.
+for cmd in ["npm run preview", "pnpm preview", "vite preview", "nuxt preview", "next start"] {
+    let r = runHook(cmd)
+    chk(r.exit == 2 && r.stderr.contains("dev-monitor preview '/tmp/proj'"),
+        "hook: blocks preview launch — \(cmd)", "exit=\(r.exit) stderr=\(r.stderr)")
+}
+// Ambiguous bare `start` (e.g. create-react-app's dev server) is deliberately NOT blocked — only
+// framework-specific, unambiguous preview commands are.
+let bareStart = runHook("npm start")
+chk(bareStart.exit == 0, "hook: bare 'npm start' is not treated as a preview", "exit=\(bareStart.exit)")
+// Already-routed and inspection commands stay exempt from the new rule too.
+let alreadyRouted = runHook("dev-monitor preview /tmp/proj")
+chk(alreadyRouted.exit == 0, "hook: a dev-monitor command is never blocked", "exit=\(alreadyRouted.exit)")
+let inspecting = runHook("pgrep -fl 'vite preview'")
+chk(inspecting.exit == 0, "hook: inspecting a preview command by name is not blocked", "exit=\(inspecting.exit)")
+// Regression: DEV_RE/BUILD_RE still fire after adding PREVIEW_RE.
+let devLaunch = runHook("npm run dev")
+chk(devLaunch.exit == 2 && devLaunch.stderr.contains("dev-monitor up"),
+    "hook: still blocks a dev launch", "exit=\(devLaunch.exit)")
+
 do { try ClaudeHookInstaller.uninstall() } catch { print("FAIL hook: uninstall threw — \(error)") ; fail += 1 }
 chk(!ClaudeHookInstaller.isInstalled, "not installed after uninstall()")
 chk(!FileManager.default.fileExists(atPath: ClaudeHookInstaller.scriptURL.path), "hook script removed")

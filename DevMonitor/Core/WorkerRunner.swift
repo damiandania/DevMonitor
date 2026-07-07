@@ -56,7 +56,8 @@ final class WorkerRunner {
         // `exec` so the worker REPLACES the login shell and becomes the session leader we spawned,
         // making its whole tree enumerable (by session) and killable (by killpg) — same as the server.
         let nodeOpts = ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)
-        let command = "NODE_OPTIONS=\(nodeOpts) FORCE_COLOR=1 exec \(baseCommand)"
+        let userEnv = ProcessSupport.envAssignments(project.env)
+        let command = "\(userEnv)NODE_OPTIONS=\(nodeOpts) FORCE_COLOR=1 exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         guard let proc = SpawnedProcess.spawn(command: command, cwd: project.path, wantsStdin: true) else {

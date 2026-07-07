@@ -13,6 +13,8 @@ struct ProcessRow: Identifiable, Sendable {
     var isWorker = false         // a background worker SUPERVISED by the app (managed tree)
     var isExternalDev = false    // a dev server running OUTSIDE the app (identified, not supervised)
     var isExtension = false      // a VS Code / Cursor extension language-server helper
+    var isClaude = false         // a shell/command Claude Code launched (its Bash-tool `/bin/zsh -c`)
+    var isPreview = false        // a supervised DevSession serving the production build, not `dev`
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -34,6 +36,14 @@ final class SystemSampler {
     var devTreeCPU: Double { processes.first { $0.isDevServer }?.cpuPerCore ?? 0 }
     var devTreeMem: Double { processes.first { $0.isDevServer }?.memBytes ?? 0 }
 
+    /// Rolling whole-machine timeline for the Activity charts — one point per sample (~2 Hz), capped
+    /// at `maxHistory` (~5 min). Appended only once we have a real CPU delta, so the first tick's
+    /// placeholder 0 never shows as a spike. `@Observable` is per-property, so appends here don't
+    /// invalidate views that read only the instantaneous meters.
+    private(set) var history: [SystemMetricPoint] = []
+    private let maxHistory = 300
+    private var historyTick = 0
+
     // Pressure detection: the machine is "stuck" when CPU stays pinned, or memory is full and
     // actively swapping, for a sustained window. Drives the auto kill-suggestions panel.
     enum Pressure: Sendable { case normal, stuck }
@@ -46,7 +56,7 @@ final class SystemSampler {
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
-    private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool)] = [:]
+    private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)] = [:]
     /// External dev servers that haven't bound a port yet: pid → uptime-ns after which the port scan
     /// (an fd walk — the expensive part of enrichment) may run again. Absent = entry is final.
     private var portRecheckAt: [Int32: UInt64] = [:]
@@ -57,7 +67,8 @@ final class SystemSampler {
     /// Supplies one entry PER supervised dev server (id + session-leader pid + readable label), so
     /// each shows as its own highlighted row (e.g. "MiddleSpace :3000") instead of a bare "node" or
     /// one merged row. Tree membership is resolved from the leader during the background pass.
-    var devServerInfo: (@MainActor () -> [(id: Int32, leader: pid_t, label: String)])?
+    /// `isPreview` marks a DevSession serving the production build (the row gets an eye icon).
+    var devServerInfo: (@MainActor () -> [(id: Int32, leader: pid_t, label: String, isPreview: Bool)])?
     /// Same, for in-progress builds — their trees show as one identified row (like the server).
     var buildInfo: (@MainActor () -> (leaders: [pid_t], label: String)?)?
     /// One entry PER running background worker, so each shows as its own highlighted row
@@ -92,7 +103,6 @@ final class SystemSampler {
             coreCount: coreCount, totalMem: totalMem, topN: topN)
         let out = await Task.detached(priority: .utility) { Self.collect(input) }.value
 
-        if let cpu = out.systemCPU { systemCPU = cpu }
         prevSysTicks = out.sysTicks
         systemMemUsed = out.memUsed
         if let swap = out.swap {
@@ -107,17 +117,30 @@ final class SystemSampler {
         richNameCache = out.richNameCache
         portRecheckAt = out.portRecheckAt
 
+        // Timeline history — only once we have a real CPU delta (the first tick has no previous
+        // ticks to diff, so `out.systemCPU` is nil; skip it rather than record a 0-CPU spike).
+        if let cpu = out.systemCPU {
+            systemCPU = cpu
+            let point = SystemMetricPoint(
+                id: historyTick, date: Date(), systemCPU: cpu,
+                memUsed: out.memUsed, memTotal: totalMem,
+                swapUsed: systemSwapUsed, swapTotal: systemSwapTotal,
+                loadAverage: out.loadAvg, temperature: out.temperature)
+            MetricChartMath.appendCapped(&history, point, cap: maxHistory)
+            historyTick += 1
+        }
+
         updatePressure()
     }
 
     /// Plain-value snapshot handed to the background pass (and the updated caches handed back).
     private struct SampleInput: Sendable {
-        var devs: [(id: Int32, leader: pid_t, label: String)]
+        var devs: [(id: Int32, leader: pid_t, label: String, isPreview: Bool)]
         var build: (leaders: [pid_t], label: String)?
         var workers: [(id: Int32, leader: pid_t, label: String)]
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
-        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool)]
+        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)]
         var portRecheckAt: [Int32: UInt64]
         var prevSysTicks: dm_cpu_ticks?
         var coreCount: Int
@@ -135,7 +158,7 @@ final class SystemSampler {
         var processes: [ProcessRow]
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
-        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool)]
+        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)]
         var portRecheckAt: [Int32: UInt64]
     }
 
@@ -208,7 +231,7 @@ final class SystemSampler {
             let sid = getsid(leader)
             return sid > 0 ? (pidsBySid[sid] ?? []) : []
         }
-        let devs = s.devs.map { (id: $0.id, pids: members(of: $0.leader), label: $0.label) }
+        let devs = s.devs.map { (id: $0.id, pids: members(of: $0.leader), label: $0.label, isPreview: $0.isPreview) }
             .filter { !$0.pids.isEmpty }
         let workers = s.workers.map { (id: $0.id, pids: members(of: $0.leader), label: $0.label) }
             .filter { !$0.pids.isEmpty }
@@ -219,32 +242,44 @@ final class SystemSampler {
             if !buildPids.isEmpty { build = (buildPids, b.label) }
         }
 
-        // Aggregate the dev-server and build trees into single identified rows; otherwise surface
-        // only processes with a real performance impact. (Pure + testable — see SystemSampler.aggregate.)
-        let result = aggregate(rows: rows, devs: devs, build: build, workers: workers,
-                               coreCount: s.coreCount, totalMem: s.totalMem, topN: s.topN)
-
-        // Give generic helpers (VS Code language servers, bare "node", …) a readable name
-        // derived from their argv — only for the few shown rows, and cached per pid.
+        // Identify external dev servers among the NOT-yet-supervised rows BEFORE aggregation, so a
+        // low-impact one (e.g. an idle preview server) is still found — enrichment used to run only
+        // on the few rows that survived the impact filter below, which silently dropped a quiet
+        // external server. `aggregate` exempts any row flagged `isExternalDev` from that filter, so
+        // it's always shown, like a supervised row. Supervised-tree pids are skipped (wasted lookup —
+        // they're already folded into their tree's row regardless of this flag).
+        let supervisedPids = devs.reduce(into: Set<Int32>()) { $0.formUnion($1.pids) }
+            .union(workers.flatMap(\.pids))
+            .union(build?.pids ?? [])
         var rich = s.richNameCache
         var recheckAt = s.portRecheckAt
-        let processes = result.map { row -> ProcessRow in
-            guard row.id > 0, isGeneric(row.name) else { return row }
+        let enrichedRows = rows.map { row -> ProcessRow in
+            // Enrich every shown real (unsupervised) row — not just the "generic"-named ones — so an
+            // app-bundled binary with an opaque name (e.g. Warp's "stable") is identified from its
+            // `.app` path too. It's cheap: enrichment reads argv once per pid and is cached across
+            // ticks, and only ~topN rows are ever shown, so new argv reads per tick are near-zero.
+            guard row.id > 0, !supervisedPids.contains(row.id) else { return row }
             let e = enrichedName(pid: row.id, comm: row.name, now: now,
                                  cache: &rich, portRecheckAt: &recheckAt)
-            if !e.ext && !e.isExtension && e.name == row.name { return row }
+            guard e.ext || e.isExtension || e.isClaude || e.name != row.name else { return row }
             return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
-                              memBytes: row.memBytes, isDevServer: row.isDevServer,
-                              isBuild: row.isBuild, isExternalDev: e.ext,
-                              isExtension: e.isExtension)
+                              memBytes: row.memBytes, isExternalDev: e.ext,
+                              isExtension: e.isExtension, isClaude: e.isClaude)
         }
+
+        // Aggregate the dev-server and build trees into single identified rows; identified external
+        // dev servers are always kept too; otherwise surface only processes with a real performance
+        // impact. (Pure + testable — see SystemSampler.aggregate.)
+        let result = aggregate(rows: enrichedRows, devs: devs, build: build, workers: workers,
+                               coreCount: s.coreCount, totalMem: s.totalMem, topN: s.topN)
+
         let liveIDs = Set(result.map { $0.id })
         rich = rich.filter { liveIDs.contains($0.key) }
         recheckAt = recheckAt.filter { liveIDs.contains($0.key) }
 
         return SampleOutput(systemCPU: systemCPU, sysTicks: ticks, memUsed: Double(sysMem.used),
                             swap: swap, loadAvg: dm_load_avg(), temperature: dm_cpu_temperature(),
-                            processes: processes, prev: newPrev, nameCache: seenNames,
+                            processes: result, prev: newPrev, nameCache: seenNames,
                             richNameCache: rich, portRecheckAt: recheckAt)
     }
 
@@ -264,11 +299,12 @@ final class SystemSampler {
     // MARK: - Pure logic (testable without the C metrics or the run loop)
 
     /// Aggregates each dev-server tree into its OWN identified row, the build tree into one row
-    /// (id -2), and keeps only other processes with real impact (heavy CPU or memory), ranked,
-    /// capped at `topN`.
+    /// (id -2), always keeps rows already flagged `isExternalDev` (an identified dev server running
+    /// outside the app), and otherwise keeps only other processes with real impact (heavy CPU or
+    /// memory), ranked, capped at `topN`.
     nonisolated static func aggregate(
         rows: [ProcessRow],
-        devs: [(id: Int32, pids: Set<Int32>, label: String)],
+        devs: [(id: Int32, pids: Set<Int32>, label: String, isPreview: Bool)],
         build: (pids: Set<Int32>, label: String)?,
         workers: [(id: Int32, pids: Set<Int32>, label: String)] = [],
         coreCount: Int, totalMem: Double, topN: Int
@@ -292,6 +328,8 @@ final class SystemSampler {
         var workerMem = [Double](repeating: 0, count: workers.count)
         var buildCPU = 0.0, buildMem = 0.0
         var others: [ProcessRow] = []
+        var externalDevs: [ProcessRow] = []
+        var claudeShells: [ProcessRow] = []
         for row in rows {
             if let gi = devIndexByPid[row.id] {
                 devCPU[gi] += row.cpuPerCore; devMem[gi] += row.memBytes
@@ -299,6 +337,10 @@ final class SystemSampler {
                 workerCPU[wi] += row.cpuPerCore; workerMem[wi] += row.memBytes
             } else if !buildPids.isEmpty, buildPids.contains(row.id) {
                 buildCPU += row.cpuPerCore; buildMem += row.memBytes
+            } else if row.isExternalDev {
+                externalDevs.append(row)
+            } else if row.isClaude {
+                claudeShells.append(row)
             } else {
                 others.append(row)
             }
@@ -307,7 +349,7 @@ final class SystemSampler {
         // One row per supervised server (always shown, even when momentarily idle).
         for (i, d) in devs.enumerated() {
             result.append(ProcessRow(id: d.id, name: d.label, cpuPerCore: devCPU[i],
-                                     memBytes: devMem[i], isDevServer: true))
+                                     memBytes: devMem[i], isDevServer: true, isPreview: d.isPreview))
         }
         // One row per running worker.
         for (i, w) in workers.enumerated() {
@@ -317,6 +359,11 @@ final class SystemSampler {
         if let build, !buildPids.isEmpty {
             result.append(ProcessRow(id: -2, name: build.label, cpuPerCore: buildCPU, memBytes: buildMem, isBuild: true))
         }
+        // Identified external dev servers ALWAYS show, like a supervised row — regardless of impact.
+        result.append(contentsOf: externalDevs.sorted { impact($0) > impact($1) })
+        // Claude Code's shells ALWAYS show too — even a near-idle one (e.g. a background `tail -f`
+        // monitor) matters here, so no impact filter; the user wants to see and be able to stop them.
+        result.append(contentsOf: claudeShells.sorted { impact($0) > impact($1) })
         result.append(contentsOf: others
             .filter { $0.cpuPerCore >= busyCPUPerCore || $0.memBytes >= heavyMem }
             .sorted { impact($0) > impact($1) }
@@ -348,17 +395,18 @@ final class SystemSampler {
         return (current, "", hotSince, false)
     }
 
-    nonisolated private static func isGeneric(_ name: String) -> Bool {
-        name.contains("Helper") || name == "node" || name == "Electron"
-            || (name.first?.isNumber ?? false)                       // version-like ("2.1.179")
-            || name.allSatisfy { $0.isNumber || $0 == "." || $0 == "-" }
+    /// JS/TS dev-server runtimes we port-probe when the argv matches no known framework — kept narrow
+    /// (node/bun/deno) so a browser, Electron app or daemon that also happens to open a port isn't
+    /// mistaken for a dev server.
+    nonisolated private static func isDevRuntime(_ comm: String) -> Bool {
+        switch comm.lowercased() { case "node", "bun", "deno": return true; default: return false }
     }
 
     nonisolated private static func enrichedName(
         pid: Int32, comm: String, now: UInt64,
-        cache: inout [Int32: (name: String, ext: Bool, isExtension: Bool)],
+        cache: inout [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)],
         portRecheckAt: inout [Int32: UInt64]
-    ) -> (name: String, ext: Bool, isExtension: Bool) {
+    ) -> (name: String, ext: Bool, isExtension: Bool, isClaude: Bool) {
         if let cached = cache[pid] {
             // An external dev server that hasn't bound a port yet re-scans only once its recheck is
             // due — walking its fds for the port is the expensive part. Everything else is final.
@@ -367,26 +415,64 @@ final class SystemSampler {
         var buffer = [CChar](repeating: 0, count: 8192)
         let n = Int(dm_proc_args(pid, &buffer, 8192))
         let args = n > 0 ? String(cString: buffer) : ""
+        // A shell Claude Code launched (its Bash tool runs every command as `/bin/zsh -c` that first
+        // sources a unique shell-snapshot — a signature nothing else produces). Surface it so the
+        // background "monitors" and foreground commands Claude runs show in Activity and can be stopped.
+        if isClaudeShell(args) {
+            // A background *monitor* (a `while true` / `until …; do sleep …; done` polling loop Claude
+            // left running to watch for a condition) vs a one-shot foreground command — Claude Code
+            // itself draws this distinction, so mirror it in the label.
+            let name = isClaudeMonitor(args) ? "Claude · monitor" : "Claude · shell"
+            let entry = (name: name, ext: false, isExtension: false, isClaude: true)
+            cache[pid] = entry
+            portRecheckAt.removeValue(forKey: pid)
+            return entry
+        }
         // A dev server started OUTSIDE the app: identify it like the managed one
         // ("MiddleSpace :3001") instead of a bare "node", and flag it external so the table can
         // give it the same format in a different colour. It stays unsupervised (no probe/recycle).
-        if ResourceAdvisor.looksLikeDevServer(argv: args) {
-            let project = projectName(fromArgs: args) ?? comm
+        // Two ways to qualify:
+        //   (1) argv matches a known framework (nuxt/next/vite/astro/…) — fast, no port scan needed,
+        //       and we keep rechecking until it binds so a still-starting heavy bundler isn't missed.
+        //   (2) it's a JS/TS dev runtime (node/bun/deno) actually LISTENING on a TCP port — catches
+        //       Express/Fastify/Nest/nodemon/plain-node/Bun/Deno servers that match no framework
+        //       pattern, so nothing that binds a port silently vanishes from Activity. The port is
+        //       the proof it's a server, so no framework allow-list is needed for this path.
+        let isFramework = ResourceAdvisor.looksLikeDevServer(argv: args)
+        if isFramework || isDevRuntime(comm) {
             let port = Int(dm_proc_listen_port(pid))
-            let entry = (name: project + (port > 0 ? " :\(port)" : ""), ext: true, isExtension: false)
-            cache[pid] = entry
-            if port > 0 {
-                portRecheckAt.removeValue(forKey: pid)               // port bound — entry is final
-            } else {
-                portRecheckAt[pid] = now &+ 10_000_000_000           // no port yet — retry in ~10 s
+            if isFramework || port > 0 {
+                let project = projectName(fromArgs: args) ?? comm
+                let entry = (name: project + (port > 0 ? " :\(port)" : ""),
+                             ext: true, isExtension: false, isClaude: false)
+                cache[pid] = entry
+                if port > 0 {
+                    portRecheckAt.removeValue(forKey: pid)           // port bound — entry is final
+                } else {
+                    portRecheckAt[pid] = now &+ 10_000_000_000       // framework still binding — retry ~10 s
+                }
+                return entry
             }
-            return entry
+            // A dev runtime that matches no framework and isn't listening (yet): not an identifiable
+            // server — fall through to generic naming. We don't reschedule a recheck, so idle node
+            // tooling (language servers, build/lint steps) isn't re-scanned every tick.
         }
         let d = describe(comm: comm, args: args)
-        let entry = (name: d.name, ext: false, isExtension: d.isExtension)
+        let entry = (name: d.name, ext: false, isExtension: d.isExtension, isClaude: false)
         cache[pid] = entry
         portRecheckAt.removeValue(forKey: pid)
         return entry
+    }
+
+    /// True when argv carries Claude Code's Bash-tool shell-snapshot signature.
+    nonisolated private static func isClaudeShell(_ args: String) -> Bool {
+        args.contains("shell-snapshots/snapshot-")
+    }
+
+    /// A Claude shell that's a background *monitor* — a polling loop (`while true` / `while :` /
+    /// `until …`) left running to watch for a condition, not a one-shot foreground command.
+    nonisolated private static func isClaudeMonitor(_ args: String) -> Bool {
+        args.contains("while true") || args.contains("while :") || args.contains("until ")
     }
 
     /// The project folder name from a dev-server argv: the directory just before `/node_modules/`
@@ -407,9 +493,34 @@ final class SystemSampler {
            let name = extensionDisplayName(dir: dir) ?? extensionFolderName(dir) {
             return (name, true)
         }
+        // Claude Code itself (its node CLI / helpers) — otherwise it shows as a bare version like
+        // "2.1.202". Match its package path so a bumped version keeps identifying.
+        if args.contains("@anthropic-ai/claude-code") || args.contains("/claude-code/") {
+            return ("Claude Code", false)
+        }
+        // A framework task run OUTSIDE the app (e.g. `node …/MiddleSpace/node_modules/.bin/nuxt build`)
+        // — name it "<project> · <task>" so a heavy orphan build/generate isn't a mystery "node" row.
+        if let task = externalTaskName(args) { return (task, false) }
         // Otherwise identify the owning app from the bundle path in argv
         // (e.g. ".../Claude.app/Contents/Helpers/.../2.1.179" → "Claude").
         return (appBundleName(inArgs: args) ?? comm, false)
+    }
+
+    /// A framework CLI task running unsupervised, named `<project> · <task>` — e.g.
+    /// `node .../<project>/node_modules/.bin/nuxt build` → "myapp · build". Only the non-server
+    /// tasks (build/generate/prepare) reach here; dev/preview/start are handled as dev servers.
+    nonisolated private static func externalTaskName(_ args: String) -> String? {
+        guard let project = projectName(fromArgs: args) else { return nil }
+        let tools: Set<String> = ["nuxt", "next", "vite", "astro", "ng", "vinxi", "remix", "nuxi"]
+        let tasks: Set<String> = ["build", "generate", "prepare"]
+        let tokens = args.split(separator: " ").map(String.init)
+        for (i, t) in tokens.enumerated() where i + 1 < tokens.count {
+            let base = t.split(separator: "/").last.map(String.init) ?? t
+            if tools.contains(base), tasks.contains(tokens[i + 1]) {
+                return "\(project) · \(tokens[i + 1])"
+            }
+        }
+        return nil
     }
 
     /// The `<Name>` of the first `…/<Name>.app/…` bundle referenced in argv.

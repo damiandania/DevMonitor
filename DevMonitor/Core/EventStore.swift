@@ -50,6 +50,13 @@ final class EventStore {
         return Array(all.suffix(limit).reversed())
     }
 
+    /// Delete the entire persisted history — the live file and any rolled `.1`. Best-effort; the
+    /// next `append` recreates the file. Backs the History window's "Clear history" button.
+    func clear() {
+        try? FileManager.default.removeItem(at: fileURL)
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: fileURL.path + ".1"))
+    }
+
     /// Roll the file to `events.jsonl.1` once it exceeds the cap, keeping exactly one previous file.
     private func rotateIfNeeded() {
         let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int) ?? 0

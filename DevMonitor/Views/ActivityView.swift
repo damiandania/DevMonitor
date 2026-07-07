@@ -7,16 +7,34 @@ struct ActivityView: View {
     @State private var percentOfMachine = false
     /// Collapsed by default: the card shows just the meters until the user expands the process list.
     @State private var expanded = false
+    /// The timeline-charts accordion, sibling to the process list. Ephemeral like `expanded`.
+    @State private var chartsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             meterRow
+            // Timeline-charts accordion (only when the setting is on) — same collapse pattern as the
+            // process list below: always in the hierarchy, height/opacity/clip animated by the card
+            // spring. Its 2 Hz churn is isolated inside ActivityTimelineView.
+            if app.settings.showCharts {
+                VStack(spacing: 0) {
+                    disclosure(title: chartsExpanded ? "Hide charts" : "Show charts",
+                               isOpen: chartsExpanded) { chartsExpanded.toggle() }
+                    ActivityTimelineView(sampler: app.systemSampler)
+                        .frame(height: chartsExpanded ? 172 : 0)
+                        .padding(.top, chartsExpanded ? 8 : 0)
+                        .opacity(chartsExpanded ? 1 : 0)
+                        .clipped()
+                        .accessibilityHidden(!chartsExpanded)
+                }
+            }
             // Disclosure region: the table is always in the hierarchy but collapses to zero height
             // and is clipped, so expand/collapse is a smooth accordion (height + opacity) driven by
             // a single spring on the card — no content spilling past the card edge mid-animation.
             VStack(spacing: 0) {
-                expandButton
+                disclosure(title: expanded ? "Hide processes" : "Show processes",
+                           isOpen: expanded) { expanded.toggle() }
                 ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
                     .frame(height: expanded ? 240 : 0)
                     .padding(.top, expanded ? 10 : 0)
@@ -27,6 +45,7 @@ struct ActivityView: View {
         }
         .dmCard()
         .animation(.spring(response: 0.38, dampingFraction: 0.88), value: expanded)
+        .animation(.spring(response: 0.38, dampingFraction: 0.88), value: chartsExpanded)
     }
 
     private var header: some View {
@@ -43,15 +62,14 @@ struct ActivityView: View {
         }
     }
 
-    /// Disclosure control under the meters that opens the process table downward.
-    private var expandButton: some View {
-        Button {
-            expanded.toggle()
-        } label: {
+    /// Shared disclosure control (chevron rotates when open) — drives both the charts and the
+    /// process-list accordions so they look and behave identically.
+    private func disclosure(title: LocalizedStringKey, isOpen: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
             HStack(spacing: 6) {
-                Text(expanded ? "Hide processes" : "Show processes")
+                Text(title)
                 Image(systemName: "chevron.down")
-                    .rotationEffect(.degrees(expanded ? 180 : 0))
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
             }
             .font(.caption.weight(.medium))
             .foregroundStyle(.secondary)
@@ -60,7 +78,6 @@ struct ActivityView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expanded ? "Hide the process list" : "Show the process list")
     }
 
     // MARK: - Meters

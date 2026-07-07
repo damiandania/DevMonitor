@@ -88,6 +88,7 @@ private struct GeneralSettings: View {
                 ForEach(AppSettings.allBars) { bar in
                     Toggle(LocalizedStringKey(bar.label), isOn: barBinding(bar.id))
                 }
+                Toggle("Show timeline charts", isOn: showCharts)
             }
             Section("AI analysis") {
                 Picker("Model", selection: model) {
@@ -120,6 +121,9 @@ private struct GeneralSettings: View {
     private var editor: Binding<String> {
         .init(get: { app.settings.editor ?? app.installedEditors.first ?? "" },
               set: { app.settings.editor = $0; app.persistSettings() })
+    }
+    private var showCharts: Binding<Bool> {
+        .init(get: { app.settings.showCharts }, set: { app.settings.showCharts = $0; app.persistSettings() })
     }
     private func barBinding(_ id: String) -> Binding<Bool> {
         .init(get: { app.settings.bars.contains(id) }, set: { on in
@@ -280,6 +284,45 @@ private struct ClaudeHookSection: View {
 
 // MARK: - Per-project
 
+/// Editor for a project's user-defined environment variables. Ordered rows (stable `id`), each a
+/// KEY/value pair; edits write straight back through the binding (persisted like every other
+/// per-project setting) and take effect on the next launch of any supervised run.
+private struct EnvSection: View {
+    @Binding var env: [Project.EnvVar]
+
+    var body: some View {
+        Section {
+            ForEach($env) { $row in
+                HStack(spacing: 8) {
+                    TextField("KEY", text: $row.key)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .autocorrectionDisabled()
+                        .frame(width: 150)
+                    Text("=").foregroundStyle(.secondary)
+                    TextField("value", text: $row.value)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .autocorrectionDisabled()
+                    Button { env.removeAll { $0.id == row.id } } label: {
+                        Image(systemName: "minus.circle.fill")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Remove this variable")
+                }
+            }
+            Button { env.append(Project.EnvVar(key: "", value: "")) } label: {
+                Label("Add variable", systemImage: "plus")
+            }
+        } header: {
+            Text("Environment")
+        } footer: {
+            Text("Injected into the dev server, preview, build, and worker on their next launch. "
+                 + "The app's own PORT / NODE_OPTIONS override a variable of the same name.")
+        }
+    }
+}
+
 private struct ProjectSettings: View {
     @Environment(AppState.self) private var app
     let project: Project
@@ -296,6 +339,7 @@ private struct ProjectSettings: View {
                 packageRow
                 healthPathRow
             }
+            EnvSection(env: Binding(get: { live.env }, set: { app.setEnv($0, for: project.id) }))
             Section {
                 LabeledContent("Folder") {
                     Text(live.path).foregroundStyle(.secondary)

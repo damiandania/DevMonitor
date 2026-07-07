@@ -27,8 +27,22 @@ struct DashboardView: View {
                 }
                 Spacer(minLength: 0)
             }
+            // Live CPU/RAM charts for the project's active dev/preview tree. Isolated in
+            // SessionChartsView so its ~1 Hz churn doesn't re-render this card.
+            if app.settings.showCharts, let session = activeSession {
+                Divider()
+                SessionChartsView(session: session)
+            }
         }
         .dmCard()
+    }
+
+    /// The project's active supervised session — dev if running, else the preview (mutually
+    /// exclusive per project). nil when nothing is live, so the charts stay hidden.
+    private var activeSession: DevSession? {
+        if let s = app.sessions[project.id], s.state.isActive { return s }
+        if let p = app.previews[project.id], p.state.isActive { return p }
+        return nil
     }
 }
 

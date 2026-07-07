@@ -29,6 +29,7 @@ printf '%s' "$cmd" | grep -qE "$INSPECT_RE" && exit 0
 sep='(^|[^[:alnum:]_.-])'
 DEV_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?dev([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|vinxi)[[:space:]]+dev([^[:alnum:]_-]|$)|${sep}vite([[:space:]]+(dev|serve|--)|[[:space:]]*$)|${sep}ng[[:space:]]+serve([^[:alnum:]_-]|$)|${sep}(webpack[[:space:]]+serve|webpack-dev-server)|${sep}remix[[:space:]]+vite:dev"
 BUILD_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?build([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|ng|vite|vinxi)[[:space:]]+build([^[:alnum:]_-]|$)"
+PREVIEW_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?preview([^[:alnum:]_:-]|$)|${sep}(nuxt|nuxi|vite|astro)[[:space:]]+preview([^[:alnum:]_-]|$)|${sep}next[[:space:]]+start([^[:alnum:]_-]|$)"
 if printf '%s' "$cmd" | grep -qE "$DEV_RE"; then
   echo "BLOCKED — dev servers on this machine run through DevMonitor (one supervised server per project)." >&2
   echo "Do not start a dev server directly. Instead run:  dev-monitor up '$cwd' --wait   (blocks until ready, prints the URL)" >&2
@@ -39,6 +40,12 @@ fi
 if printf '%s' "$cmd" | grep -qE "$BUILD_RE"; then
   echo "BLOCKED — builds run through DevMonitor so the project's dev server is stopped first." >&2
   echo "Instead run:  dev-monitor build '$cwd'   (stops the server, builds, relaunches it)." >&2
+  echo "Bypass once with DM_RAW=1." >&2
+  exit 2
+fi
+if printf '%s' "$cmd" | grep -qE "$PREVIEW_RE"; then
+  echo "BLOCKED — preview servers (serving the production build) also run through DevMonitor." >&2
+  echo "Instead run:  dev-monitor preview '$cwd' --wait   (blocks until ready, prints the URL)." >&2
   echo "Bypass once with DM_RAW=1." >&2
   exit 2
 fi

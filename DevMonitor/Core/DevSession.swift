@@ -134,7 +134,8 @@ final class DevSession {
         // the fresh server collides and exits ("code 6").
         reapLeftovers(pinnedPort: pinnedPort)
         let fwEnv = Self.frameworkEnv(for: project.framework)
-        let command = "\(fwEnv)NODE_OPTIONS=\(ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
+        let userEnv = ProcessSupport.envAssignments(project.env)
+        let command = "\(userEnv)\(fwEnv)NODE_OPTIONS=\(ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)) FORCE_COLOR=1 \(portEnv)exec \(baseCommand)"
         append(line: "$ \(command)  (cwd: \(project.path))")
 
         guard let proc = SpawnedProcess.spawn(command: command, cwd: project.path, wantsStdin: true) else {

@@ -13,17 +13,60 @@ enum ClaudeRunner {
     /// Dev Monitor's own source tree (where the app is developed).
     static let sourcePath = NSHomeDirectory() + "/dev/DevMonitor"
 
-    static func diagnose(internalLog: String, model: String? = nil) async -> Report {
+    /// The Doctor "Live Scan": Claude reads a TIMELINE transcript of Dev Monitor + the machine
+    /// (captured live over a couple of minutes by `LiveScan`) and returns a structured, copyable
+    /// report — what each process is and who owns it, the activity, errors/bugs, and improvement
+    /// points. Runs in the app's own source tree so it can correlate log errors to the code.
+    /// Read-only, like `diagnoseProject`. `language` is a BCP-47 code so the report matches the UI.
+    static func liveScan(transcript: String, language: String, model: String? = nil) async -> Report {
         let prompt = """
-        You are diagnosing **Dev Monitor**, a native macOS SwiftUI app whose source is the current
-        working directory. Below is a tail of its internal event log. Identify the most likely root
-        cause of any error or anomaly, name the file/function involved, and suggest a concrete fix.
-        Be concise (a short report). DO NOT modify any files.
+        You are **Dev Monitor**'s built-in diagnostician. Dev Monitor is a native macOS SwiftUI app
+        that supervises local dev servers; its source is the current working directory. Below is a
+        TIMELINE captured live over the last couple of minutes: machine meters, the process table,
+        the supervised sessions/builds/workers, machine-pressure episodes, and Dev Monitor's own
+        internal event log (the `LOG:` lines). Each block is timestamped `[t=Ns]`.
 
-        --- Dev Monitor internal log ---
-        \(internalLog)
+        Produce a clear, well-structured **Markdown** report, written in this language (BCP-47 code):
+        `\(language)`. Make it easy to copy and paste. Use exactly these sections, in order:
+
+        1. **Summary** — a one-paragraph health verdict.
+        2. **Processes & who they belong to** — for every notable process in the snapshots, say what it
+           is and WHO owns it (which app, project, editor, CLI or system service), inferring the owner
+           from its `argv`, executable path, and any `node_modules` / `.app` bundle / `/extensions/`
+           location. Group by owner. Explicitly flag any process you cannot confidently attribute.
+        3. **Activity** — what happened across the window: servers starting/stopping, builds, worker
+           activity, recycles, pressure episodes, orphans auto-closed.
+        4. **Errors & bugs** — concrete errors or anomalies (from the internal log or the state), each
+           with the most likely root cause and the file/function involved — read the source to confirm.
+           Only real issues; write "None observed" if it looks clean.
+        5. **Improvement points** — specific, actionable improvements to Dev Monitor (code or UX),
+           most impactful first.
+
+        Be specific: cite pids, names and timestamps from the transcript. DO NOT modify any files.
+
+        --- live timeline ---
+        \(transcript)
         """
         return await run(prompt: prompt, cwd: sourcePath, model: model)
+    }
+
+    /// Diagnose why a user's dev **project** failed to run or build. Runs in the project's own
+    /// directory (`projectPath`) so claude can read its `package.json`, framework config, `.env.example`,
+    /// etc., and is fed the supervisor's failure `context` (state, exit code, `lastError`, log tail).
+    /// Read-only, like `diagnose`.
+    static func diagnoseProject(name: String, projectPath: String, context: String, model: String? = nil) async -> Report {
+        let prompt = """
+        You are diagnosing why a local dev **project** named "\(name)" failed to run or build. Its
+        source is the current working directory — read its own config (package.json / framework
+        config / .env.example / lockfile) as needed. Below is Dev Monitor's supervision context: the
+        process state, exit code, the failure cause it recorded, and a tail of the process output.
+        Identify the single most likely root cause and give a concrete, actionable fix (the exact
+        commands to run or file changes to make). Be concise. DO NOT modify any files.
+
+        --- supervision context ---
+        \(context)
+        """
+        return await run(prompt: prompt, cwd: projectPath, model: model)
     }
 
     /// Holds the Process so the cancellation handler can terminate it from another thread.

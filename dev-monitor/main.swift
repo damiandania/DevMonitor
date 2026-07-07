@@ -12,7 +12,8 @@ let usage = """
 dev-monitor — launch, build and supervise dev servers through the Dev Monitor app.
 
 USAGE:
-  dev-monitor up [path] [--gb N] [--wait]   Start the server (--wait blocks until ready, prints URL). Alias: run
+  dev-monitor up [path] [--gb N] [--wait]        Start the server (--wait blocks until ready, prints URL). Alias: run
+  dev-monitor preview [path] [--gb N] [--wait]   Serve the production build (needs a `preview`/`start` script)
   dev-monitor build [path]          Build the project (runs alongside the dev server)
   dev-monitor status [--json]       List every known project (name, state, port)
   dev-monitor stop [path] [--all]   Stop one project's server (default: cwd), or --all of them
@@ -25,6 +26,10 @@ USAGE:
 One supervised server PER PROJECT; several projects can run at once. Paths default to the
 current directory and are resolved to absolute. The Dev Monitor app hosts the hub at
 ~/Library/Application Support/DevMonitor/dm.sock — if it isn't running, it's started for you.
+
+If a build is in progress for the project, `up`/`preview` won't interrupt it: without --wait they
+report the build and exit; with --wait they queue behind it and start the server once it finishes.
+`status --json` includes `building`/`buildElapsed`/`buildETA` so an agent can coordinate.
 """
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -113,10 +118,64 @@ func fetchServers() -> [IPCServerInfo] {
     return servers
 }
 
+/// Start a dev server (`up`) or production preview (`preview`), coordinating with any in-flight
+/// build. If the hub reports "busy" (a build is running — starting a server would abort it): without
+/// `--wait`, print the guidance and exit non-zero; with `--wait`, block until the build finishes,
+/// THEN launch and wait for readiness — so another Claude can queue behind a build instead of
+/// killing it. With no conflict, behaves like the old path.
+func startServer(cmd: String, path: String, gb: Int?, wait: Bool) {
+    let messages = requireHub(IPCRequest(cmd: cmd, path: path, name: nil, gb: gb, all: nil))
+    if let busy = messages.first(where: { $0.type == "busy" }) {
+        let note = busy.message ?? "a build is in progress"
+        guard wait else {
+            FileHandle.standardError.write(Data("dev-monitor: \(note)\n".utf8))
+            exit(1)
+        }
+        FileHandle.standardError.write(Data(
+            "dev-monitor: \(note)\ndev-monitor: waiting for the build to finish, then starting…\n".utf8))
+        waitForBuildToFinish(path)
+        runAndReport(IPCRequest(cmd: cmd, path: path, name: nil, gb: gb, all: nil))
+        waitUntilReady(path)
+        return
+    }
+    for m in messages {
+        if m.type == "error" {
+            FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
+        }
+        print(m.message ?? m.type)
+    }
+    if wait { waitUntilReady(path) }
+}
+
+/// Poll `status` until the project's build finishes (or the project vanishes / the timeout elapses),
+/// printing occasional progress to stderr. Builds can be long, so the cap is generous.
+func waitForBuildToFinish(_ path: String, timeoutSeconds: Double = 900) {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    var lastNote = -15
+    while Date() < deadline {
+        guard let s = fetchServers().first(where: { $0.path == path }) else { return }  // project gone
+        if s.building != true { return }                                                // build done
+        let elapsed = Int(s.buildElapsed ?? 0)
+        if elapsed >= lastNote + 15 {
+            lastNote = elapsed
+            let eta = s.buildETA.map { " / ~\(Int($0))s" } ?? ""
+            FileHandle.standardError.write(Data("dev-monitor: still building (\(elapsed)s\(eta))…\n".utf8))
+        }
+        usleep(1_000_000)
+    }
+    die("timed out after \(Int(timeoutSeconds))s waiting for the build to finish (see: dev-monitor logs '\(path)')")
+}
+
 /// Block until the project at `path` is HTTP-ready (print its URL, exit 0), has Failed (print the
 /// cause, exit 1), or the timeout elapses — so `up --wait` saves the caller from polling itself.
 func waitUntilReady(_ path: String, timeoutSeconds: Double = 180) {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
+    // A just-issued launch takes a moment to flip the status from a prior "Stopped"/"Idle" (e.g. a
+    // rapid stop→up, or launching right after a build that left the session Stopped) to "Launching".
+    // So treat "Stopped" as terminal only AFTER we've seen the server go active at least once, or a
+    // short grace elapses — otherwise a stale read would abort the wait immediately.
+    let stopGraceUntil = Date().addingTimeInterval(5)
+    var sawActive = false
     while Date() < deadline {
         // Tolerate a transient untrack/retrack (e.g. a rapid stop→up, or a crash auto-restart): if
         // the project momentarily isn't in the list, keep waiting rather than failing — only `Failed`
@@ -124,8 +183,13 @@ func waitUntilReady(_ path: String, timeoutSeconds: Double = 180) {
         if let s = fetchServers().first(where: { $0.path == path }) {
             if s.ready == true { print("ready: \(s.url ?? "(running)")"); return }
             if s.state.hasPrefix("Failed") { die("failed: \(s.lastError ?? s.state)") }
-            // A clean Stop while we wait means something stopped it elsewhere — terminal, don't hang.
-            if s.state.hasPrefix("Stopped") { die("stopped while waiting (the server was stopped elsewhere)") }
+            let idleOrStopped = s.state.hasPrefix("Stopped") || s.state.hasPrefix("Idle")
+            if !idleOrStopped { sawActive = true }   // Launching / Recycling / Running / …
+            // A clean Stop AFTER it was active (or past the launch grace) means something stopped it
+            // elsewhere — terminal, don't hang.
+            if s.state.hasPrefix("Stopped"), sawActive || Date() > stopGraceUntil {
+                die("stopped while waiting (the server was stopped elsewhere)")
+            }
         }
         usleep(400_000)
     }
@@ -133,12 +197,10 @@ func waitUntilReady(_ path: String, timeoutSeconds: Double = 180) {
 }
 
 switch cmd {
-case "run", "up":
+case "run", "up", "preview":
     let a = DMParse.parse(rest, boolFlags: ["--wait"], allowGB: true)
     if let e = a.error { die(e) }
-    let upPath = singlePath(a)
-    runAndReport(IPCRequest(cmd: cmd, path: upPath, name: nil, gb: a.gb, all: nil))
-    if a.flags.contains("--wait") { waitUntilReady(upPath) }
+    startServer(cmd: cmd, path: singlePath(a), gb: a.gb, wait: a.flags.contains("--wait"))
 
 case "build", "restart", "remove", "rm", "forget":
     let a = DMParse.parse(rest, boolFlags: [], allowGB: false)

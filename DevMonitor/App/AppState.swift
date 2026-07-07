@@ -41,6 +41,7 @@ final class AppState {
     @ObservationIgnored private let ipcServer = IPCServer()
     @ObservationIgnored let eventStore = EventStore()
     let systemSampler = SystemSampler()
+    let sleepGuard = SleepGuard()
 
     init() {
         // The IPC hub writes responses to `dev-monitor` clients that may have already closed the
@@ -81,15 +82,18 @@ final class AppState {
             guard let self else { return [] }
             // One entry PER supervised server — dev servers AND production-build previews (both are
             // DevSessions) — each its own table row. id = -pid so the synthetic row never collides
-            // with a real pid and skips enrichment.
-            var rows: [(id: Int32, leader: pid_t, label: String)] = []
+            // with a real pid and skips enrichment. `isPreview` gets the row an eye icon in the
+            // Activity table instead of the " · preview" text suffix it used to carry in the name.
+            var rows: [(id: Int32, leader: pid_t, label: String, isPreview: Bool)] = []
             for s in self.sessions.values where s.pid > 0 {
                 rows.append((id: -s.pid, leader: s.pid,
-                             label: s.project.name + (s.effectivePort.map { " :\($0)" } ?? "")))
+                             label: s.project.name + (s.effectivePort.map { " :\($0)" } ?? ""),
+                             isPreview: false))
             }
             for p in self.previews.values where p.pid > 0 {
                 rows.append((id: -p.pid, leader: p.pid,
-                             label: p.project.name + " · preview" + (p.effectivePort.map { " :\($0)" } ?? "")))
+                             label: p.project.name + (p.effectivePort.map { " :\($0)" } ?? ""),
+                             isPreview: true))
             }
             return rows
         }
@@ -109,6 +113,7 @@ final class AppState {
                 .map { (id: -$0.pid, leader: $0.pid, label: "\($0.project.name) · worker") }
         }
         pressure = PressureManager(app: self)
+        liveScan = LiveScan(app: self)
         systemSampler.onStuck = { [weak self] in self?.pressure.evaluate() }
         // Refresh the pressure suggestions every 30s: prune dead processes, clear once the machine
         // recovers (the yellow tab disappears), or re-evaluate while still stuck.
@@ -289,6 +294,7 @@ final class AppState {
     /// `reapLeftovers` covers it.
     func shutdown() {
         ipcServer.stop()
+        sleepGuard.disable()
         let leaders = (sessions.values.map(\.pid) + builds.values.map(\.pid)
                        + workers.values.map(\.pid) + previews.values.map(\.pid)).filter { $0 > 0 }
         guard !leaders.isEmpty else { return }
@@ -367,12 +373,14 @@ final class AppState {
     // Build orchestration (runBuild, runBuildAndWait + its pause/pressure/autoscale steps, build(for:))
     // lives in AppState+Builds.swift.
 
-    // Doctor — three READ-ONLY AI analyses. The generate/stop/reset + apply/applyAll methods and the
-    // `diagnosticReport`/`advice`/`memoryAdvice` read shims live in AppState+Doctor.swift; each is
-    // backed by one of these jobs (which own the guard/flag/Task lifecycle they used to duplicate).
-    let reportJob = AsyncJob<ClaudeRunner.Report>()
+    // Doctor — READ-ONLY AI analyses. The generate/stop/reset + apply/applyAll methods and the
+    // `advice`/`memoryAdvice`/… read shims live in AppState+Doctor.swift; each is backed by one of
+    // these jobs (which own the guard/flag/Task lifecycle they used to duplicate). The Doctor's "Live
+    // Scan" tab is instead backed by the `liveScan` manager below (it has its own progress lifecycle).
     let adviceJob = AsyncJob<ResourceAdvisor.Advice>()
     let memoryJob = AsyncJob<ResourceAdvisor.Advice>()
+    /// Doctor "Project" tab: diagnose why the selected project's server/build failed.
+    let projectJob = AsyncJob<ClaudeRunner.Report>()
 
     func persistSettings() { settingsStore.save(settings) }
 
@@ -385,6 +393,19 @@ final class AppState {
     var killSuggestions: [ResourceAdvisor.Recommendation] { pressure.killSuggestions }
     func dismissPressure() { pressure.dismiss() }
     func killSuggestion(_ rec: ResourceAdvisor.Recommendation) { pressure.killSuggestion(rec) }
+
+    // Doctor "Live Scan": watches the app + machine for a window, then a Claude report. Its own
+    // progress/phase lifecycle lives in LiveScan; created in init() once `self` exists. View-facing
+    // shims are in AppState+Doctor.swift.
+    @ObservationIgnored private(set) var liveScan: LiveScan!
+
+    /// BCP-47 language for AI reports — the chosen UI language, or the system locale's when "system",
+    /// so a Live Scan report comes back in the language the user reads.
+    var reportLanguageHint: String {
+        settings.language == "system"
+            ? (Locale.autoupdatingCurrent.language.languageCode?.identifier ?? "en")
+            : settings.language
+    }
 
     /// argv of a pid (joined), via KERN_PROCARGS2 — used for orphan dev-server detection.
     static func argv(of pid: Int32) -> String {

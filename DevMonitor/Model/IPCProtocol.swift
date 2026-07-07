@@ -2,10 +2,10 @@ import Foundation
 
 /// Shared IPC types between the app (hub) and the `dev-monitor` CLI.
 struct IPCRequest: Codable, Sendable {
-    var cmd: String          // "run"/"up" | "status" | "stop" | "restart" | "build"
-    var path: String?        // project path (run/up/build/stop/restart) — defaults to the CLI's cwd
+    var cmd: String          // "run"/"up" | "status" | "stop" | "restart" | "build" | "preview"
+    var path: String?        // project path (run/up/build/stop/restart/preview) — defaults to the CLI's cwd
     var name: String?        // reserved
-    var gb: Int?             // heap override (run/up)
+    var gb: Int?             // heap override (run/up: dev heap; preview: build heap)
     var all: Bool?           // stop: stop every supervised server, not just this path's
 }
 
@@ -28,6 +28,15 @@ struct IPCServerInfo: Codable, Sendable {
     var exitCode: Int?
     /// Human cause of the last failure, with a remedy when known (e.g. an OOM hint).
     var lastError: String?
+    // Build coordination — lets an external client (the CLI / another Claude) see that a build is
+    // in flight and wait it out instead of interrupting it. All nil when no build is running.
+    /// A build is currently running for this project. (Defaults keep older call sites — e.g. the
+    /// IPC test — constructing `IPCServerInfo` without the build fields.)
+    var building: Bool? = nil
+    /// Seconds since the current build started.
+    var buildElapsed: Double? = nil
+    /// Expected total build seconds (the last successful build's duration), for an ETA.
+    var buildETA: Double? = nil
 }
 
 struct IPCMessage: Codable, Sendable {

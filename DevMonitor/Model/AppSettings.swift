@@ -15,6 +15,8 @@ struct AppSettings: Codable, Sendable, Equatable {
     var defaultMemoryGB: Int
     /// Which activity bars to show on the dashboard (ids from `allBars`).
     var bars: [String]
+    /// Show the live metric timeline charts (Activity timeline accordion + per-project charts).
+    var showCharts: Bool
     /// UI appearance: "system" (follow macOS), "light", or "dark".
     var theme: String
     /// Terminal/log appearance: "app" (follow the app theme), "dark", or "light".
@@ -36,6 +38,7 @@ struct AppSettings: Codable, Sendable, Equatable {
          autoCloseOrphans: Bool = true,
          defaultMemoryGB: Int = 4,
          bars: [String] = AppSettings.defaultBars,
+         showCharts: Bool = true,
          theme: String = "system",
          terminalTheme: String = "dark",
          language: String = "system",
@@ -50,6 +53,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         self.autoCloseOrphans = autoCloseOrphans
         self.defaultMemoryGB = defaultMemoryGB
         self.bars = bars
+        self.showCharts = showCharts
         self.theme = theme
         self.terminalTheme = terminalTheme
         self.language = language
@@ -62,7 +66,7 @@ struct AppSettings: Codable, Sendable, Equatable {
 
     // Tolerant decode so older settings.json (missing keys) still loads.
     enum CodingKeys: String, CodingKey {
-        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, theme, terminalTheme, language
+        case browser, editor, analysisModel, autoCloseOrphans, defaultMemoryGB, bars, showCharts, theme, terminalTheme, language
         case notificationsEnabled, notifyFailures, notifyRecovery, notifyBuilds, notifyPressure
     }
     init(from decoder: Decoder) throws {
@@ -73,6 +77,7 @@ struct AppSettings: Codable, Sendable, Equatable {
         autoCloseOrphans = try c.decodeIfPresent(Bool.self, forKey: .autoCloseOrphans) ?? true
         defaultMemoryGB = try c.decodeIfPresent(Int.self, forKey: .defaultMemoryGB) ?? 4
         bars = try c.decodeIfPresent([String].self, forKey: .bars) ?? AppSettings.defaultBars
+        showCharts = try c.decodeIfPresent(Bool.self, forKey: .showCharts) ?? true
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "system"
         terminalTheme = try c.decodeIfPresent(String.self, forKey: .terminalTheme) ?? "dark"
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? "system"

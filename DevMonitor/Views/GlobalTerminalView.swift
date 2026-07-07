@@ -10,14 +10,24 @@ struct GlobalTerminalView: View {
 
     private enum Tab: Identifiable {
         case control(RunControl)
+        case claude(ProcessRow)
         case pressure
-        var id: String { switch self { case .control(let c): c.tabID; case .pressure: "pressure" } }
+        var id: String {
+            switch self {
+            case .control(let c): c.tabID
+            case .claude(let r): "claude:\(r.id)"
+            case .pressure: "pressure"
+            }
+        }
     }
 
     private var tabs: [Tab] {
         var controls = app.projects.flatMap { app.runControls(for: $0) }.filter(\.isLive)
         controls.sort { ($0.projectName, $0.rank) < ($1.projectName, $1.rank) }
         var result: [Tab] = controls.map { .control($0) }
+        // Claude Code's own shells/monitors get their own tabs (rightmost), each closeable — like a
+        // terminal tab, but the "log" is the command/script it's running (its stdout isn't ours to tap).
+        result += app.systemSampler.processes.filter(\.isClaude).map { .claude($0) }
         // The pressure tab is an alert — always first (leftmost).
         if app.systemUnderPressure { result.insert(.pressure, at: 0) }
         return result
@@ -57,6 +67,13 @@ struct GlobalTerminalView: View {
                     isPressure: false, selected: selected, tint: c.status.color,
                     onSelect: { app.selectedTerminalID = c.tabID },
                     closeHelp: "Close \(c.title.lowercased()) · \(c.projectName)", onClose: c.onClose)
+        case .claude(let row):
+            TabPill(icon: "terminal", assetIcon: "ClaudeLogo", name: row.name,
+                    help: "\(row.name) — pid \(row.id)",
+                    isPressure: false, selected: selected, tint: .red,
+                    onSelect: { app.selectedTerminalID = "claude:\(row.id)" },
+                    closeHelp: "Stop \(row.name) (pid \(row.id))",
+                    onClose: { app.killProcessRow(row) })
         case .pressure:
             TabPill(icon: "exclamationmark.triangle.fill", name: "System pressure",
                     help: "System under pressure — suggested processes to free up",
@@ -74,6 +91,8 @@ struct GlobalTerminalView: View {
             LogPaneView(lines: c.logLines(),
                         footer: c.timerMode.map { AnyView(RunTimerBar(mode: $0)) },
                         terminalTheme: app.settings.terminalTheme)
+        case .claude(let row):
+            ClaudeShellPane(shell: row)
         }
     }
 
@@ -81,6 +100,9 @@ struct GlobalTerminalView: View {
     /// an ✕ on hover; the pressure tab is yellow with a warning glyph.
     private struct TabPill: View {
         let icon: String
+        /// Asset-catalog image name; when set it's rendered instead of the SF Symbol `icon` (e.g. the
+        /// Claude mark on a Claude shell tab). Tints with the pill's foreground, like a symbol.
+        var assetIcon: String? = nil
         let name: String
         let help: String
         let isPressure: Bool
@@ -94,7 +116,7 @@ struct GlobalTerminalView: View {
         var body: some View {
             HStack(spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+                    iconView
                     Text(name)
                         .font(.callout.weight(selected ? .semibold : .regular))
                         .lineLimit(1)
@@ -110,6 +132,15 @@ struct GlobalTerminalView: View {
             .background(background, in: Capsule())
             .onHover { hovering = $0 }
             .animation(.easeInOut(duration: 0.12), value: hovering)
+        }
+
+        @ViewBuilder private var iconView: some View {
+            if let assetIcon {
+                Image(assetIcon).renderingMode(.template).resizable().scaledToFit()
+                    .frame(width: 11, height: 11)
+            } else {
+                Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            }
         }
 
         private var foreground: Color {
@@ -134,6 +165,67 @@ struct GlobalTerminalView: View {
             } else {
                 StatusDot(color: tint)
             }
+        }
+    }
+
+    /// The pane for a Claude shell/monitor tab: its command/script (the "what it does") + a Stop
+    /// button. Dev Monitor didn't spawn these, so their live stdout can't be captured — the command
+    /// is the closest thing to a log. Metrics/command refresh from the sampler's live row.
+    private struct ClaudeShellPane: View {
+        @Environment(AppState.self) private var app
+        let shell: ProcessRow
+        @State private var command = ""
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image("ClaudeLogo").renderingMode(.template).resizable().scaledToFit()
+                        .frame(width: 13, height: 13).foregroundStyle(.red)
+                    Text(shell.name).fontWeight(.semibold).foregroundStyle(.red)
+                    Text("pid \(shell.id)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(metrics).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Button(role: .destructive) { app.killProcessRow(shell) } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .help("Stop \(shell.name) (pid \(shell.id))")
+                }
+                ScrollView {
+                    Text(command.isEmpty ? "resolving…" : command)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                .frame(maxHeight: .infinity)
+                Text(shell.name.localizedCaseInsensitiveContains("monitor")
+                     ? "A background monitor — a polling loop Claude left running. Its live output isn't captured (Dev Monitor didn't start it)."
+                     : "Live output isn't captured — Dev Monitor didn't start this shell, so it can't tap its stdout.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .task(id: shell.id) { command = Self.command(fromArgv: AppState.argv(of: shell.id)) }
+        }
+
+        private var metrics: String {
+            let mem = shell.memBytes >= 1_073_741_824
+                ? String(format: "%.1f GB", shell.memBytes / 1_073_741_824)
+                : "\(Int(shell.memBytes / 1_048_576)) MB"
+            return String(format: "%.0f%% · %@", shell.cpuPerCore, mem)
+        }
+
+        /// The real command a Claude shell runs — everything after the `source <snapshot> … && `
+        /// preamble its Bash tool prepends; falls back to the raw argv (minus a leading `-c`).
+        static func command(fromArgv argv: String) -> String {
+            if let snap = argv.range(of: "shell-snapshots/snapshot-"),
+               let amp = argv.range(of: "&& ", range: snap.upperBound..<argv.endIndex) {
+                let cmd = argv[amp.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cmd.isEmpty { return cmd }
+            }
+            if let r = argv.range(of: "-c ") { return String(argv[r.upperBound...]) }
+            return argv.isEmpty ? "(no command captured)" : argv
         }
     }
 }
