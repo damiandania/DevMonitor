@@ -106,42 +106,50 @@ cmd=$(printf '%s' "$input" | /usr/bin/plutil -extract tool_input.command raw -o 
 cwd=$(printf '%s' "$input" | /usr/bin/plutil -extract cwd raw -o - - 2>/dev/null)
 [ -z "$cwd" ] && cwd='.'
 [ -z "$cmd" ] && exit 0
-# We intentionally DON'T whitelist every command that merely CONTAINS the string "dev-monitor". That
-# naive substring match was a hole: a chained launch hid behind it — `dev-monitor stop X && npm run
-# build` was allowed whole. A lone `dev-monitor …` invocation still passes, because the launch
-# detectors below never match dev-monitor's own subcommands (it's in no pm/framework list); only the
-# chained real launch is caught.
 
-# Read-only / inspection commands that merely MENTION a dev server (e.g. `pgrep -fl 'nuxt dev'`,
-# `grep "vite" file`, `ps aux | grep next`) must NOT be blocked. If the command's first real word —
-# after any leading VAR=val assignments and an optional path prefix — is a known inspection tool,
-# let it through. (This closes the false-positive that blocked plain `pgrep 'nuxt dev'`.)
+# A command's first real word — after any leading VAR=val assignments and an optional path prefix —
+# being a known read-only INSPECTION tool means that SEGMENT is just looking, not launching (e.g.
+# `pgrep -fl 'nuxt dev'`, `grep vite file`, `ps aux`). Such a segment is allowed as-is.
 INSPECT_RE='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=([^[:space:]"'"'"']*|"[^"]*"|'"'"'[^'"'"']*'"'"')[[:space:]]+)*([^[:space:]]*/)?(pgrep|pkill|kill|grep|egrep|fgrep|rg|ag|ack|ps|echo|printf|cat|bat|less|more|head|tail|ls|find|fd|which|type|command|whereis|whatis|man|lsof|awk|sed|tr|cut|sort|uniq|wc|jq|yq|stat|file|dirname|basename|realpath|readlink|true|false|test|tmux|history)([[:space:]]|$)'
-printf '%s' "$cmd" | grep -qE "$INSPECT_RE" && exit 0
 
 # Match a real launch. `sep` no longer excludes '/', so a path-qualified launch
-# (`./node_modules/.bin/nuxt dev`, `/usr/local/bin/next dev`, `node_modules/.bin/vite`) is caught
-# too — that hole is how a launch could previously slip past this hook.
+# (`./node_modules/.bin/nuxt dev`, `/usr/local/bin/next dev`, `node_modules/.bin/vite`) is caught too.
 sep='(^|[^[:alnum:]_.-])'
 DEV_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?dev([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|vinxi)[[:space:]]+dev([^[:alnum:]_-]|$)|${sep}vite([[:space:]]+(dev|serve|--)|[[:space:]]*$)|${sep}ng[[:space:]]+serve([^[:alnum:]_-]|$)|${sep}(webpack[[:space:]]+serve|webpack-dev-server)|${sep}remix[[:space:]]+vite:dev"
 BUILD_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?build([^[:alnum:]_:-]|$)|${sep}(nuxt|next|astro|ng|vite|vinxi)[[:space:]]+build([^[:alnum:]_-]|$)"
 PREVIEW_RE="${sep}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?preview([^[:alnum:]_:-]|$)|${sep}(nuxt|nuxi|vite|astro)[[:space:]]+preview([^[:alnum:]_-]|$)|${sep}next[[:space:]]+start([^[:alnum:]_-]|$)"
-if printf '%s' "$cmd" | grep -qE "$DEV_RE"; then
-  echo "BLOCKED — dev servers on this machine run through DevMonitor (one supervised server per project)." >&2
-  echo "Do not start a dev server directly. Instead run:  dev-monitor up '$cwd' --wait   (blocks until ready, prints the URL)" >&2
-  echo "Inspect with: dev-monitor status --json   (ready/url/pid/exitCode/lastError per project)" >&2
-  echo "Full surface: dev-monitor --help" >&2
-  exit 2
-fi
-if printf '%s' "$cmd" | grep -qE "$BUILD_RE"; then
-  echo "BLOCKED — builds run through DevMonitor so the project's dev server is stopped first." >&2
-  echo "Instead run:  dev-monitor build '$cwd'   (stops the server, builds, relaunches it)." >&2
-  exit 2
-fi
-if printf '%s' "$cmd" | grep -qE "$PREVIEW_RE"; then
-  echo "BLOCKED — preview servers (serving the production build) also run through DevMonitor." >&2
-  echo "Instead run:  dev-monitor preview '$cwd' --wait   (blocks until ready, prints the URL)." >&2
-  exit 2
-fi
+
+# Judge each shell SEGMENT independently, so a real launch can't ride behind an allowed prefix
+# (`echo x && npm run dev`, `pgrep foo | npm run build`, `dev-monitor stop X && npm run build`). We
+# split on && || ; | and newlines: `tr` maps &,|,; to a newline (nl), and && / || just yield an empty
+# middle segment (skipped). Over-splitting a quoted separator (e.g. grep -E 'a|b') only ever inspects
+# MORE segments — it can never merge a hidden launch into an allowed one, so it cannot create a bypass.
+nl='
+'
+block=''
+while IFS= read -r seg || [ -n "$seg" ]; do
+  printf '%s' "$seg" | grep -q '[^[:space:]]' || continue    # blank segment
+  printf '%s' "$seg" | grep -qE "$INSPECT_RE" && continue     # a read-only inspection segment
+  printf '%s' "$seg" | grep -qE "$DEV_RE"     && { block=dev;     break; }
+  printf '%s' "$seg" | grep -qE "$BUILD_RE"   && { block=build;   break; }
+  printf '%s' "$seg" | grep -qE "$PREVIEW_RE" && { block=preview; break; }
+done < <(printf '%s' "$cmd" | tr '&|;' "$nl")
+
+case "$block" in
+  dev)
+    echo "BLOCKED — dev servers on this machine run through DevMonitor (one supervised server per project)." >&2
+    echo "Do not start a dev server directly. Instead run:  dev-monitor up '$cwd' --wait   (blocks until ready, prints the URL)" >&2
+    echo "Inspect with: dev-monitor status --json   (ready/url/pid/exitCode/lastError per project)" >&2
+    echo "Full surface: dev-monitor --help" >&2
+    exit 2 ;;
+  build)
+    echo "BLOCKED — builds run through DevMonitor so the project's dev server is stopped first." >&2
+    echo "Instead run:  dev-monitor build '$cwd'   (stops the server, builds, relaunches it)." >&2
+    exit 2 ;;
+  preview)
+    echo "BLOCKED — preview servers (serving the production build) also run through DevMonitor." >&2
+    echo "Instead run:  dev-monitor preview '$cwd' --wait   (blocks until ready, prints the URL)." >&2
+    exit 2 ;;
+esac
 exit 0
 """

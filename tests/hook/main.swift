@@ -74,6 +74,18 @@ let dmRawBuild = runHook("DM_RAW=1 npm run build")
 chk(dmRawBuild.exit == 2, "hook: DM_RAW=1 no longer bypasses a build launch", "exit=\(dmRawBuild.exit)")
 let dmRawDev = runHook("DM_RAW=1 nuxt dev")
 chk(dmRawDev.exit == 2, "hook: DM_RAW=1 no longer bypasses a dev launch", "exit=\(dmRawDev.exit)")
+// Segmentation: a launch can't hide behind an inspection prefix. `echo x && npm run dev` /
+// `pgrep foo | npm run build` used to slip past because the FIRST word was a read-only tool; each
+// segment is now judged on its own, so the launch segment still blocks.
+let echoChain = runHook("echo starting && npm run dev")
+chk(echoChain.exit == 2, "hook: launch chained after an inspection command is blocked", "exit=\(echoChain.exit)")
+let pipeChain = runHook("pgrep node | npm run build")
+chk(pipeChain.exit == 2, "hook: launch piped after an inspection command is blocked", "exit=\(pipeChain.exit)")
+// …but genuine inspection — even chained or piped, even with a launch word as an ARGUMENT — is allowed.
+let inspectChain = runHook("ps aux | grep -E 'vite|next'")
+chk(inspectChain.exit == 0, "hook: piped inspection is not blocked", "exit=\(inspectChain.exit)")
+let inspectArg = runHook("pgrep -f 'nuxt dev' && echo done")
+chk(inspectArg.exit == 0, "hook: inspection whose arg mentions a launch is not blocked", "exit=\(inspectArg.exit)")
 let inspecting = runHook("pgrep -fl 'vite preview'")
 chk(inspecting.exit == 0, "hook: inspecting a preview command by name is not blocked", "exit=\(inspecting.exit)")
 // Regression: DEV_RE/BUILD_RE still fire after adding PREVIEW_RE.
