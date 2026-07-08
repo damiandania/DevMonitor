@@ -125,6 +125,7 @@ private struct ProcessRowView: View {
         if row.isDevServer { return "\(row.name), supervised dev server" }
         if row.isWorker { return "\(row.name), supervised worker" }
         if row.isExternalDev { return "\(row.name), external dev server" }
+        if row.isExternalBuild { return "\(row.name), external build" }
         if row.isClaude { return "\(row.name), Claude Code shell" }
         if row.isBuild { return "\(row.name), build" }
         if row.isExtension { return "\(row.name), editor extension" }
@@ -135,7 +136,7 @@ private struct ProcessRowView: View {
     /// other real process is killed by pid. Critical system processes and the editor (anything
     /// `ResourceAdvisor` protects) get no button, so a stray hover-click can't take down the session.
     private var killable: Bool {
-        if row.isDevServer || row.isBuild || row.isWorker || row.isExternalDev || row.isClaude { return true }
+        if row.isDevServer || row.isBuild || row.isWorker || row.isExternalDev || row.isExternalBuild || row.isClaude { return true }
         return row.id > 0 && !ResourceAdvisor.isProtected(row.name)
     }
 
@@ -154,6 +155,7 @@ private struct ProcessRowView: View {
         if row.isDevServer { return "Stop \(row.name)" }
         if row.isWorker { return "Stop \(row.name)" }
         if row.isBuild { return "Stop the build" }
+        if row.isExternalBuild { return "Kill this unsupervised build (pid \(row.id))" }
         if row.isClaude { return "Stop this Claude shell (pid \(row.id))" }
         return "Kill \(row.name) (pid \(row.id))"
     }
@@ -165,6 +167,7 @@ private struct ProcessRowView: View {
         else if row.isDevServer { kind = " — supervised dev server" }
         else if row.isWorker { kind = " — supervised worker" }
         else if row.isExternalDev { kind = " — external dev server (not supervised)" }
+        else if row.isExternalBuild { kind = " — external build (not supervised)" }
         else if row.isClaude { kind = " — Claude Code shell (not supervised)" }
         else if row.isBuild { kind = " — build" }
         else if row.isExtension { kind = " — VS Code extension" }
@@ -183,6 +186,9 @@ private struct ProcessRowView: View {
         } else if row.isExternalDev {
             // Same glyph as a managed server, but purple = running outside the app.
             Image(systemName: "xserve").foregroundStyle(Color.indigo)
+        } else if row.isExternalBuild {
+            // The build's hammer, but indigo = running outside the app (like the external server tint).
+            Image(systemName: "hammer.fill").foregroundStyle(Color.indigo)
         } else if row.isClaude {
             // Claude Code's own shells/monitors — the Claude mark (asset), tinted red like the name.
             Image("ClaudeLogo").resizable().scaledToFit()

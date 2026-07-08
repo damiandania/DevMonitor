@@ -59,6 +59,21 @@ chk(bareStart.exit == 0, "hook: bare 'npm start' is not treated as a preview", "
 // Already-routed and inspection commands stay exempt from the new rule too.
 let alreadyRouted = runHook("dev-monitor preview /tmp/proj")
 chk(alreadyRouted.exit == 0, "hook: a dev-monitor command is never blocked", "exit=\(alreadyRouted.exit)")
+let bareBuildCLI = runHook("dev-monitor build /tmp/proj")
+chk(bareBuildCLI.exit == 0, "hook: a bare 'dev-monitor build' is never blocked", "exit=\(bareBuildCLI.exit)")
+// Regression: a chained launch hiding behind a dev-monitor invocation must NOT slip through — the old
+// blanket `grep dev-monitor` substring match whitelisted the whole command, so `dev-monitor stop X &&
+// npm run build` ran unsupervised. It's now caught by BUILD_RE.
+let chainedHole = runHook("dev-monitor stop /tmp/proj && npm run build")
+chk(chainedHole.exit == 2 && chainedHole.stderr.contains("dev-monitor build '/tmp/proj'"),
+    "hook: a launch chained after a dev-monitor command is still blocked",
+    "exit=\(chainedHole.exit) stderr=\(chainedHole.stderr)")
+// Hard block: DM_RAW=1 is no longer an escape hatch for launches — a build always routes through the
+// app. (This is the exact bypass a runaway session used to run builds unsupervised.)
+let dmRawBuild = runHook("DM_RAW=1 npm run build")
+chk(dmRawBuild.exit == 2, "hook: DM_RAW=1 no longer bypasses a build launch", "exit=\(dmRawBuild.exit)")
+let dmRawDev = runHook("DM_RAW=1 nuxt dev")
+chk(dmRawDev.exit == 2, "hook: DM_RAW=1 no longer bypasses a dev launch", "exit=\(dmRawDev.exit)")
 let inspecting = runHook("pgrep -fl 'vite preview'")
 chk(inspecting.exit == 0, "hook: inspecting a preview command by name is not blocked", "exit=\(inspecting.exit)")
 // Regression: DEV_RE/BUILD_RE still fire after adding PREVIEW_RE.

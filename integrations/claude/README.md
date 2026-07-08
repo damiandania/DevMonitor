@@ -31,7 +31,8 @@ self-diagnose without curling the port or reading internal files.
 
 It deliberately does **not** touch `xcodebuild`, `go build`, `cargo build`, `docker build`,
 `make`, `npm install`, `npm test`, `npm run dev:<variant>`, or any command that already calls
-`dev-monitor`. Escape hatch: prefix any command with `DM_RAW=1 ` to run it untouched.
+`dev-monitor`. There is **no inline escape hatch**: dev/build/preview launches always route through
+the app. To run one unsupervised, uninstall the hook (Settings → General → Claude Code).
 
 ## Install
 

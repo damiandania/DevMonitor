@@ -12,6 +12,7 @@ struct ProcessRow: Identifiable, Sendable {
     var isBuild = false
     var isWorker = false         // a background worker SUPERVISED by the app (managed tree)
     var isExternalDev = false    // a dev server running OUTSIDE the app (identified, not supervised)
+    var isExternalBuild = false  // a framework BUILD (nuxt/next/… build|generate|prepare) running OUTSIDE the app
     var isExtension = false      // a VS Code / Cursor extension language-server helper
     var isClaude = false         // a shell/command Claude Code launched (its Bash-tool `/bin/zsh -c`)
     var isPreview = false        // a supervised DevSession serving the production build, not `dev`
@@ -56,7 +57,7 @@ final class SystemSampler {
 
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
-    private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)] = [:]
+    private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)] = [:]
     /// External dev servers that haven't bound a port yet: pid → uptime-ns after which the port scan
     /// (an fd walk — the expensive part of enrichment) may run again. Absent = entry is final.
     private var portRecheckAt: [Int32: UInt64] = [:]
@@ -140,7 +141,7 @@ final class SystemSampler {
         var workers: [(id: Int32, leader: pid_t, label: String)]
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
-        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)]
+        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)]
         var portRecheckAt: [Int32: UInt64]
         var prevSysTicks: dm_cpu_ticks?
         var coreCount: Int
@@ -158,7 +159,7 @@ final class SystemSampler {
         var processes: [ProcessRow]
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
-        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)]
+        var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)]
         var portRecheckAt: [Int32: UInt64]
     }
 
@@ -261,9 +262,10 @@ final class SystemSampler {
             guard row.id > 0, !supervisedPids.contains(row.id) else { return row }
             let e = enrichedName(pid: row.id, comm: row.name, now: now,
                                  cache: &rich, portRecheckAt: &recheckAt)
-            guard e.ext || e.isExtension || e.isClaude || e.name != row.name else { return row }
+            guard e.ext || e.isExtension || e.isClaude || e.extBuild || e.name != row.name else { return row }
             return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
                               memBytes: row.memBytes, isExternalDev: e.ext,
+                              isExternalBuild: e.extBuild,
                               isExtension: e.isExtension, isClaude: e.isClaude)
         }
 
@@ -329,6 +331,7 @@ final class SystemSampler {
         var buildCPU = 0.0, buildMem = 0.0
         var others: [ProcessRow] = []
         var externalDevs: [ProcessRow] = []
+        var externalBuilds: [ProcessRow] = []
         var claudeShells: [ProcessRow] = []
         for row in rows {
             if let gi = devIndexByPid[row.id] {
@@ -339,6 +342,8 @@ final class SystemSampler {
                 buildCPU += row.cpuPerCore; buildMem += row.memBytes
             } else if row.isExternalDev {
                 externalDevs.append(row)
+            } else if row.isExternalBuild {
+                externalBuilds.append(row)
             } else if row.isClaude {
                 claudeShells.append(row)
             } else {
@@ -361,6 +366,9 @@ final class SystemSampler {
         }
         // Identified external dev servers ALWAYS show, like a supervised row — regardless of impact.
         result.append(contentsOf: externalDevs.sorted { impact($0) > impact($1) })
+        // Unsupervised framework builds ALWAYS show too — a build is heavy by nature, and the user
+        // wants to see (and be able to stop) one that's running outside the app.
+        result.append(contentsOf: externalBuilds.sorted { impact($0) > impact($1) })
         // Claude Code's shells ALWAYS show too — even a near-idle one (e.g. a background `tail -f`
         // monitor) matters here, so no impact filter; the user wants to see and be able to stop them.
         result.append(contentsOf: claudeShells.sorted { impact($0) > impact($1) })
@@ -404,9 +412,9 @@ final class SystemSampler {
 
     nonisolated private static func enrichedName(
         pid: Int32, comm: String, now: UInt64,
-        cache: inout [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool)],
+        cache: inout [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)],
         portRecheckAt: inout [Int32: UInt64]
-    ) -> (name: String, ext: Bool, isExtension: Bool, isClaude: Bool) {
+    ) -> (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool) {
         if let cached = cache[pid] {
             // An external dev server that hasn't bound a port yet re-scans only once its recheck is
             // due — walking its fds for the port is the expensive part. Everything else is final.
@@ -423,7 +431,7 @@ final class SystemSampler {
             // left running to watch for a condition) vs a one-shot foreground command — Claude Code
             // itself draws this distinction, so mirror it in the label.
             let name = isClaudeMonitor(args) ? "Claude · monitor" : "Claude · shell"
-            let entry = (name: name, ext: false, isExtension: false, isClaude: true)
+            let entry = (name: name, ext: false, isExtension: false, isClaude: true, extBuild: false)
             cache[pid] = entry
             portRecheckAt.removeValue(forKey: pid)
             return entry
@@ -444,7 +452,7 @@ final class SystemSampler {
             if isFramework || port > 0 {
                 let project = projectName(fromArgs: args) ?? comm
                 let entry = (name: project + (port > 0 ? " :\(port)" : ""),
-                             ext: true, isExtension: false, isClaude: false)
+                             ext: true, isExtension: false, isClaude: false, extBuild: false)
                 cache[pid] = entry
                 if port > 0 {
                     portRecheckAt.removeValue(forKey: pid)           // port bound — entry is final
@@ -457,8 +465,19 @@ final class SystemSampler {
             // server — fall through to generic naming. We don't reschedule a recheck, so idle node
             // tooling (language servers, build/lint steps) isn't re-scanned every tick.
         }
+        // A framework BUILD (nuxt/next/… build|generate|prepare) started OUTSIDE the app: name it like
+        // the managed build ("<project> · build") and flag it external-build, so Activity shows it as a
+        // build (hammer, always visible) instead of a mystery heavy "node" or an idle "Claude · shell".
+        // Mirrors the isExternalDev path for an unsupervised server; the non-server subcommand that
+        // stops looksLikeDevServer from firing above is exactly the signal `externalTaskName` keys on.
+        if let task = externalTaskName(args) {
+            let entry = (name: task, ext: false, isExtension: false, isClaude: false, extBuild: true)
+            cache[pid] = entry
+            portRecheckAt.removeValue(forKey: pid)
+            return entry
+        }
         let d = describe(comm: comm, args: args)
-        let entry = (name: d.name, ext: false, isExtension: d.isExtension, isClaude: false)
+        let entry = (name: d.name, ext: false, isExtension: d.isExtension, isClaude: false, extBuild: false)
         cache[pid] = entry
         portRecheckAt.removeValue(forKey: pid)
         return entry

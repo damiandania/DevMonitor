@@ -88,6 +88,21 @@ enum NotificationPolicy {
                                 category: .failures, severity: .urgent, projectID: nil, action: .none)
     }
 
+    /// Posted once when an unsupervised dev server / build is detected running OUTSIDE the app — the
+    /// safety net for what the Claude hook can't see at the source (a process started from a plain
+    /// terminal, a script, an IDE task, or with the hook uninstalled). The app can't route it, so it
+    /// tells the user, who can stop it from Activity or relaunch it through DevMonitor. Categorised
+    /// like `orphansClosed` (unsupervised dev processes are a `.pressure` concern).
+    static func externalProcessDetected(name: String, isBuild: Bool) -> NotificationItem {
+        let title = isBuild ? String(localized: "Unsupervised build detected")
+                            : String(localized: "Unsupervised dev server detected")
+        let body = isBuild
+            ? String(localized: "\(name) is building outside Dev Monitor. Run builds via ‘dev-monitor build’ so the server is stopped first.")
+            : String(localized: "\(name) is running outside Dev Monitor. Start servers via ‘dev-monitor up’ so they're supervised.")
+        return NotificationItem(title: title, body: body, category: .pressure,
+                                severity: .passive, projectID: nil, action: .open)
+    }
+
     /// Posted after auto-closing orphaned dev processes to relieve pressure.
     static func orphansClosed(count: Int, names: String) -> NotificationItem {
         let title = count > 1 ? String(localized: "Closed orphaned dev processes")

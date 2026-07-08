@@ -57,6 +57,11 @@ check(orphan1.title == "Closed orphaned dev process" && orphan1.severity == .pas
       && orphan1.action == .none, "orphansClosed(1): singular title, passive/none")
 check(NotificationPolicy.orphansClosed(count: 2, names: "node, vite").title == "Closed orphaned dev processes",
       "orphansClosed(2): plural title")
+let extBuild = NotificationPolicy.externalProcessDetected(name: "MiddleSpace · build", isBuild: true)
+check(extBuild.category == .pressure && extBuild.severity == .passive && extBuild.action == .open
+      && extBuild.title == "Unsupervised build detected", "externalProcessDetected(build): pressure/passive, build title")
+check(NotificationPolicy.externalProcessDetected(name: "MiddleSpace :3000", isBuild: false).title
+      == "Unsupervised dev server detected", "externalProcessDetected(server): server title")
 
 // --- throttle ---
 check(NotificationThrottle.defaultWindow == 15, "throttle default window is 15s")

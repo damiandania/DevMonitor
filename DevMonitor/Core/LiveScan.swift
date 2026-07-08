@@ -163,6 +163,7 @@ final class LiveScan {
         if row.isWorker { return "supervised worker" }
         if row.isBuild { return "build" }
         if row.isExternalDev { return "EXTERNAL dev server (unsupervised)" }
+        if row.isExternalBuild { return "EXTERNAL build (unsupervised)" }
         if row.isClaude { return "Claude Code shell" }
         if row.isExtension { return "editor extension" }
         return "other"

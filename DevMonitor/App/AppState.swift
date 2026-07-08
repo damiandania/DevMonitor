@@ -130,6 +130,7 @@ final class AppState {
                 guard let self else { return }
                 self.pressure.tick()
                 self.checkSwapPressure()
+                self.checkExternalProcesses()
             }
         }
         // Wire notifications: set the UN delegate (foreground presentation + action routing),
@@ -315,6 +316,25 @@ final class AppState {
             title: "Swap \(pct)% full",
             body: "The Mac is leaning on swap. Close idle projects or heavy apps before starting more servers, or it may start to stutter.",
             category: .pressure, severity: .passive, projectID: nil, action: .open))
+    }
+
+    /// Pids of external (unsupervised) dev servers/builds we've already alerted about, so each is
+    /// announced once — not every 30s tick. Pruned as processes exit (a reused pid can alert again).
+    @ObservationIgnored private var alertedExternalPids: Set<Int32> = []
+
+    /// Safety net for the "no unsupervised launches" rule the Claude hook enforces at the source. The
+    /// hook only sees Claude Code's own Bash calls — a server/build started from a plain terminal, a
+    /// script, an IDE task (or with the hook uninstalled) slips past it. The sampler still identifies
+    /// those (isExternalDev/isExternalBuild); here we announce each new one once so nothing runs
+    /// outside Dev Monitor unnoticed.
+    private func checkExternalProcesses() {
+        let external = systemSampler.processes.filter { $0.id > 0 && ($0.isExternalDev || $0.isExternalBuild) }
+        alertedExternalPids.formIntersection(Set(external.map(\.id)))   // forget the ones that have exited
+        for row in external where !alertedExternalPids.contains(row.id) {
+            alertedExternalPids.insert(row.id)
+            route(NotificationPolicy.externalProcessDetected(name: row.name, isBuild: row.isExternalBuild))
+            AppLog.shared.event("Detected unsupervised \(row.isExternalBuild ? "build" : "dev server"): \(row.name) (pid \(row.id))")
+        }
     }
 
     /// Stop the supervised server for one project.

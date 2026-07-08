@@ -81,6 +81,18 @@ let aggExternal = SystemSampler.aggregate(
 chk(aggExternal.contains { $0.id == 500 && $0.isExternalDev }, "aggregate: idle external dev server still shown")
 chk(!aggExternal.contains { $0.id == 501 }, "aggregate: an equally-light plain process is still filtered")
 
+// An unsupervised framework build is always shown too (like an external server) — even momentarily
+// quiet — instead of being filtered as a plain heavy "node" or hidden under its Claude shell.
+let aggExtBuild = SystemSampler.aggregate(
+    rows: [
+        ProcessRow(id: 550, name: "MiddleSpace · build", cpuPerCore: 0.2, memBytes: 30 * MB,
+                  isExternalBuild: true),
+        ProcessRow(id: 551, name: "idle", cpuPerCore: 0.2, memBytes: 30 * MB),   // plain other, same size
+    ],
+    devs: [], build: nil, coreCount: 8, totalMem: 8 * GB, topN: 40)
+chk(aggExtBuild.contains { $0.id == 550 && $0.isExternalBuild }, "aggregate: idle external build still shown")
+chk(!aggExtBuild.contains { $0.id == 551 }, "aggregate: an equally-light plain process is still filtered (build)")
+
 // External dev servers are exempt from topN too (always shown, like a supervised row).
 let manyExternals = (0..<3).map {
     ProcessRow(id: Int32(600 + $0), name: "ext\($0)", cpuPerCore: 0, memBytes: 0, isExternalDev: true)
