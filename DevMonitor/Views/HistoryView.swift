@@ -6,12 +6,7 @@ import SwiftUI
 struct HistoryView: View {
     @Environment(AppState.self) private var app
     @State private var events: [PersistedEvent] = []
-    /// Count + size of the on-disk server log files, for the "Clear logs" button label/confirm.
-    @State private var logs: (count: Int, bytes: Int) = (0, 0)
-    @State private var confirmingClear = false
     @State private var confirmingClearHistory = false
-    /// Set after a clear so the freed amount is reported back to the user.
-    @State private var clearedNote: String?
 
     var body: some View {
         Group {
@@ -34,27 +29,12 @@ struct HistoryView: View {
         .toolbar {
             Button(action: reload) { Label("Refresh", systemImage: "arrow.clockwise") }
                 .help("Reload the event history")
-            // Clear the server LOG FILES (dev-server output on disk) — separate from the history.
-            Button { confirmingClear = true } label: {
-                Label("Clear logs", systemImage: "doc.badge.xmark")
-            }
-            .help(logs.count > 0 ? "Delete the \(logs.count) server log file(s) — \(byteText(logs.bytes))"
-                                 : "No server logs to delete")
-            .disabled(logs.count == 0)
-            // Clear the event HISTORY shown here (what the trash button now does).
+            // Clear the event HISTORY shown here.
             Button(role: .destructive) { confirmingClearHistory = true } label: {
                 Label("Clear history", systemImage: "trash")
             }
             .help(events.isEmpty ? "No history to clear" : "Delete all \(events.count) history event(s)")
             .disabled(events.isEmpty)
-        }
-        .confirmationDialog("Delete \(logs.count) server log file(s)?",
-                            isPresented: $confirmingClear, titleVisibility: .visible) {
-            Button("Delete \(byteText(logs.bytes)) of logs", role: .destructive, action: clearLogs)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Removes the dev-server output logs under Application Support. Running servers keep "
-                 + "logging to a fresh file. This does not touch the event history above.")
         }
         .confirmationDialog("Clear all history?",
                             isPresented: $confirmingClearHistory, titleVisibility: .visible) {
@@ -64,25 +44,7 @@ struct HistoryView: View {
             Text("Permanently deletes the recorded crashes, recycles, builds and pressure events. "
                  + "This does not touch the server log files.")
         }
-        .alert("Logs cleared", isPresented: .constant(clearedNote != nil)) {
-            Button("OK") { clearedNote = nil }
-        } message: {
-            Text(clearedNote ?? "")
-        }
-        .onAppear { reload(); refreshLogs() }
-    }
-
-    /// Human byte size (e.g. "4.1 MB") for the button/confirm text.
-    private func byteText(_ bytes: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
-
-    private func refreshLogs() { logs = Project.logsSummary() }
-
-    private func clearLogs() {
-        let result = Project.clearLogs()
-        clearedNote = "Freed \(byteText(result.bytes)) across \(result.removed) file(s)."
-        refreshLogs()
+        .onAppear { reload() }
     }
 
     private func row(_ e: PersistedEvent) -> some View {
