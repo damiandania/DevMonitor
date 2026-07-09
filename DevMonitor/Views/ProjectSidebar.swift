@@ -12,15 +12,17 @@ struct ProjectSidebar: View {
 
         List(selection: $app.selectedProjectID) {
             Section("Projects") {
+                // Flat rows (a folder header + its projects), NOT DisclosureGroups: on macOS a
+                // `List(selection:)` mis-lays-out a selected row nested in a DisclosureGroup — it
+                // renders it floating outside its group or overlapping another row. Collapsing is done
+                // by hand (chevron header + conditional rows), which keeps every selectable row a
+                // direct child of the section and sidesteps that bug.
                 ForEach(groups, id: \.id) { group in
-                    DisclosureGroup(isExpanded: expansion(group.id)) {
+                    groupHeader(group)
+                    if !collapsed.contains(group.id) {
                         ForEach(group.projects) { project in
                             projectRow(project)
                         }
-                    } label: {
-                        Label(group.name, systemImage: "folder")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            .help(group.id)
                     }
                 }
             }
@@ -69,28 +71,46 @@ struct ProjectSidebar: View {
                     .help("Server: \(st.label)")
             }
         }
+        .padding(.leading, 14)   // indent under the folder header (DisclosureGroup used to do this)
         .tag(project.id)
         .contextMenu {
             Button("Remove", role: .destructive) { app.removeProject(project.id) }
         }
     }
 
-    /// Projects grouped by their parent folder — groups ordered by first appearance, projects kept in
-    /// their existing order. The group id is the parent's full path (so same-named folders in
-    /// different locations stay distinct); the display name is the folder's last path component.
+    /// Projects grouped by the folder the user dropped (`groupRoot`), falling back to the immediate
+    /// parent for projects added directly. So dropping a parent like `~/Dev/42` keeps every project
+    /// found inside it under one "42" group, regardless of how deep each one was nested. Groups are
+    /// ordered by first appearance and projects keep their existing order; the group id is the full
+    /// path (same-named folders elsewhere stay distinct), the display name its last path component.
     private var groups: [(id: String, name: String, projects: [Project])] {
         var order: [String] = []
-        var byParent: [String: [Project]] = [:]
+        var byGroup: [String: [Project]] = [:]
         for p in app.projects {
-            let parent = URL(fileURLWithPath: p.path).deletingLastPathComponent().path
-            if byParent[parent] == nil { order.append(parent) }
-            byParent[parent, default: []].append(p)
+            let key = p.groupRoot ?? URL(fileURLWithPath: p.path).deletingLastPathComponent().path
+            if byGroup[key] == nil { order.append(key) }
+            byGroup[key, default: []].append(p)
         }
-        return order.map { (id: $0, name: URL(fileURLWithPath: $0).lastPathComponent, projects: byParent[$0]!) }
+        return order.map { (id: $0, name: URL(fileURLWithPath: $0).lastPathComponent, projects: byGroup[$0]!) }
     }
 
-    private func expansion(_ id: String) -> Binding<Bool> {
-        Binding(get: { !collapsed.contains(id) },
-                set: { expanded in if expanded { collapsed.remove(id) } else { collapsed.insert(id) } })
+    /// A folder group header row: a chevron + folder label that toggles the group's collapsed state.
+    /// Not tagged, so `List(selection:)` never treats it as a selectable project.
+    @ViewBuilder private func groupHeader(_ group: (id: String, name: String, projects: [Project])) -> some View {
+        let isCollapsed = collapsed.contains(group.id)
+        HStack(spacing: 6) {
+            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(width: 10)
+            Label(group.name, systemImage: "folder")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { toggle(group.id) }
+        .help(group.id)
+    }
+
+    private func toggle(_ id: String) {
+        if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) }
     }
 }

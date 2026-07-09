@@ -14,16 +14,19 @@ struct BranchWorktreeMenu: View {
     @State private var showNewSheet = false
     @State private var actionError: String?
     @State private var refreshToken = 0   // bumped to force a re-read of the on-disk branch
+    @State private var lastListReload = Date.distantPast   // throttles the on-open list refresh
 
     /// Poll the branch a few times a minute so a `git switch`/`checkout` done OUTSIDE the app (e.g. in
     /// a terminal) is picked up. The read is a cheap `.git/HEAD` file read; the worktree/branch LISTS
-    /// only reload on project change or an in-app action.
+    /// reload on project change, an in-app action, and each time the menu is opened (see
+    /// `refreshListsOnOpen`) so a branch deleted outside the app drops off next time you look.
     private let poll = Timer.publish(every: 2.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let _ = refreshToken
         if let branch = GitInfo.branch(for: project.path) {
             Menu {
+                let _ = refreshListsOnOpen()   // the content closure runs when the menu opens
                 branchSection(current: branch)
                 worktreeSection()
                 Divider()
@@ -124,6 +127,18 @@ struct BranchWorktreeMenu: View {
         async let br = Task.detached { GitInfo.localBranches(for: path) }.value
         worktrees = await wt
         branches = await br
+    }
+
+    /// Refresh the worktree/branch lists when the menu opens so branches deleted outside the app stop
+    /// showing. Deferred to the next runloop tick (never mutate state during a view update) and
+    /// throttled: reassigning the lists rebuilds the menu content, which would re-enter here in a loop
+    /// while the menu is open — the 1s guard breaks that, while real re-opens are always further apart.
+    private func refreshListsOnOpen() {
+        Task { @MainActor in
+            guard Date().timeIntervalSince(lastListReload) > 1 else { return }
+            lastListReload = Date()
+            await reload()
+        }
     }
 
     @ViewBuilder private func pill(_ branch: String) -> some View {

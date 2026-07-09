@@ -7,7 +7,7 @@ extension AppState {
     /// Add (or focus, if already present) a project. Returns the project, or `nil` when `path` is not
     /// a launchable project folder — in which case nothing is created or persisted.
     @discardableResult
-    func addProject(path: String) -> Project? {
+    func addProject(path: String, groupRoot: String? = nil) -> Project? {
         if let existing = projects.first(where: { $0.path == path }) {
             selectedProjectID = existing.id
             return existing
@@ -18,6 +18,7 @@ extension AppState {
         let project = Project(
             name: name,
             path: path,
+            groupRoot: groupRoot,
             packageManager: d.packageManager,
             framework: d.framework,
             devCommand: d.devCommand,
@@ -55,7 +56,10 @@ extension AppState {
             }
         }
         scan(root, 0)
-        let added = found.compactMap { addProject(path: $0) }
+        // Group everything found under the folder the user actually dropped — but only when we scanned
+        // INTO it. If `root` is itself the project, there's nothing to cluster: leave groupRoot nil so
+        // the sidebar groups it by its parent like a normal single add.
+        let added = found.compactMap { addProject(path: $0, groupRoot: $0 == root ? nil : root) }
         if let first = added.first { selectedProjectID = first.id }
         return added
     }
@@ -78,6 +82,9 @@ extension AppState {
         builds[id]?.stop(); builds[id] = nil
         workers[id]?.stop(); workers[id] = nil
         projects.removeAll { $0.id == id }
+        // Drop the removed project's entries from the in-app feed so no dead notification lingers
+        // (clicking one would try to focus a project that no longer exists). History on disk is kept.
+        recentNotifications.removeAll { $0.projectID == id }
         if selectedProjectID == id { selectedProjectID = projects.first?.id }
         persist()
     }

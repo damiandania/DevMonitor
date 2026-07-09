@@ -52,6 +52,11 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     var name: String
     /// Absolute path to the project root.
     var path: String
+    /// The folder the user actually added, when this project was found by scanning INTO it (e.g.
+    /// dropping `~/Dev/42` discovers projects nested at various depths). Drives sidebar grouping so
+    /// every project found under one dropped root clusters under it. `nil` when the project's own
+    /// folder was added directly — the sidebar then falls back to grouping by the immediate parent.
+    var groupRoot: String?
     var packageManager: PackageManager
     var framework: Framework
     /// Optional override for the dev command; `nil` = auto-derived.
@@ -110,6 +115,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         id: UUID = UUID(),
         name: String,
         path: String,
+        groupRoot: String? = nil,
         packageManager: PackageManager = .npm,
         framework: Framework = .unknown,
         devCommand: String? = nil,
@@ -131,6 +137,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         self.id = id
         self.name = name
         self.path = path
+        self.groupRoot = groupRoot
         self.packageManager = packageManager
         self.framework = framework
         self.devCommand = devCommand
@@ -154,7 +161,7 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
     // fields default by INHERITING the dev-server config (so an existing project keeps the heap the
     // user already set, for the build too), and the learned autoscaler levels start at firstGB.
     enum CodingKeys: String, CodingKey {
-        case id, name, path, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
+        case id, name, path, groupRoot, packageManager, framework, devCommand, buildCommand, workerCommand, previewCommand
         case memoryGB, memoryAuto, port, healthPath, packageManagerAuto
         case autoHeapGB, buildMemoryGB, buildMemoryAuto, buildAutoHeapGB, lastBuildSeconds, env
     }
@@ -164,6 +171,8 @@ struct Project: Identifiable, Codable, Hashable, Sendable {
         id = try c.decode(UUID.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         path = try c.decode(String.self, forKey: .path)
+        // Absent in projects.json written before grouped-add existed — nil ⇒ group by immediate parent.
+        groupRoot = try c.decodeIfPresent(String.self, forKey: .groupRoot)
         packageManager = try c.decode(PackageManager.self, forKey: .packageManager)
         framework = try c.decode(Framework.self, forKey: .framework)
         devCommand = try c.decodeIfPresent(String.self, forKey: .devCommand)

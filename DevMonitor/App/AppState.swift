@@ -235,12 +235,17 @@ final class AppState {
     /// Notification action: focus the app on the related project (or its build log / the pressure tab).
     func focusFromNotification(projectID: UUID?, showLogs: Bool) {
         bringMainWindowToFront()
-        if let id = projectID {
-            selectedProjectID = id
-            selectedTerminalID = showLogs ? "b:\(id)" : "s:\(id)"
-        } else {
+        guard let id = projectID else {
             selectedTerminalID = "pressure"   // machine-wide (pressure) events
+            return
         }
+        // The project may have been removed since this notification fired (its entry lingers in the
+        // feed). Selecting a dead id leaves the sidebar List with a selection that has no backing row,
+        // which SwiftUI renders as a stale, un-removable "ghost" row — so ignore it. Mirrors the
+        // existence guard in `restartFromNotification`.
+        guard projects.contains(where: { $0.id == id }) else { return }
+        selectedProjectID = id
+        selectedTerminalID = showLogs ? "b:\(id)" : "s:\(id)"
     }
 
     /// Activate the app and bring the single main window to the front (no SwiftUI openWindow here).
