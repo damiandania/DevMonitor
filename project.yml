@@ -4,11 +4,17 @@ options:
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
+# CODE_SIGN_IDENTITY comes from tools/Signing.xcconfig (default ad-hoc "-"), which optionally pulls in a
+# git-ignored per-machine override so local builds sign with the stable self-signed cert — see that file
+# and tools/ensure-signing-cert.sh. It lives in an xcconfig, NOT in `settings` here, because a value in
+# `settings` lands in the pbxproj and would override the xcconfig.
+configFiles:
+  Debug: tools/Signing.xcconfig
+  Release: tools/Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     SWIFT_STRICT_CONCURRENCY: complete
 targets:

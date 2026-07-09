@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The last 5 notifications as a "Recent" section inside the project sidebar list (most-recent
-/// first), so it shares the same card surface as the Projects section. Tapping a row focuses the
-/// related project (or the pressure tab for machine-wide events).
+/// first), so it shares the same card surface as the Projects section. Tapping a row opens the
+/// History window — the full persisted timeline these rows are a live preview of.
 struct NotificationsFeedView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
@@ -12,7 +13,7 @@ struct NotificationsFeedView: View {
             Section("Recent") {
                 ForEach(app.recentNotifications) { n in
                     Button {
-                        app.focusFromNotification(projectID: n.projectID, showLogs: false)
+                        openWindow(id: "history")
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: n.icon).foregroundStyle(n.tint).frame(width: 16)
@@ -28,6 +29,11 @@ struct NotificationsFeedView: View {
                     .buttonStyle(.plain)
                     .help(n.body)
                 }
+                // These rows aren't projects: without this, the enclosing `List(selection:)` treats
+                // a click as selecting the row and writes the notification's UUID into
+                // `selectedProjectID` (both are UUIDs) — which matches no project, so the detail pane
+                // flips to "No project selected". Disabling selection lets the Button handle the tap.
+                .selectionDisabled()
             }
         }
     }

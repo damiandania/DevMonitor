@@ -145,35 +145,47 @@ let S = 8.0
 let G = 1_000_000_000 as UInt64
 typealias SS = SystemSampler
 
-var r = SS.evaluatePressure(cpu: 30, memPercent: 50, swapPercent: 10, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
+var r = SS.evaluatePressure(cpu: 30, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .normal && !r.justStuck, "pressure: idle stays normal")
 
-r = SS.evaluatePressure(cpu: 95, memPercent: 50, swapPercent: 10, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 95, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .normal && r.hotSince == 100*G && !r.justStuck, "pressure: hot starts the clock")
 
-r = SS.evaluatePressure(cpu: 95, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 109*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 95, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 109*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .stuck && r.justStuck && r.reason.contains("CPU"), "pressure: sustained CPU → stuck", r.reason)
 
-r = SS.evaluatePressure(cpu: 40, memPercent: 95, swapPercent: 70, hotSince: 100*G, now: 110*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 40, buildCPU: 0, memPercent: 95, swapPercent: 70, hotSince: 100*G, now: 110*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .stuck && r.reason.contains("Memory"), "pressure: sustained mem+swap → stuck", r.reason)
 
-r = SS.evaluatePressure(cpu: 95, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 120*G, sustainSeconds: S, current: .stuck)
+r = SS.evaluatePressure(cpu: 95, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 120*G, sustainSeconds: S, current: .stuck)
 chk(r.pressure == .stuck && !r.justStuck, "pressure: stays stuck without re-triggering")
 
-r = SS.evaluatePressure(cpu: 40, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 130*G, sustainSeconds: S, current: .stuck)
+r = SS.evaluatePressure(cpu: 40, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 130*G, sustainSeconds: S, current: .stuck)
 chk(r.pressure == .normal && r.hotSince == nil, "pressure: cools back to normal")
 
-r = SS.evaluatePressure(cpu: 80, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 131*G, sustainSeconds: S, current: .stuck)
+r = SS.evaluatePressure(cpu: 80, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 131*G, sustainSeconds: S, current: .stuck)
 chk(r.pressure == .stuck && r.hotSince == 100*G, "pressure: hysteresis band holds state")
 
-r = SS.evaluatePressure(cpu: 95, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 105*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 95, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 105*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .normal && r.hotSince == 100*G && !r.justStuck, "pressure: hot but not yet sustained stays normal")
 
-r = SS.evaluatePressure(cpu: 95, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 108*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 95, buildCPU: 0, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 108*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .stuck && r.justStuck, "pressure: exact sustain boundary trips")
 
-r = SS.evaluatePressure(cpu: 40, memPercent: 95, swapPercent: 20, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
+r = SS.evaluatePressure(cpu: 40, buildCPU: 0, memPercent: 95, swapPercent: 20, hotSince: nil, now: 100*G, sustainSeconds: S, current: .normal)
 chk(r.pressure == .normal && r.hotSince == nil, "pressure: full memory WITHOUT swap is not hot")
+
+// build CPU is discounted — a build maxing every core must NOT read as a stuck machine.
+r = SS.evaluatePressure(cpu: 98, buildCPU: 98, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 120*G, sustainSeconds: S, current: .normal)
+chk(r.pressure == .normal && !r.justStuck, "pressure: a build maxing the CPU is not stuck")
+
+// something ELSE pinning the cores (beyond a small build) still trips.
+r = SS.evaluatePressure(cpu: 98, buildCPU: 3, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 120*G, sustainSeconds: S, current: .normal)
+chk(r.pressure == .stuck && r.justStuck, "pressure: non-build CPU still trips despite the discount")
+
+// build + light other load: the residual is below the bar → normal.
+r = SS.evaluatePressure(cpu: 100, buildCPU: 70, memPercent: 50, swapPercent: 10, hotSince: 100*G, now: 120*G, sustainSeconds: S, current: .normal)
+chk(r.pressure == .normal, "pressure: build plus light other load stays normal")
 
 // --- live off-main sampling (the async collect pass) ---
 // Rows + system stats materialize, a supervised leader resolves to its own row via the single

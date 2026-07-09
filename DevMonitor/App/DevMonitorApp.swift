@@ -4,6 +4,7 @@ import AppKit
 @main
 struct DevMonitorApp: App {
     @State private var appState = AppState()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     // Notifications are wired in AppState.init (Notifier.attach): delegate, categories, authorization.
 
     var body: some Scene {
@@ -14,21 +15,17 @@ struct DevMonitorApp: App {
                 .environment(appState)
                 .environment(\.locale, appState.uiLocale)
                 .frame(minWidth: 800, minHeight: 600)
+                // Hand the shared AppState to the AppDelegate so the always-visible quota HUD (a
+                // detached AppKit panel) can build the same menu the old MenuBarExtra showed.
+                .onAppear { delegate.attach(appState: appState) }
         }
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
 
-        MenuBarExtra {
-            MenuBarView()
-                .environment(appState)
-                .environment(\.locale, appState.uiLocale)
-        } label: {
-            MenuBarStatusIcon()
-                .environment(appState)
-                .environment(\.locale, appState.uiLocale)
-        }
-        .menuBarExtraStyle(.window)
+        // The menu-bar item (MenuBarExtra) is gone: macOS hides menu-bar icons behind the notch, so
+        // its role — the constellation status glyph + the controls menu — now lives in the always-
+        // visible quota HUD beside the notch (see QuotaHUD / AppDelegate).
 
         // Settings and Doctor are real windows (native title bar + traffic-light close button).
         Window("Settings", id: "settings") {
@@ -48,6 +45,23 @@ struct DevMonitorApp: App {
     }
 }
 
+/// Hosts the always-visible Claude quota HUD (a floating panel beside the notch). Kept in an
+/// AppDelegate because it's a plain AppKit window with no place in the SwiftUI scene graph, and it
+/// must come up once at launch and live for the whole app session.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let quota = ClaudeQuotaMonitor()
+    private var quotaHUD: QuotaHUDController?
+
+    /// Called once from the main window's `onAppear` with the app's shared state — the HUD needs it to
+    /// build the controls menu. Guarded so a window reopen doesn't spawn a second HUD.
+    func attach(appState: AppState) {
+        guard quotaHUD == nil else { return }
+        // One continuous notch bar: animated mascot (left) + notch + quota readout (right).
+        quotaHUD = QuotaHUDController(quota: quota, appState: appState)
+    }
+}
+
 /// The menu-bar icon: the logo's 7-dot constellation, drawn one dot per *live* process — each tinted
 /// by that process's OWN status (running green ▸ starting orange ▸ failed/stopped red). So two
 /// servers, one green and one red, show as two differently-coloured dots instead of a single
@@ -56,6 +70,9 @@ struct DevMonitorApp: App {
 /// Unused slots use `labelColor` so they adapt like every other menu-bar icon (black/white).
 struct MenuBarStatusIcon: View {
     @Environment(AppState.self) private var app
+    /// Colour for the resting (no live process) dots. Defaults to `labelColor`; the quota HUD passes a
+    /// wallpaper-reactive black/white so the glyph tracks the desktop like a real menu-bar item.
+    var restColor: NSColor = .labelColor
 
     private static let iconSize: CGFloat = 18                 // menu-bar glyph size (points)
     private static let dotRadiusRatio: CGFloat = 0.115        // dot radius ÷ icon size
@@ -89,7 +106,7 @@ struct MenuBarStatusIcon: View {
         // re-runs the handler on redraw, so `labelColor` tracks the menu bar's light/dark appearance.
         // A new NSImage is built whenever the dot colours change (a process starts/stops/changes state).
         let colors = dotColors
-        return Image(nsImage: Self.icon(dots: colors))
+        return Image(nsImage: Self.icon(dots: colors, rest: restColor))
             .renderingMode(.original)
             .accessibilityLabel("Dev Monitor")
             .accessibilityValue(colors.isEmpty ? "idle"
@@ -97,13 +114,13 @@ struct MenuBarStatusIcon: View {
     }
 
     /// Draw the full 7-dot constellation: the first N slots take live processes' status colours, the
-    /// rest stay `labelColor` (resting/unused), so the logo is always visible.
-    private static func icon(dots: [NSColor]) -> NSImage {
+    /// rest use `rest` (resting/unused), so the logo is always visible.
+    private static func icon(dots: [NSColor], rest: NSColor) -> NSImage {
         let size = iconSize
         return NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
             let r = size * dotRadiusRatio
             for (i, slot) in slots.enumerated() {
-                let color = i < dots.count ? dots[i] : NSColor.labelColor
+                let color = i < dots.count ? dots[i] : rest
                 color.setFill()
                 let cx = slot.x * size
                 let cy = (1 - slot.y) * size   // SVG is top-down; AppKit drawing is bottom-up

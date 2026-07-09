@@ -159,6 +159,41 @@ struct BranchWorktreeMenu: View {
     }
 }
 
+/// The uncommitted diff size shown just right of the branch pill: `+added` in green, `-removed` in
+/// red, no chrome (no capsule) — just the numbers. Reads `git diff HEAD --numstat` off the main
+/// thread, refreshing on a gentle poll and when the app reactivates (tabbing back from an editor).
+/// Renders nothing when the tree is clean or the folder isn't a git repo.
+struct UncommittedDiffStat: View {
+    let project: Project
+    @State private var stat: GitInfo.DiffStat?
+
+    private let poll = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Group {
+            if let stat, !stat.isEmpty {
+                HStack(spacing: 6) {
+                    if stat.added > 0 { Text("+\(stat.added.formatted())").foregroundStyle(.green) }
+                    if stat.removed > 0 { Text("-\(stat.removed.formatted())").foregroundStyle(.red) }
+                }
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .help("Uncommitted vs HEAD: +\(stat.added) / -\(stat.removed) lines")
+                .fixedSize()
+            }
+        }
+        .task(id: project.path) { await reload() }
+        .onReceive(poll) { _ in Task { await reload() } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await reload() }
+        }
+    }
+
+    private func reload() async {
+        let path = project.path
+        stat = await Task.detached { GitInfo.diffStat(for: path) }.value
+    }
+}
+
 /// Sheet for `git worktree add`: a branch (existing, or new from the current HEAD) and a target
 /// folder that defaults to a sibling `<repo>-<branch>`. On success the caller adds the new worktree
 /// as a project; on failure git's message is shown inline.

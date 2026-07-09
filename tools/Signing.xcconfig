@@ -1,0 +1,14 @@
+// Code-signing identity for LOCAL builds of Dev Monitor.
+//
+// Default is ad-hoc ("-"), exactly as before — this is what CI and other contributors get, so nothing
+// changes for them.
+//
+// A machine that has run `tools/ensure-signing-cert.sh` also gets a git-ignored Signing.local.xcconfig
+// next to this file, which redefines CODE_SIGN_IDENTITY to the stable self-signed cert. The optional
+// include below picks it up WHEN PRESENT (and is a silent no-op when absent), so every local build —
+// Xcode Run, `xcodebuild`, tools/install-local.sh — is signed with the same identity. That stable
+// identity is what stops macOS from re-asking for permissions (Downloads/Music/…) on each install.
+CODE_SIGN_IDENTITY = -
+
+// Optional, per-machine override. Missing on CI / fresh clones → ignored. See ensure-signing-cert.sh.
+#include? "Signing.local.xcconfig"

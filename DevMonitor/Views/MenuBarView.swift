@@ -6,7 +6,6 @@ import AppKit
 /// system snapshot — without opening the main window.
 struct MenuBarView: View {
     @Environment(AppState.self) private var app
-    @Environment(\.openWindow) private var openWindow
     /// Per-project expand override; absent → defaults to expanded when the project has something live.
     @State private var expandedOverride: [Project.ID: Bool] = [:]
 
@@ -23,10 +22,7 @@ struct MenuBarView: View {
 
             Divider()
             HStack {
-                Button("Open Window") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "main")
-                }
+                Button("Open Window") { app.bringMainWindowToFront() }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .foregroundStyle(.secondary)
