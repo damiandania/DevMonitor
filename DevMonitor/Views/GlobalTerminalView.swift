@@ -180,7 +180,7 @@ struct GlobalTerminalView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image("ClaudeLogo").renderingMode(.template).resizable().scaledToFit()
-                        .frame(width: 13, height: 13).foregroundStyle(.red)
+                        .frame(width: 13, height: 13).foregroundStyle(.primary)
                     Text(shell.name).fontWeight(.semibold).foregroundStyle(.red)
                     Text("pid \(shell.id)").font(.caption).foregroundStyle(.secondary)
                     Spacer()

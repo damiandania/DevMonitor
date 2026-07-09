@@ -16,6 +16,7 @@ struct ProcessRow: Identifiable, Sendable {
     var isExtension = false      // a VS Code / Cursor extension language-server helper
     var isClaude = false         // a shell/command Claude Code launched (its Bash-tool `/bin/zsh -c`)
     var isPreview = false        // a supervised DevSession serving the production build, not `dev`
+    var isSystem = false         // a macOS system/Apple process (executable under /System, /usr/libexec, …)
 }
 
 /// Samples ALL system processes (~2 Hz) and exposes the top consumers, like Activity Monitor.
@@ -262,11 +263,12 @@ final class SystemSampler {
             guard row.id > 0, !supervisedPids.contains(row.id) else { return row }
             let e = enrichedName(pid: row.id, comm: row.name, now: now,
                                  cache: &rich, portRecheckAt: &recheckAt)
-            guard e.ext || e.isExtension || e.isClaude || e.extBuild || e.name != row.name else { return row }
+            let system = dm_proc_is_system(row.id) != 0
+            guard e.ext || e.isExtension || e.isClaude || e.extBuild || e.name != row.name || system else { return row }
             return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
                               memBytes: row.memBytes, isExternalDev: e.ext,
                               isExternalBuild: e.extBuild,
-                              isExtension: e.isExtension, isClaude: e.isClaude)
+                              isExtension: e.isExtension, isClaude: e.isClaude, isSystem: system)
         }
 
         // Aggregate the dev-server and build trees into single identified rows; identified external

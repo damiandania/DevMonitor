@@ -285,6 +285,24 @@ int dm_proc_name(pid_t pid, char *buf, int size) {
     return proc_name(pid, buf, size);
 }
 
+// 1 if the process's executable lives under a macOS system location (Apple daemons, system
+// frameworks, bundled system apps, privileged helpers), else 0. Used to badge system/background
+// processes distinctly from user apps in the process table.
+int dm_proc_is_system(pid_t pid) {
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    int r = proc_pidpath(pid, path, sizeof(path));
+    if (r <= 0) return 0;
+    static const char *prefixes[] = {
+        "/System/", "/usr/libexec/", "/usr/sbin/", "/usr/bin/",
+        "/sbin/", "/bin/", "/Library/Apple/", "/Library/PrivilegedHelperTools/"
+    };
+    for (unsigned i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t len = strlen(prefixes[i]);
+        if (strncmp(path, prefixes[i], len) == 0) return 1;
+    }
+    return 0;
+}
+
 int dm_proc_args(pid_t pid, char *buf, int size) {
     if (size <= 0) {
         return 0;

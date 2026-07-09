@@ -189,10 +189,6 @@ private struct ProcessRowView: View {
         } else if row.isExternalBuild {
             // The build's hammer, but indigo = running outside the app (like the external server tint).
             Image(systemName: "hammer.fill").foregroundStyle(Color.indigo)
-        } else if row.isClaude {
-            // Claude Code's own shells/monitors — the Claude mark (asset), tinted red like the name.
-            Image("ClaudeLogo").resizable().scaledToFit()
-                .frame(width: 12, height: 12).foregroundStyle(.red)
         } else if row.isWorker {
             // A "gears" glyph marks a background worker — distinct from the server's rack and the
             // build's hammer.
@@ -203,9 +199,40 @@ private struct ProcessRowView: View {
             // A generic "extension" glyph — marks the row as a VS Code/Cursor extension, not the
             // tech's own logo. Distinguishes it from a plain helper's gray dot.
             Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.secondary)
+        } else if let logo = logoAsset {
+            // Every app/brand logo — Claude shells/monitors and known GUI apps (Chrome, Notion,
+            // Affinity, VS Code, Xcode, Safari, WhatsApp, Codex, Warp, Antigravity, the Claude desktop
+            // app) — renders the SAME way: the monochrome asset in the theme's foreground colour, black
+            // on light / white on dark, so it always contrasts.
+            Image(logo).renderingMode(.template).resizable().scaledToFit()
+                .frame(width: 12, height: 12).foregroundStyle(.primary)
+        } else if row.isSystem {
+            // A macOS system / Apple background process — a gear so it reads distinctly from an
+            // unrecognised user process (the plain dot below).
+            Image(systemName: "gearshape.fill").font(.system(size: 10)).foregroundStyle(.secondary)
         } else {
             Image(systemName: "circle.fill").font(.system(size: 4)).foregroundStyle(.tertiary)
         }
+    }
+
+    /// The logo asset for a Claude shell/monitor or a known GUI app, matched on the process name — so
+    /// every related process (main app, helpers, renderers, GPU) shares the icon, since helpers are
+    /// named after their parent `.app` bundle. `nil` = no logo → a system glyph or the generic dot.
+    private var logoAsset: String? {
+        if row.isClaude { return "ClaudeLogo" }   // Claude Code's own shells/monitors
+        let n = row.name.lowercased()
+        if n.contains("xcode") { return "XcodeLogo" }                          // before "code"
+        if n.contains("codex") { return "CodexLogo" }                          // before "code"
+        if n.contains("visual studio code") || n == "code" { return "VSCodeLogo" }
+        if n.contains("safari") { return "SafariLogo" }
+        if n.contains("whatsapp") { return "WhatsAppLogo" }
+        if n.contains("antigravity") { return "AntigravityLogo" }
+        if n.contains("warp") { return "WarpLogo" }
+        if n.contains("chrome") { return "ChromeLogo" }
+        if n.contains("notion") { return "NotionLogo" }
+        if n.contains("affinity") { return "AffinityLogo" }
+        if n.contains("claude") { return "ClaudeLogo" }   // the Claude desktop app / CLI
+        return nil
     }
 
     // Claude rows are deliberately NOT emphasized — red text but no tinted highlight (see nameColor).
