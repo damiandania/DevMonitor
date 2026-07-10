@@ -33,6 +33,7 @@ final class ClaudeMascot {
         case completed    // event: a server came up — the rocket LIFTS OFF + green check eyes
         case exploded     // event: a server died mid-launch — the rocket EXPLODES + red X eyes
         case celebrating  // event: a build finished OK — check eyes, hops + confetti
+        case caffeinated  // event: keep-awake switched on — a steaming coffee, a couple of sips
     }
 
     /// Add the cat's root layer to the host (the bar's left strip). Sizing happens in `layout`,
@@ -74,12 +75,17 @@ final class ClaudeMascot {
     private var idleTimer: Timer?
     private var lastVignette: Vignette = .rest
 
-    // Palette (sRGB). Black-on-black: body, ears, tail and paws all match the bezel — invisible by
-    // design ("deja solo los ojos, la nariz y unos bigotes finos"). Only the face shows, plus the
-    // event colours: red for failure, amber for launching, green for success.
-    private static let cBody = rgb(0x0A, 0x0A, 0x0A)
-    private static let cLimb = cBody                        // limbs/ears/tail melt into the bezel
-    private static let cEye  = rgb(0xF5, 0xF2, 0xEA)        // eyes, nose and mouth — the whole face
+    // Palette (sRGB). A brown TABBY cat: a warm caramel coat with darker-brown stripes, a cream
+    // muzzle, a pink nose and inner ears, and near-white whiskers — a proper cat on the black bar,
+    // not a black blob. Event colours (red / amber / green) still swap in for failure / launch /
+    // success on top of the face.
+    // Minimal: only the WHITE face (eyes, nose, "ω" mouth, whiskers) shows on the black bar; the
+    // body / limbs are invisible, so what reads is the notch itself come alive.
+    private static let cBody = rgb(0x0A, 0x0A, 0x0A)       // (unused — head shape removed)
+    private static let cLimb = rgb(0x0A, 0x0A, 0x0A)       // tail / feet — black, invisible on the bar
+    private static let cEye  = rgb(0xF5, 0xF2, 0xEA)       // eyes + nose + mouth — warm white
+    private static let cWhisker = rgb(0xF2, 0xEF, 0xE8)    // white whiskers
+    private static let cClear = CGColor(gray: 0, alpha: 0) // invisible parts (head, ears, paws)
     private static let cCoral = rgb(0xD9, 0x77, 0x57)      // Claude's clay coral — props/confetti
     private static let cOrange = rgb(0xF0, 0x8A, 0x3C)     // the build hammer's head
     private static let cOrangeDark = rgb(0xB3, 0x5F, 0x26) // the build hammer's handle
@@ -114,27 +120,23 @@ final class ClaudeMascot {
         configure(leftFoot,  x: 40, y: 27, w: 11, h: 9, color: Self.cLimb, radius: 4, anchor: CGPoint(x: 0.5, y: 1))
         configure(rightFoot, x: 54, y: 27, w: 11, h: 9, color: Self.cLimb, radius: 4, anchor: CGPoint(x: 0.5, y: 1))
 
-        // The body is a low, wide loaf, anchored at its bottom-centre so breathing/arching pivots
-        // from the ground and any sway leans the whole cat rather than sliding it.
-        configure(body, x: 50, y: 22, w: 62, h: 46, color: Self.cBody, radius: 20, anchor: CGPoint(x: 0.5, y: 0))
+        // No head shape at all — just an invisible box that holds the features and drives the
+        // breathing / blink / mood animations. Only the white face below is drawn.
+        configure(body, x: 50, y: 22, w: 62, h: 46, color: Self.cClear, radius: 0, anchor: CGPoint(x: 0.5, y: 0))
 
-        // Ears: anchored at their base on the head's top edge, so a small rotation is a twitch, a
-        // big one is "ears flat back". A coral inner ear makes them read as ears, not bumps.
-        configureChild(leftEar,  in: body, cx: 14, cy: 48, w: 12, h: 13, color: Self.cLimb, radius: 4,
+        // Ears kept as INVISIBLE layers so the ear animations (twitch, flatten) still have something
+        // to drive — nothing is drawn.
+        configureChild(leftEar,  in: body, cx: 18, cy: 44, w: 12, h: 13, color: Self.cClear, radius: 4,
                        anchor: CGPoint(x: 0.5, y: 0))
-        configureChild(rightEar, in: body, cx: 48, cy: 48, w: 12, h: 13, color: Self.cLimb, radius: 4,
+        configureChild(rightEar, in: body, cx: 44, cy: 44, w: 12, h: 13, color: Self.cClear, radius: 4,
                        anchor: CGPoint(x: 0.5, y: 0))
         leftEar.transform  = CATransform3DMakeRotation(-0.1, 0, 0, 1)
         rightEar.transform = CATransform3DMakeRotation(0.1, 0, 0, 1)
 
-        // Face — the only visible part of the cat, all in the same warm white so it reads as one
-        // set: two small eyes sitting close over a nose, and a thin "ω" mouth below it. No whiskers.
-        // Eye CENTRES are at (20,28.5)/(42,28.5) — kept in sync with the eye-mark overlays below.
+        // The whole visible cat: two white eyes over a white nose and a thin white "ω" mouth.
         configureChild(leftEye,  in: body, cx: 20, cy: 28.5, w: 6, h: 7.5, color: Self.cEye, radius: 3)
         configureChild(rightEye, in: body, cx: 42, cy: 28.5, w: 6, h: 7.5, color: Self.cEye, radius: 3)
         addRect(to: body, x: 28.25, y: 20.5, w: 5.5, h: 4, color: Self.cEye, radius: 2)     // nose
-        // Mouth: a thin "ω" just under the nose — a ~1-unit stroke, since the curves are the one
-        // thing rectangles can't fake.
         let mouth = CAShapeLayer()
         mouth.frame = CGRect(x: 0, y: 0, width: 62, height: 46)   // body-local coords
         let m = CGMutablePath()
@@ -149,11 +151,21 @@ final class ClaudeMascot {
         mouth.lineCap = .round
         mouth.contentsScale = backing
         body.addSublayer(mouth)
+        // White whiskers, three per side, beside the muzzle and fanning outward.
+        for (y, rot) in [(19.5, 0.22), (16.0, 0.02), (12.5, -0.2)] {
+            let l = addRect(to: body, x: 8, y: y, w: 7.5, h: 1.1, color: Self.cWhisker, radius: 0.55)
+            l.transform = CATransform3DMakeRotation(rot, 0, 0, 1)
+            l.zPosition = 20
+            let r = addRect(to: body, x: 46.5, y: y, w: 7.5, h: 1.1, color: Self.cWhisker, radius: 0.55)
+            r.transform = CATransform3DMakeRotation(-rot, 0, 0, 1)
+            r.zPosition = 20
+        }
 
-        // Front paws at the body's sides, pivoting from the shoulder.
-        configureChild(leftArm,  in: body, cx: 3,  cy: 26, w: 9, h: 18, color: Self.cLimb, radius: 4.5,
+        // Front paws: kept as INVISIBLE pivots (no visible hands, per request) — they still carry
+        // the held prop (hammer / mug / dumbbell) and drive its swing, they just aren't drawn.
+        configureChild(leftArm,  in: body, cx: 3,  cy: 26, w: 9, h: 18, color: Self.cClear, radius: 4.5,
                        anchor: CGPoint(x: 0.5, y: 1))
-        configureChild(rightArm, in: body, cx: 59, cy: 26, w: 9, h: 18, color: Self.cLimb, radius: 4.5,
+        configureChild(rightArm, in: body, cx: 59, cy: 26, w: 9, h: 18, color: Self.cClear, radius: 4.5,
                        anchor: CGPoint(x: 0.5, y: 1))
 
         // A prop held in the right paw: its BASE sits at the paw and it extends UPWARD, so the
@@ -244,7 +256,7 @@ final class ClaudeMascot {
     /// How much of the 100-unit design box maps to a point, via a scale on `root`. Below 1 the cat
     /// shrinks and MORE of the bar is free around it — headroom for the props and travelling
     /// animations. Safe to set on `root.transform` because `clearAnimations` no longer resets it.
-    private static let bodyScale: CGFloat = 0.9
+    private static let bodyScale: CGFloat = 0.82
 
     /// Park the cat at the CENTRE of the stage — every animation plays from there (roaming
     /// vignettes go out and always come back to centre).
@@ -293,6 +305,7 @@ final class ClaudeMascot {
         case .completed:   completed()
         case .exploded:    exploded()
         case .celebrating: celebrating()
+        case .caffeinated: caffeinated()
         }
     }
 
@@ -548,15 +561,15 @@ final class ClaudeMascot {
         configureHammer()
         leftEye.transform = CATransform3DMakeScale(1, 0.75, 1)           // focus squint
         rightEye.transform = CATransform3DMakeScale(1, 0.75, 1)
-        // Wind up (head tips left) → STRIKE (easeIn: a hit, not a wave) → recover.
+        // No hands now — so float the hammer BESIDE the cat, off its right side (clear of the face),
+        // where it hammers down like a tool working next to it.
+        rightArm.transform = CATransform3DMakeTranslation(9, -11, 0)
+        // Wind up (head tips back) → STRIKE down → recover.
         let swing = keyframe("transform.rotation.z",
-                             values: [0.2, 0.85, -1.15, 0.2],
+                             values: [0.3, 0.95, -0.5, 0.3],
                              times:  [0, 0.42, 0.6, 1],
                              duration: 0.72, easings: [.easeInOut, .easeIn, .easeInOut])
         heldProp.add(swing, forKey: "swing")
-        // The paws just ride along: a hint of sympathetic grip motion, the other one bracing.
-        rightArm.add(basic("transform.rotation.z", from: 0.06, to: -0.1, duration: 0.36), forKey: "grip")
-        leftArm.add(basic("transform.rotation.z", from: 0.12, to: -0.12, duration: 0.72), forKey: "brace")
         // Body squashes on the strike (~t=0.6) and springs back.
         let impact = keyframe("transform.scale.y",
                               values: [1, 1, 0.93, 1.01, 1],
@@ -642,6 +655,24 @@ final class ClaudeMascot {
         waveR.timeOffset = 0.15
         rightArm.add(waveR, forKey: "wave")
         tail.add(basic("transform.rotation.z", from: 0.6, to: 1.15, duration: 0.31), forKey: "wag")
+    }
+
+    /// 3-second "staying up": keep-awake just switched on — a steaming mug of coffee held up by the
+    /// muzzle, the cat taking a couple of content little sips (eyes dipping shut). Then gone.
+    private func caffeinated() {
+        configureMug()
+        breathe(period: 2.0, amount: 0.02)
+        body.transform = CATransform3DMakeRotation(0.03, 0, 0, 1)        // slight lean toward the cup
+        leftEye.transform = CATransform3DMakeScale(1, 0.55, 1)           // content
+        rightEye.transform = CATransform3DMakeScale(1, 0.55, 1)
+        // Two sips: the eyes dip fully shut for a beat each.
+        let sip = keyframe("transform.scale.y",
+                           values: [0.55, 0.55, 0.1, 0.55, 0.55, 0.1, 0.55, 0.55],
+                           times:  [0, 0.18, 0.26, 0.42, 0.58, 0.66, 0.82, 1],
+                           duration: 3, easings: nil, repeats: 1)
+        leftEye.add(sip, forKey: "sip")
+        rightEye.add(sip, forKey: "sip")
+        tailFlick(period: 2.2, from: 0.1, to: 0.3)
     }
 
     /// 3-second alarm: something FAILED — the eyes themselves turn into red X's, and the body gives
@@ -870,6 +901,35 @@ final class ClaudeMascot {
         addRect(to: heldProp, x: 18, y: 5, w: 5,  h: 9, color: Self.cCoral, radius: 2)
     }
 
+    /// A steaming coffee mug held up by the muzzle for the keep-awake sip. A fixed prop (not on the
+    /// swinging arm) so the cup stays upright and the steam rises true; the steam wisps loop.
+    private func configureMug() {
+        floorProp.sublayers?.forEach { $0.removeFromSuperlayer() }
+        floorProp.isHidden = false
+        floorProp.position = CGPoint(x: 60, y: 33)      // just right of the muzzle, chin height
+        addRect(to: floorProp, x: 3,   y: 0,   w: 10,  h: 9,   color: Self.cCream, radius: 2.5)  // cup
+        addRect(to: floorProp, x: 4.5, y: 5.5, w: 7,   h: 2.5, color: Self.rgb(0x5A, 0x3B, 0x22), radius: 1)  // coffee
+        addRect(to: floorProp, x: 12,  y: 2,   w: 3.5, h: 5,   color: Self.cCream, radius: 2)    // handle
+        for (dx, off) in [(-1.5, 0.0), (2.0, 0.75)] {
+            let s = CALayer()
+            s.bounds = CGRect(x: 0, y: 0, width: 2.2, height: 2.2)
+            s.cornerRadius = 1.1
+            s.position = CGPoint(x: 8 + dx, y: 10)
+            s.backgroundColor = Self.cCream
+            s.opacity = 0
+            s.contentsScale = backing
+            floorProp.addSublayer(s)
+            let rise = keyframe("transform.translation.y", values: [0, 6], times: [0, 1],
+                                duration: 1.5, easings: [.easeOut])
+            rise.timeOffset = off
+            let fade = keyframe("opacity", values: [0, 0.6, 0], times: [0, 0.3, 1],
+                                duration: 1.5, easings: nil)
+            fade.timeOffset = off
+            s.add(rise, forKey: "rise")
+            s.add(fade, forKey: "fade")
+        }
+    }
+
     /// The worker's yellow hard hat: domed crown, wide brim, a ridge on top — parked on the
     /// forehead, just above the eyes.
     private func configureHardHat() {
@@ -1053,22 +1113,33 @@ final class ClaudeMascot {
         smoke.sublayers?.forEach { $0.removeFromSuperlayer() }
         smoke.isHidden = false
         smoke.position = CGPoint(x: 94, y: 33)
-        for (dx, offset) in [(-5.0, 0.0), (5.0, 0.9)] {
+        // A steady billow off the pad: eight puffs on a tight stagger (~0.22 s apart, each living
+        // 1.8 s) so there's always a full column of smoke rising, swelling and fading — engine
+        // warming up hard, not a lone wisp.
+        let puffs: [(dx: CGFloat, off: Double, size: CGFloat)] = [
+            (-8, 0.0, 5.5), (8, 0.22, 5), (-4, 0.45, 4.5), (5, 0.68, 5),
+            (-1, 0.9, 4.5), (3, 1.12, 5.5), (-6, 1.35, 4.5), (7, 1.58, 5),
+        ]
+        for p in puffs {
             let puff = CALayer()
-            puff.bounds = CGRect(x: 0, y: 0, width: 4, height: 4)
-            puff.position = CGPoint(x: 20 + dx, y: 8)
-            puff.cornerRadius = 2
+            puff.bounds = CGRect(x: 0, y: 0, width: p.size, height: p.size)
+            puff.position = CGPoint(x: 20 + p.dx, y: 8)
+            puff.cornerRadius = p.size / 2
             puff.backgroundColor = Self.cCream
             puff.opacity = 0
             puff.contentsScale = backing
             smoke.addSublayer(puff)
-            let rise = keyframe("transform.translation.y", values: [0, 7], times: [0, 1],
+            let rise = keyframe("transform.translation.y", values: [0, 9], times: [0, 1],
                                 duration: 1.8, easings: [.easeOut])
-            rise.timeOffset = offset
-            let fade = keyframe("opacity", values: [0, 0.55, 0], times: [0, 0.3, 1],
+            rise.timeOffset = p.off
+            let grow = keyframe("transform.scale", values: [0.6, 1.5], times: [0, 1],
+                                duration: 1.8, easings: [.easeOut])
+            grow.timeOffset = p.off
+            let fade = keyframe("opacity", values: [0, 0.7, 0], times: [0, 0.3, 1],
                                 duration: 1.8, easings: nil)
-            fade.timeOffset = offset
+            fade.timeOffset = p.off
             puff.add(rise, forKey: "rise")
+            puff.add(grow, forKey: "grow")
             puff.add(fade, forKey: "fade")
         }
     }
@@ -1078,25 +1149,35 @@ final class ClaudeMascot {
         smoke.sublayers?.forEach { $0.removeFromSuperlayer() }
         smoke.isHidden = false
         smoke.position = CGPoint(x: 94, y: 33)
-        for (dx, offset) in [(-8.0, 0.0), (0.0, 0.12), (8.0, 0.24)] {
+        // A big blast on liftoff: eight fat puffs bursting out both ways (and a couple straight
+        // down) so the pad disappears in smoke as the rocket rips upward.
+        let puffs: [(dx: CGFloat, dy: CGFloat, off: Double)] = [
+            (-10, 1, 0.0), (-6, -2, 0.06), (-3, 2, 0.12), (0, -1, 0.18),
+            (3, 2, 0.24), (6, -2, 0.3), (10, 1, 0.36), (0, 3, 0.14),
+        ]
+        for p in puffs {
             let puff = CALayer()
-            puff.bounds = CGRect(x: 0, y: 0, width: 6, height: 6)
+            puff.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
             puff.position = CGPoint(x: 20, y: 8)
-            puff.cornerRadius = 3
+            puff.cornerRadius = 3.5
             puff.backgroundColor = Self.cCream
             puff.opacity = 0
             puff.contentsScale = backing
             smoke.addSublayer(puff)
-            let drift = keyframe("transform.translation.x", values: [0, dx * 1.8], times: [0, 1],
-                                 duration: 1.0, easings: [.easeOut])
-            drift.timeOffset = offset
-            let grow = keyframe("transform.scale", values: [0.5, 1.6], times: [0, 1],
-                                duration: 1.0, easings: [.easeOut])
-            grow.timeOffset = offset
-            let fade = keyframe("opacity", values: [0, 0.8, 0], times: [0, 0.25, 1],
-                                duration: 1.0, easings: nil)
-            fade.timeOffset = offset
-            puff.add(drift, forKey: "drift")
+            let dx = keyframe("transform.translation.x", values: [0, p.dx * 1.8], times: [0, 1],
+                              duration: 1.1, easings: [.easeOut])
+            dx.timeOffset = p.off
+            let dy = keyframe("transform.translation.y", values: [0, p.dy * 1.8], times: [0, 1],
+                              duration: 1.1, easings: [.easeOut])
+            dy.timeOffset = p.off
+            let grow = keyframe("transform.scale", values: [0.5, 2.0], times: [0, 1],
+                                duration: 1.1, easings: [.easeOut])
+            grow.timeOffset = p.off
+            let fade = keyframe("opacity", values: [0, 0.9, 0], times: [0, 0.25, 1],
+                                duration: 1.1, easings: nil)
+            fade.timeOffset = p.off
+            puff.add(dx, forKey: "dx")
+            puff.add(dy, forKey: "dy")
             puff.add(grow, forKey: "grow")
             puff.add(fade, forKey: "fade")
         }

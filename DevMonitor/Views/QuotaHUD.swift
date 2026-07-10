@@ -111,6 +111,7 @@ final class QuotaHUDController {
     private var runningWorkerIDs: Set<Project.ID> = []
     private var launchingServerIDs: Set<Project.ID> = []
     private var runningServerIDs: Set<Project.ID> = []
+    private var wasKeepingAwake = false
     private var wasRed = false
     /// The transient event animation currently showing, and until when.
     private var transientMood: ClaudeMascot.Mood?
@@ -194,6 +195,7 @@ final class QuotaHUDController {
     ///   exploded    — a server died mid-launch: the rocket explodes + red X eyes
     ///   celebrating — a build finished OK: check eyes, hops + confetti
     ///   gearedUp    — a background worker just started: hard hat drops on + determined nod
+    ///   caffeinated — keep-awake switched on: a steaming coffee, a couple of sips
     /// Four CONTINUOUS states: while a server is LAUNCHING the rocket vibrates on the pad; while a
     /// build runs the cat hammers away; while a production PREVIEW serves it watches its little
     /// screen; and when the machine is under pressure the warning-eyes animation outranks
@@ -212,6 +214,11 @@ final class QuotaHUDController {
         let workersNow = Set(appState.workers.filter { $0.value.isRunning }.map(\.key))
         if !workersNow.subtracting(runningWorkerIDs).isEmpty { fire(.gearedUp, at: now) }
         runningWorkerIDs = workersNow
+
+        // Keep-awake toggled ON → a 3-second coffee break.
+        let keepingAwake = appState.sleepGuard.isActive
+        if keepingAwake && !wasKeepingAwake { fire(.caffeinated, at: now) }
+        wasKeepingAwake = keepingAwake
 
         // Servers (dev sessions + previews). Launching is CONTINUOUS (the rocket loop plays for as
         // long as a server is coming up — that can be well past 3 s); reaching running fires the
