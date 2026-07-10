@@ -10,6 +10,13 @@ enum GitInfo {
         var name: String { URL(fileURLWithPath: path).lastPathComponent }
     }
 
+    /// Size of the uncommitted changes — line counts from `git diff HEAD`.
+    struct DiffStat: Equatable, Sendable {
+        var added: Int
+        var removed: Int
+        var isEmpty: Bool { added == 0 && removed == 0 }
+    }
+
     /// Current branch for a project path. Handles both a normal clone (`.git` is a directory) and a
     /// linked worktree (`.git` is a file pointing at the real gitdir). nil if not a git repo.
     static func branch(for projectPath: String) -> String? {
@@ -19,6 +26,22 @@ enum GitInfo {
         let prefix = "ref: refs/heads/"
         if trimmed.hasPrefix(prefix) { return String(trimmed.dropFirst(prefix.count)) }
         return trimmed.isEmpty ? nil : String(trimmed.prefix(7))  // detached HEAD
+    }
+
+    /// Uncommitted line changes vs HEAD (staged + unstaged tracked edits), summed from
+    /// `git diff HEAD --numstat`. nil when not a git repo or the repo has no commits yet; a clean tree
+    /// yields (0, 0). Untracked files aren't counted — they're not part of the diff. Blocking — call
+    /// off the main thread.
+    static func diffStat(for projectPath: String) -> DiffStat? {
+        guard let out = run(["diff", "HEAD", "--numstat"], cwd: projectPath) else { return nil }
+        var added = 0, removed = 0
+        for raw in out.split(separator: "\n") {
+            let cols = raw.split(separator: "\t")
+            guard cols.count >= 2 else { continue }
+            added   += Int(cols[0]) ?? 0     // "-" for binary files → counts as 0
+            removed += Int(cols[1]) ?? 0
+        }
+        return DiffStat(added: added, removed: removed)
     }
 
     /// Resolve the path to the `HEAD` file, following the worktree `.git`-file pointer when present.

@@ -21,7 +21,7 @@ Live resource graphs · hang detection · crash auto-revive · build runner · a
 
 ---
 
-Dev Monitor runs your dev servers the way a production process manager runs services: it **launches** them with the right heap, **watches** CPU/memory/health in real time, **recycles** them when they hang, **revives** them when they crash, and gives you **one place** — app, menu bar, or CLI — to see and control every server across every project.
+Dev Monitor runs your dev servers the way a production process manager runs services: it **launches** them with the right heap, **watches** CPU/memory/health in real time, **recycles** them when they hang, **revives** them when they crash, and gives you **one place** — app, notch bar, or CLI — to see and control every server across every project.
 
 > **Why it exists.** A doubled `npm` wrapper once left an orphaned Nuxt process listening on `:3000` but unresponsive — pinning a CPU core and dragging the whole Mac down, with nothing obvious to kill. Dev Monitor does that supervision properly and *visibly*, so it can't happen quietly again.
 
@@ -70,10 +70,10 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 - **Autoscales the build heap** 4 → 6 → 8 on OOM, with its **own** learned level independent from the dev server's.
 - **Frees RAM aggressively around the build**: `purge`s inactive/cached memory (before, and again under pressure during), surfaces the resource advisor to close heavy non-essential apps, watches memory pressure to act **before** the kernel jetsams the build, and runs Node with `--optimize-for-size`. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
 
-### 🖥️ Global terminal &amp; menu bar
+### 🖥️ Global terminal &amp; notch bar
 - **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*). **Claude Code's shells and monitors get tabs too** — each tab shows the command/script it runs and a **Stop** button.
 - **Global Activity** — the meters and process list always reflect the whole machine, not just the selected project.
-- **Menu-bar item** (`MenuBarExtra`) — lists every **online server** (live status/uptime + Stop/Restart), every **build** in progress, and any **external** dev servers, plus a Launch button and a CPU/memory snapshot — without opening the window.
+- **Notch bar** — a single black strip that extends the notch's bezel: an animated, all-vector Claude **cat mascot** on the left that mirrors what the machine is doing (hammering while a build runs, a rocket on the pad while a server boots, red-X eyes on a failure, a warning face under pressure, a hard-hat salute when a worker starts, cat vignettes when idle), and the live **Claude quota** — 5-hour and 7-day usage — on the right. Hovering it opens the controls menu: every **online server** (status/uptime + Stop/Restart), every **build** in progress, any **external** servers, a Launch button and a CPU/memory snapshot — without opening the window. (macOS hides menu-bar icons *behind* the notch, so the status glyph moved here where it's always visible, even in fullscreen.)
 - **Appearance** — app-wide **Theme** (System / Light / Dark) and a separate **Terminal** theme for the log panes.
 
 ### ⌨️ CLI + central hub
@@ -123,16 +123,23 @@ Grab the latest build from [GitHub Releases](https://github.com/damiandania/DevM
 
 ### Install a release build
 
-A Release build installs the app to `/Applications` and the `dev-monitor` CLI to `~/.local/bin`:
+One command builds Release, signs with a **stable local certificate**, and installs the app to `/Applications` + the `dev-monitor` CLI to `~/.local/bin`:
 
 ```bash
-xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor  -configuration Release -derivedDataPath build build
-xcodebuild -project DevMonitor.xcodeproj -scheme dev-monitor -configuration Release -derivedDataPath build build
-cp -R "build/Build/Products/Release/Dev Monitor.app" "/Applications/Dev Monitor.app"
-cp    "build/Build/Products/Release/dev-monitor"      ~/.local/bin/dev-monitor
+bash tools/install-local.sh
 ```
 
-The app is **ad-hoc signed** (`CODE_SIGN_IDENTITY = -`) — no Apple Developer ID is installed on this machine, which is fine for local use. The CLI auto-starts the app via LaunchServices when the hub isn't already running. For distribution outside this Mac, sign with a Developer ID and notarize.
+**Why the stable signature matters.** macOS ties permission grants (Downloads, Music, Automation, …) to an app's code-signing identity. A plain *ad-hoc* signature (`CODE_SIGN_IDENTITY = -`) has no stable identity, so macOS keys the grants to the cdhash — and that changes on **every** build. Result: each reinstall looks like a brand-new app and you get re-prompted for all permissions.
+
+**The fix is a one-time setup, then it's automatic for *every* build.** Run once:
+
+```bash
+bash tools/ensure-signing-cert.sh
+```
+
+It creates a self-signed cert in your login keychain and writes a git-ignored `tools/Signing.local.xcconfig`. From then on **any** build on this machine — `tools/install-local.sh`, a plain `xcodebuild`, or Xcode's Run button — signs with that same identity (via the optional `#include?` in `tools/Signing.xcconfig`), so the app's designated requirement is stable across rebuilds. Grant the permissions once and they stick. The first build pops a single keychain dialog — click **Always Allow** and later builds sign silently.
+
+Without that local file (CI, a fresh clone) the include is a no-op and builds stay ad-hoc, so **CI and other contributors are unaffected**. For distribution outside this Mac, sign with a Developer ID and notarize (see `tools/package-release.sh`).
 
 ---
 
@@ -179,7 +186,7 @@ A non-sandboxed SwiftUI app (`@Observable @MainActor` state) plus a small CLI ta
 
 ```
 DevMonitor/
-  App/        @main App (WindowGroup + MenuBarExtra), AppState
+  App/        @main App (single Window + notch-bar HUD), AppState
   Model/      Project, AppSettings, SessionState, MetricPoint, IPCProtocol
   Store/      ProjectStore (Application Support JSON)
   Core/       Detector, DevSession (supervisor + metrics + health), ProcessTree,
@@ -188,7 +195,8 @@ DevMonitor/
   Sys/        spawn.c (posix_spawn SETSID + CLOEXEC), metrics.c (libproc/mach),
               ipc.c, dm_exc.m (ObjC exception shim) + bridging header
   Views/      RootSplitView, DashboardView, GlobalTerminalView, MenuBarView,
-              ActivityView, ProcessTableView, settings + Claude sheets
+              QuotaHUD + ClaudeMascot (the notch bar), ActivityView,
+              ProcessTableView, settings + Claude sheets
   Resources/  Assets.xcassets (AppIcon + skull + github), Info.plist
 dev-monitor/  CLI target (IPC client, robust arg parsing in ArgParse.swift)
 ```

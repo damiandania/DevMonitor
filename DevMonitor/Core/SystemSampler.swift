@@ -289,7 +289,12 @@ final class SystemSampler {
 
     private func updatePressure() {
         let now = DispatchTime.now().uptimeNanoseconds
-        let r = Self.evaluatePressure(cpu: systemCPU, memPercent: systemMemPercent,
+        // Aggregate 0–100 CPU attributable to builds (the supervised build row id -2 plus any external
+        // build), subtracted from the pressure signal so a build alone never trips it.
+        let buildCPU = processes
+            .filter { $0.isBuild || $0.isExternalBuild }
+            .reduce(0.0) { $0 + $1.cpuPerCore } / Double(coreCount)
+        let r = Self.evaluatePressure(cpu: systemCPU, buildCPU: buildCPU, memPercent: systemMemPercent,
                                       swapPercent: systemSwapPercent, hotSince: hotSince,
                                       now: now, sustainSeconds: sustainSeconds, current: pressure)
         hotSince = r.hotSince
@@ -381,12 +386,18 @@ final class SystemSampler {
         return result
     }
 
-    /// Pure pressure state machine: stuck when CPU is pinned, or memory is full while swapping, for
-    /// a sustained window; clears with hysteresis. `justStuck` marks the normal → stuck transition.
+    /// Pure pressure state machine: stuck when NON-build CPU is pinned, or memory is full while
+    /// swapping, for a sustained window; clears with hysteresis. `justStuck` marks the normal → stuck
+    /// transition. `buildCPU` is the aggregate 0–100 CPU a running build accounts for; it's subtracted
+    /// first so a plain build — which maxes the cores on purpose — never reads as a stuck machine.
     nonisolated static func evaluatePressure(
-        cpu: Double, memPercent: Double, swapPercent: Double,
+        cpu: Double, buildCPU: Double, memPercent: Double, swapPercent: Double,
         hotSince: UInt64?, now: UInt64, sustainSeconds: Double, current: Pressure
     ) -> (pressure: Pressure, reason: String, hotSince: UInt64?, justStuck: Bool) {
+        // A build saturating the cores is expected, bounded work that finishes — not a stuck machine.
+        // Discount it so pressure fires only when something ELSE is pinning the cores. (Memory pressure
+        // below stays on raw memory/swap: a build thrashing RAM IS real pressure.)
+        let cpu = max(0, cpu - buildCPU)
         let cpuHot = cpu >= 90
         let memHot = memPercent >= 90 && swapPercent >= 50
         if cpuHot || memHot {

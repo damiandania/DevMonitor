@@ -249,7 +249,9 @@ final class AppState {
     }
 
     /// Activate the app and bring the single main window to the front (no SwiftUI openWindow here).
-    private func bringMainWindowToFront() {
+    /// Internal (not private) so the quota HUD's detached menu — which has no SwiftUI scene
+    /// `openWindow` — can open the main window too.
+    func bringMainWindowToFront() {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first { $0.identifier?.rawValue == "main" }?.makeKeyAndOrderFront(nil)
     }

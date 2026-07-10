@@ -16,6 +16,7 @@ struct DashboardView: View {
                 Text(project.name).font(.title2.bold()).lineLimit(1)
                     .help(project.path)
                 BranchWorktreeMenu(project: project)
+                UncommittedDiffStat(project: project)
                 Spacer()
             }
             Divider()
