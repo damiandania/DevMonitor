@@ -243,6 +243,14 @@ extension Project {
         return Project.logsDirectory.appendingPathComponent("\(trimmed)-\(id.uuidString.prefix(8)).log")
     }
 
+    /// The build's OWN log file, alongside the dev-server log. `BuildRunner` streams the full build
+    /// output here (fresh per build) so the whole thing survives — the in-app pane and the CLI's
+    /// failure tail only show a slice, which hides the header of a big error (e.g. a Rollup dump).
+    /// `dev-monitor logs --build` reads this path (carried on `status`).
+    var buildLogFileURL: URL {
+        logFileURL.deletingPathExtension().appendingPathExtension("build.log")
+    }
+
     /// How many `.log` files sit in `directory` and the bytes they occupy — for the "Clear logs"
     /// affordance (label + confirm text). `directory` defaults to `logsDirectory`; tests pass a temp.
     static func logsSummary(in directory: URL = logsDirectory) -> (count: Int, bytes: Int) {

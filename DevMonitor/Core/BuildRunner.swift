@@ -21,6 +21,9 @@ final class BuildRunner {
     private var consumeTask: Task<Void, Never>?
     private var lineBuffer = LineBuffer()
     private let maxLogLines = 4000
+    /// Full build output mirrored to disk (ANSI-stripped), fresh per build. `logLines` is capped and
+    /// the CLI only surfaces a tail, so this file is the one place the WHOLE error survives.
+    private var logFile: FileHandle?
     /// Set when `stop()` is called so the signal-killed exit isn't reported as a build *failure*
     /// (the dashboard shows "Stopped", not "Failed").
     private(set) var wasStopped = false
@@ -38,6 +41,14 @@ final class BuildRunner {
 
     func start(memoryGB: Int) {
         guard !isRunning else { return }
+        // Resolve the user's login+interactive PATH into our env BEFORE spawning, so the build finds
+        // node/npm. Without it, a build run right after a GUI launch — before any dev server resolved
+        // the PATH in this process — inherits the bare launchd PATH and dies with `node: not found`
+        // (exit 127). DevSession/WorkerRunner do the same; a build must too, since it can be the very
+        // first thing spawned. See ShellEnvironment.
+        if ShellEnvironment.applyResolvedPATH() == nil {
+            AppLog.shared.event("BuildRunner: could not resolve the user shell PATH for \(project.name) — using inherited PATH")
+        }
         // Inject the same heap as the dev server (--max-old-space-size) so a large build doesn't OOM
         // where a bare `npm run build` would. NOTE: only NODE_OPTIONS-allowlisted flags work here —
         // V8 flags like --optimize-for-size are REJECTED ("not allowed in NODE_OPTIONS") and make
@@ -45,8 +56,10 @@ final class BuildRunner {
         let nodeOpts = ProcessSupport.nodeHeapFlag(memoryGB: memoryGB)
         let userEnv = ProcessSupport.envAssignments(project.env)
         let command = "\(userEnv)NODE_OPTIONS='\(nodeOpts)' FORCE_COLOR=0 exec \(buildCommand)"
-        logLines = ["$ \(command)  (cwd: \(project.path))"]
+        let header = "$ \(command)  (cwd: \(project.path))"
+        logLines = [header]
         lineBuffer.reset()
+        openLogFile(header: header)
         result = nil
         duration = nil
         startedAt = Date()
@@ -91,6 +104,11 @@ final class BuildRunner {
         if logLines.count > maxLogLines + 200 {
             logLines.removeFirst(logLines.count - maxLogLines)
         }
+        // Mirror the FULL output to disk (unlike the capped in-memory buffer) so the whole error is
+        // recoverable — that's the point of the file.
+        if let data = fresh.map({ $0.strippedANSI + "\n" }).joined().data(using: .utf8) {
+            logFile?.write(data)
+        }
     }
 
     private func finish(code: Int32) {
@@ -108,6 +126,25 @@ final class BuildRunner {
             logLines.append("build finished (code \(code))")
             onEvent?(.buildFinished(project: project.name, success: code == 0))
         }
+        let tail = (wasStopped ? "build stopped" : "build finished (code \(code))") + "\n"
+        logFile?.write(Data(tail.utf8))
+        try? logFile?.close()
+        logFile = nil
         onFinish?(code == 0)
+    }
+
+    /// Open the build log fresh (truncated) for this run — one build's output at a time, so the file
+    /// is never a confusing mix of past builds. Mirrors `DevSession.openLogFile`'s directory handling.
+    private func openLogFile(header: String) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Project.logsDirectory, withIntermediateDirectories: true)
+        let url = project.buildLogFileURL
+        fm.createFile(atPath: url.path, contents: Data())   // truncate: a build log is per-run
+        logFile = try? FileHandle(forWritingTo: url)
+        if logFile == nil {
+            AppLog.shared.event("BuildRunner: could not open build log for \(project.name) at \(url.path)")
+            return
+        }
+        logFile?.write(Data((header + "\n").utf8))
     }
 }

@@ -16,6 +16,9 @@ struct IPCServerInfo: Codable, Sendable {
     var port: Int?
     /// Absolute path to this project's log file (so `dev-monitor logs [path]` can find it).
     var logPath: String?
+    /// Absolute path to this project's build log file (so `dev-monitor logs [path] --build` can read
+    /// the WHOLE last build's output — the failure tail the CLI prints is only a slice).
+    var buildLogPath: String? = nil
     // Structured fields so an agent can operate/diagnose from `status --json` alone — no curl, no
     // reading internal files. All optional for backward/forward compatibility.
     /// HTTP-confirmed running (reliable readiness — true only after a successful health probe).

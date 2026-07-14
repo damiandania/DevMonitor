@@ -84,6 +84,7 @@ final class IPCServer {
                         state: active?.state.label ?? "Idle",
                         port: active?.effectivePort ?? p.port,
                         logPath: p.logFileURL.path,
+                        buildLogPath: p.buildLogFileURL.path,
                         ready: active?.isReady ?? false,
                         url: active.flatMap { $0.isReady ? $0.url : nil },
                         pid: (active?.pid).flatMap { $0 > 0 ? Int($0) : nil },
@@ -166,12 +167,16 @@ final class IPCServer {
             // (or an agent) gets the real result instead of a fire-and-forget "building …".
             let build = await app.runBuildAndWait(project)
             let code = build.result ?? -1
-            for line in build.logLines.suffix(40) {
+            // On failure show a deeper tail (errors are what the caller came for); on success a short
+            // one. Either way the WHOLE build log is on disk, so point there for anything the tail
+            // clips — e.g. a Rollup error whose header scrolls past any fixed-size tail.
+            for line in build.logLines.suffix(code == 0 ? 40 : 200) {
                 IPCIO.write(client, IPCMessage(type: "ok", message: line))
             }
             if code == 0 {
                 IPCIO.write(client, IPCMessage(type: "ok", message: "✅ build succeeded — \(project.name) (exit 0)"))
             } else {
+                IPCIO.write(client, IPCMessage(type: "ok", message: "↳ full build log: \(project.buildLogFileURL.path)"))
                 IPCIO.write(client, IPCMessage(type: "error", message: "❌ build failed — \(project.name) (exit \(code))"))
             }
 

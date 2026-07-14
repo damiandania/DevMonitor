@@ -20,6 +20,7 @@ USAGE:
   dev-monitor restart [path]        Relaunch the project's server (works from any state)
   dev-monitor remove [path]         Stop and forget the project (aliases: rm, forget)
   dev-monitor logs [path] [-f]      Print (or follow with -f) that project's log (default: cwd)
+  dev-monitor logs [path] --build   Print the WHOLE last build's output (the full error, not the tail)
   dev-monitor version               Print the version (aliases: -v, --version)
   dev-monitor docs                  Print this help
 
@@ -237,12 +238,19 @@ case "status":
     }
 
 case "logs":
-    let a = DMParse.parse(rest, boolFlags: ["-f", "--follow"], allowGB: false)
+    let a = DMParse.parse(rest, boolFlags: ["-f", "--follow", "--build"], allowGB: false)
     if let e = a.error { die(e) }
     let follow = a.flags.contains("-f") || a.flags.contains("--follow")
+    let wantBuild = a.flags.contains("--build")
     let target = singlePath(a)
-    guard let server = fetchServers().first(where: { $0.path == target }), let logPath = server.logPath else {
+    guard let server = fetchServers().first(where: { $0.path == target }) else {
         die("no project tracked for \(target) — run 'dev-monitor up' here first")
+    }
+    // --build reads the last build's full output (BuildRunner mirrors it to its own file); otherwise
+    // the dev-server log. The build tail printed by `dev-monitor build` is only a slice of this.
+    guard let logPath = wantBuild ? server.buildLogPath : server.logPath else {
+        die(wantBuild ? "no build log for \(target) — run 'dev-monitor build' here first"
+                      : "no project tracked for \(target) — run 'dev-monitor up' here first")
     }
     if follow {
         let tail = Process()
