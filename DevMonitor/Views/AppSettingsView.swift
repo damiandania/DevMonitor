@@ -57,7 +57,7 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            ClaudeHookSection()
+            ClaudeCodeSection()
             Section {
                 Picker("Theme", selection: theme) {
                     ForEach(AppSettings.themes) { t in
@@ -255,18 +255,58 @@ private struct NotificationsSettings: View {
 
 // MARK: - Claude Code hook (install / uninstall)
 
-/// Lets the user install (or remove) the global Claude Code hook that makes OTHER Claude sessions
-/// route dev servers through this app instead of launching them themselves. Shown first in General.
-private struct ClaudeHookSection: View {
-    @State private var installed = ClaudeHookInstaller.isInstalled
-    @State private var error: String?
+/// Lets the user install (or remove) the `dev-monitor` CLI and the global Claude Code hook that makes
+/// OTHER Claude sessions route dev servers through this app instead of launching them themselves.
+/// Shown first in General. The CLI comes first — it's what the hook tells agents to run.
+private struct ClaudeCodeSection: View {
+    @State private var cliInstalled = CLIInstaller.isInstalled
+    @State private var cliError: String?
+    @State private var hookInstalled = ClaudeHookInstaller.isInstalled
+    @State private var hookError: String?
 
     var body: some View {
         Section("Claude Code") {
+            // MARK: CLI (dev-monitor)
+            LabeledContent("Command-line tool (dev-monitor)") {
+                Label(cliInstalled ? "Installed" : "Not installed",
+                      systemImage: cliInstalled ? "checkmark.seal.fill" : "circle")
+                    .foregroundStyle(cliInstalled ? Color.green : .secondary)
+                    .labelStyle(.titleAndIcon)
+            }
+            Text("Symlinks `dev-monitor` into `~/.local/bin`, pointing at the copy inside this app — so "
+                 + "the CLI always matches the running app. Drive builds/servers from any terminal, and "
+                 + "the hook below routes agents through it.")
+                .font(.caption).foregroundStyle(.secondary)
+            if cliInstalled && !CLIInstaller.isOnPATH {
+                Label("`~/.local/bin` isn't on your PATH — add it so `dev-monitor` is found.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                if cliInstalled {
+                    Button(role: .destructive) { runCLI(CLIInstaller.uninstall) } label: {
+                        Label("Uninstall CLI", systemImage: "trash")
+                    }
+                } else {
+                    Button { runCLI(CLIInstaller.install) } label: {
+                        Label("Install CLI", systemImage: "terminal")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            if let cliError {
+                Label(cliError, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.red)
+            }
+
+            Divider()
+
+            // MARK: PreToolUse hook
             LabeledContent("Route dev servers through the app") {
-                Label(installed ? "Installed" : "Not installed",
-                      systemImage: installed ? "checkmark.seal.fill" : "circle")
-                    .foregroundStyle(installed ? Color.green : .secondary)
+                Label(hookInstalled ? "Installed" : "Not installed",
+                      systemImage: hookInstalled ? "checkmark.seal.fill" : "circle")
+                    .foregroundStyle(hookInstalled ? Color.green : .secondary)
                     .labelStyle(.titleAndIcon)
             }
             Text("Other Claude Code sessions are blocked from running `npm run dev` / `nuxt dev` / "
@@ -275,28 +315,36 @@ private struct ClaudeHookSection: View {
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                if installed {
-                    Button(role: .destructive) { run(ClaudeHookInstaller.uninstall) } label: {
+                if hookInstalled {
+                    Button(role: .destructive) { runHook(ClaudeHookInstaller.uninstall) } label: {
                         Label("Uninstall hook", systemImage: "trash")
                     }
                 } else {
-                    Button { run(ClaudeHookInstaller.install) } label: {
+                    Button { runHook(ClaudeHookInstaller.install) } label: {
                         Label("Install hook", systemImage: "checkmark.shield")
                     }
                     .buttonStyle(.borderedProminent)
                 }
             }
-            if let error {
-                Label(error, systemImage: "exclamationmark.triangle")
+            if let hookError {
+                Label(hookError, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.red)
             }
         }
-        .onAppear { installed = ClaudeHookInstaller.isInstalled }
+        .onAppear {
+            cliInstalled = CLIInstaller.isInstalled
+            hookInstalled = ClaudeHookInstaller.isInstalled
+        }
     }
 
-    private func run(_ action: () throws -> Void) {
-        do { try action(); error = nil } catch { self.error = error.localizedDescription }
-        installed = ClaudeHookInstaller.isInstalled
+    private func runCLI(_ action: () throws -> Void) {
+        do { try action(); cliError = nil } catch { cliError = error.localizedDescription }
+        cliInstalled = CLIInstaller.isInstalled
+    }
+
+    private func runHook(_ action: () throws -> Void) {
+        do { try action(); hookError = nil } catch { hookError = error.localizedDescription }
+        hookInstalled = ClaudeHookInstaller.isInstalled
     }
 }
 

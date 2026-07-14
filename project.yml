@@ -24,6 +24,20 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - DevMonitor
+    # Build the CLI first (link:false — it's an executable, not something we link against) and drop it
+    # inside the app bundle (Contents/MacOS/dev-monitor). The "Install CLI" button in Settings then
+    # symlinks ~/.local/bin/dev-monitor at it, so the CLI always matches the running app (they share
+    # IPCProtocol — a stale CLI would mis-decode `status`). Copy runs post-sign, so the nested binary
+    # is ad-hoc like the app; a notarized release would need to re-sign it (see package-release.sh).
+    dependencies:
+      - target: dev-monitor
+        link: false
+    postBuildScripts:
+      - name: Embed dev-monitor CLI into the app bundle
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          cp -f "$BUILT_PRODUCTS_DIR/dev-monitor" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/dev-monitor"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.app
