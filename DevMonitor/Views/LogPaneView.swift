@@ -11,10 +11,11 @@ struct LogPaneView: View {
     var footer: AnyView? = nil
     /// Terminal appearance: "app" (follow the app theme), "dark", or "light".
     var terminalTheme: String = "dark"
-    /// Suggested filename (without extension) when exporting the log to a file.
-    var exportName: String = "log"
     @State private var input = ""
     @State private var search = ""
+    @State private var copied = false
+    /// Cancels a pending "revert the copied checkmark" so rapid re-copies don't flicker back early.
+    @State private var resetCopied: Task<Void, Never>? = nil
     @Environment(\.colorScheme) private var appScheme
 
     /// Lines actually shown: filtered by the search query (matched against ANSI-stripped text).
@@ -39,8 +40,8 @@ struct LogPaneView: View {
         let shown = visibleLines
 
         VStack(spacing: 0) {
-            // Search + export strip. Filtering matches the ANSI-stripped text; export writes the
-            // currently shown lines (so a filtered export saves just the matches).
+            // Search + copy strip. Filtering matches the ANSI-stripped text; the copy button puts the
+            // currently shown lines (so a filtered view copies just the matches) on the clipboard.
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
                 TextField("Filter log", text: $search)
@@ -52,38 +53,16 @@ struct LogPaneView: View {
                     Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
-                Button { export(shown) } label: { Image(systemName: "square.and.arrow.up") }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .help("Export the shown log to a file")
-                    .disabled(lines.isEmpty)
+                copyButton(shown)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(inputBg)
             Divider()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(shown.enumerated()), id: \.offset) { index, line in
-                            Text(ANSI.attributed(line.isEmpty ? " " : line))
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(textColor)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(index)
-                        }
-                    }
-                    .padding(8)
-                }
-                .scrollIndicators(.hidden)   // no scroll bar in the terminal
-                .background(bgColor)
-                .onChange(of: shown.count) { _, count in
-                    guard count > 0 else { return }
-                    // No animation: appends arrive in bursts and queued scroll animations pile up.
-                    proxy.scrollTo(count - 1, anchor: .bottom)
-                }
-            }
+            // AppKit-backed so a click-drag can select across MANY lines (a stack of SwiftUI `Text`s
+            // can only select within one row) and so chatty output stays smooth on large logs.
+            TerminalTextView(lines: shown, textColor: textColor, background: bgColor)
 
             if let footer {
                 Divider()
@@ -117,13 +96,131 @@ struct LogPaneView: View {
         .environment(\.colorScheme, dark ? .dark : .light)
     }
 
-    /// Save the given lines (ANSI-stripped, so the file is plain text) via a save panel.
-    private func export(_ shown: [String]) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(exportName).log"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let text = shown.map(\.strippedANSI).joined(separator: "\n") + "\n"
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+    /// Copy-all button: pops to a green checkmark + "Copied" for a beat so the click registers.
+    @ViewBuilder private func copyButton(_ shown: [String]) -> some View {
+        Button { copyAll(shown) } label: {
+            HStack(spacing: 3) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                if copied {
+                    Text("Copied").font(.caption2.weight(.medium))
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(copied ? Color.green : Color.secondary)
+            .scaleEffect(copied ? 1.15 : 1)
+        }
+        .buttonStyle(.plain)
+        .help(search.isEmpty ? "Copy the whole log to the clipboard"
+                             : "Copy the filtered log to the clipboard")
+        .disabled(shown.isEmpty)
+        .animation(.spring(response: 0.3, dampingFraction: 0.55), value: copied)
+    }
+
+    /// Put the shown lines (ANSI-stripped, so it pastes as plain text) on the clipboard and flash the
+    /// checkmark for ~1.3s.
+    private func copyAll(_ shown: [String]) {
+        let text = shown.map(\.strippedANSI).joined(separator: "\n")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+
+        copied = true
+        resetCopied?.cancel()
+        resetCopied = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { copied = false }
+        }
+    }
+}
+
+/// AppKit terminal text: an `NSTextView` gives native multi-line click-drag selection and `⌘C`, plus
+/// TextKit's lazy layout (only visible glyphs) so a 2000-line log doesn't re-lay-out wholesale on
+/// every chatty burst the way one giant SwiftUI `Text` would. Read-only; follows the tail unless the
+/// user has scrolled up or is mid-selection.
+private struct TerminalTextView: NSViewRepresentable {
+    let lines: [String]
+    let textColor: Color
+    let background: Color
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = true
+
+        let tv = scroll.documentView as! NSTextView
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isRichText = false
+        tv.drawsBackground = true
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticLinkDetectionEnabled = false
+        tv.textContainerInset = NSSize(width: 8, height: 8)
+        tv.textContainer?.lineFragmentPadding = 0
+        tv.textContainer?.widthTracksTextView = true   // wrap to width, no horizontal scroll
+
+        context.coordinator.scroll = scroll
+        context.coordinator.textView = tv
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        context.coordinator.apply(lines: lines, textColor: NSColor(textColor), background: NSColor(background))
+    }
+
+    final class Coordinator {
+        weak var scroll: NSScrollView?
+        weak var textView: NSTextView?
+
+        private let font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        private let boldFont = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold)
+
+        func apply(lines: [String], textColor: NSColor, background: NSColor) {
+            guard let tv = textView, let scroll = scroll else { return }
+            tv.backgroundColor = background
+            scroll.backgroundColor = background
+
+            // Leave the text (and thus the selection) untouched while the user is selecting — a live
+            // burst mustn't yank the highlight out from under a drag. It catches up on the next update.
+            guard tv.selectedRange().length == 0 else { return }
+
+            let atBottom = isScrolledToBottom(scroll)
+
+            let full = NSMutableAttributedString()
+            for (i, line) in lines.enumerated() {
+                if i > 0 { full.append(NSAttributedString(string: "\n")) }
+                full.append(attributed(line.isEmpty ? " " : line, textColor: textColor))
+            }
+            tv.textStorage?.setAttributedString(full)
+
+            // Only follow the tail if the user was already parked there — don't fight a scroll-up.
+            if atBottom { tv.scrollToEndOfDocument(nil) }
+        }
+
+        private func isScrolledToBottom(_ scroll: NSScrollView) -> Bool {
+            guard let doc = scroll.documentView else { return true }
+            // Within ~one line of the bottom counts as "following the tail".
+            return scroll.contentView.bounds.maxY >= doc.bounds.height - 20
+        }
+
+        /// Reuse the cached SwiftUI ANSI parse, re-emitting each run as AppKit attributes (SwiftUI
+        /// `Color` → `NSColor`, strong emphasis → bold monospaced), defaulting to the theme text colour.
+        private func attributed(_ line: String, textColor: NSColor) -> NSAttributedString {
+            let parsed = ANSI.attributed(line)
+            let out = NSMutableAttributedString()
+            for run in parsed.runs {
+                let text = String(parsed[run.range].characters)
+                let bold = run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+                var attrs: [NSAttributedString.Key: Any] = [.font: bold ? boldFont : font]
+                attrs[.foregroundColor] = run.foregroundColor.map(NSColor.init) ?? textColor
+                out.append(NSAttributedString(string: text, attributes: attrs))
+            }
+            return out
+        }
     }
 }
