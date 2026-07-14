@@ -126,10 +126,21 @@ failure — instead of returning immediately with "building …". This lets a ca
 the real result.
 
 How: the hub handler (`IPCServer.handle`, `case "build"`) is `async` and awaits
-`AppState.runBuildAndWait`; when the build (and its retries) finish it writes the last ~40 log lines
-as `ok` messages followed by an `ok`/`error` verdict, then closes the socket. The **CLI binary is
-unchanged** — it already reads the socket to EOF, prints each message, and exits non-zero on the
-trailing `error`. So a change here only needs the **app** rebuilt, not the CLI reinstalled.
+`AppState.runBuildAndWait`; when the build (and its retries) finish it writes the tail of the log
+(40 lines on success, 200 on failure) as `ok` messages, then — on failure — the build-log path
+(`↳ full build log: <path>`), then an `ok`/`error` verdict, and closes the socket. The CLI reads the
+socket to EOF, prints each message, and exits non-zero on the trailing `error`.
+
+**The whole error is never truncated away.** A tail can bury the real message under a big tool dump
+(e.g. a Rollup `watchFiles` array of every server module). So `BuildRunner` also mirrors every build —
+fresh per run — to `<name>-<id>.build.log` next to the dev-server log; it's exposed as `buildLogPath`
+on `status` and printed in full by **`dev-monitor logs [path] --build`**. `BuildRunner` resolves the
+login `PATH` (`ShellEnvironment`) before spawning, like `DevSession`, so a build that runs before any
+server on a fresh app launch still finds `node` (no `exit 127`).
+
+> The `--build` reader and `buildLogPath` field touch the CLI + shared `IPCProtocol`, so they *do*
+> need the CLI rebuilt — but the CLI now ships **inside the app bundle** and is symlinked into
+> `~/.local/bin` (Settings → Claude Code → **Install CLI**), so a fresh app build keeps them in lockstep.
 
 ---
 

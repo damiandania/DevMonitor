@@ -9,12 +9,13 @@ can drive it with the `dev-monitor` CLI instead of running the dev server direct
 | Command | What it does |
 |---------|--------------|
 | `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent** — a no-op that reports the port if already running. Auto-detects pnpm/npm + framework. `--gb N` overrides the heap (and pins it). `--wait` blocks until the server is HTTP-ready and prints its URL (or exits non-zero with the failure cause). (`run` is an alias.) |
-| `dev-monitor build [path]` | Build the project. **Pauses all active dev servers while building** (to free RAM) and relaunches them after. **Synchronous** — waits for the build, prints the tail of its output + a `✅`/`❌` verdict, and exits non-zero on failure. In auto mode the build heap autoscales **4 → 6 → 8** on OOM (independent from the dev server; learned level persisted). See `docs/HEAP-AND-BUILD.md`. |
-| `dev-monitor status [--json]` | List **every known** project (idle or running) with state + port. `--json` adds a machine-readable array with `ready`, `url`, `pid`, `exitCode`, `lastError`, `logPath` — everything an agent needs to operate and diagnose. |
+| `dev-monitor build [path]` | Build the project. **Pauses all active dev servers while building** (to free RAM) and relaunches them after. **Synchronous** — waits for the build, prints the tail of its output + a `✅`/`❌` verdict, and exits non-zero on failure. On failure it also prints `↳ full build log: <path>`; read the **whole** error with `dev-monitor logs [path] --build`. In auto mode the build heap autoscales **4 → 6 → 8** on OOM (independent from the dev server; learned level persisted). See `docs/HEAP-AND-BUILD.md`. |
+| `dev-monitor status [--json]` | List **every known** project (idle or running) with state + port. `--json` adds a machine-readable array with `ready`, `url`, `pid`, `exitCode`, `lastError`, `logPath`, `buildLogPath` — everything an agent needs to operate and diagnose. |
 | `dev-monitor stop [path] [--all]` | Stop one project's server (default: cwd), or `--all` of them. |
 | `dev-monitor restart [path]` | Relaunch the project's server. Works from **any** state — including `Failed`/`Idle` (relaunches), not just a live server. |
 | `dev-monitor remove [path]` | Stop the server and **forget** the project (removes it from `projects.json`). Aliases: `rm`, `forget`. |
-| `dev-monitor logs [path] [-f]` | Print, or follow with `-f`, **that project's own** log (default: cwd). One log file per project. |
+| `dev-monitor logs [path] [-f]` | Print, or follow with `-f`, **that project's own** dev-server log (default: cwd). One log file per project. |
+| `dev-monitor logs [path] --build` | Print the **whole** output of the last build for that project — the full error, not the tail `dev-monitor build` shows. |
 | `dev-monitor version` | Print the version (aliases: `-v`, `--version`). |
 | `dev-monitor docs` | Print help (aliases: `--help`, `-h`). |
 
@@ -40,6 +41,10 @@ When a server fails, `status --json` carries the cause so you can self-correct:
 - `state` — e.g. `Failed: out of memory — relaunch with more heap (e.g. dev-monitor up --gb 8)`
 - `exitCode` — the last process exit code
 - `lastError` — a human-readable cause with a remedy when known (OOM is detected and the heap fix is suggested)
+
+For a **build** failure the server fields don't carry the compiler error — the build tail is printed by
+`dev-monitor build`, and the complete output (real error header included, not just the tail) is at
+`dev-monitor logs [path] --build`.
 
 ```jsonc
 // dev-monitor status --json
@@ -75,9 +80,14 @@ The heap maps to `NODE_OPTIONS=--max-old-space-size`. It is **deterministic**:
 
 ## Logs
 
-Each project has its **own** log file under `~/Library/Application Support/DevMonitor/logs/`
+Each project has its **own** dev-server log file under `~/Library/Application Support/DevMonitor/logs/`
 (`<name>-<id>.log`), retained across runs (a crash log survives the next launch). `dev-monitor logs
 [path]` resolves and prints it; `-f` follows it live.
+
+Builds get their **own** file too (`<name>-<id>.build.log`, rewritten fresh each build), holding the
+**complete** build output — the in-app terminal pane and the `dev-monitor build` tail only show a
+slice, so a big tool dump (e.g. a Rollup `watchFiles` object) can push the real message off the top.
+`dev-monitor logs [path] --build` prints the whole thing.
 
 ## For Claude Code / agents in other terminals
 
@@ -85,7 +95,8 @@ Route dev servers and JS builds through the app instead of running them directly
 
 ```bash
 dev-monitor up --wait     # instead of `npm run dev` / `pnpm dev` / `nuxt dev` — blocks, prints the URL
-dev-monitor build         # instead of `npm run build` (runs alongside the server)
+dev-monitor build         # instead of `npm run build` (runs alongside the server); ✅/❌ + non-zero on failure
+dev-monitor logs --build  # after a ❌ build: the WHOLE error, not just the printed tail
 dev-monitor status --json # ready/url/pid/exitCode/lastError per project (parseable)
 ```
 

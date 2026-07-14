@@ -21,8 +21,11 @@ versions use [SemVer](https://semver.org/).
 - **Persistent event history.** Crashes, recycles, OOM retries, builds and pressure events are written
   to a JSONL log (rotated by size) and shown in a new **History** window — a timeline grouped by day —
   so the record survives an app restart (the sidebar feed only keeps the last few).
-- **Log search + export.** The terminal pane has a filter field (case-insensitive, ANSI-stripped) and
-  an export-to-file button (`Core/LogFilter`).
+- **Log search, copy-all + multi-line selection.** The terminal pane has a filter field
+  (case-insensitive, ANSI-stripped) and a one-click **Copy** button — with a copied-✓ confirmation —
+  that puts the whole (filtered) log on the clipboard. The log now renders in an AppKit text view, so a
+  click-drag selects **across many lines** (a stack of SwiftUI `Text`s couldn't) and `⌘C` works
+  natively (`Core/LogFilter`, `Views/LogPaneView`).
 - **Localization (Spanish + French) + in-app language picker.** Settings → Appearance → Language
   switches the UI **live**, no relaunch (strings live in a `Localizable.xcstrings` catalog, applied
   via a `\.locale` environment override). VoiceOver labels added across the interactive UI
@@ -35,6 +38,17 @@ versions use [SemVer](https://semver.org/).
 - **Distribution scaffolding** (opt-in, no effect on the default unsigned build): Developer ID signing
   + notarization in `tools/package-release.sh`, hardened runtime, a Sparkle auto-update hook, a
   Homebrew cask template, and a tag-triggered release workflow. See `docs/DISTRIBUTION.md`.
+- **Full build log + `dev-monitor logs --build`.** Each build now mirrors its **complete** output to
+  its own file (`<name>-<id>.build.log`, fresh per build); `status --json` carries the `buildLogPath`,
+  and a failed `dev-monitor build` prints `↳ full build log: <path>`. The in-app pane and the CLI's
+  printed failure tail (bumped 40 → 200 lines) still only show a slice, so a big error dump (e.g. a
+  Rollup `watchFiles` object that buries the real message) no longer hides it — the whole error is one
+  command away (`BuildRunner`, `IPCServer`, `Model/Project.buildLogFileURL`).
+- **One-click CLI install.** The `dev-monitor` CLI now ships **inside the app bundle**
+  (`Contents/MacOS/dev-monitor`, embedded via `project.yml`); **Settings → Claude Code → Install CLI**
+  symlinks it into `~/.local/bin` so the CLI always matches the running app — they share
+  `IPCProtocol`, and a stale copy would mis-decode `status` (`Core/CLIInstaller`). The block message
+  the hook shows agents now also points at `dev-monitor logs --build` for a failing build's full error.
 
 ### Changed
 - **Menu-bar status glyph** now turns red when *any* supervised process (dev, worker, build, preview)
@@ -88,6 +102,11 @@ versions use [SemVer](https://semver.org/).
   managers put their shims — a GUI launch from launchd then had no `node`/`npm` on `PATH`. A new
   `ShellEnvironment` resolves the user's login+interactive `PATH` and exports it before each launch
   (re-resolved per launch, because fnm's per-shell dir is ephemeral).
+- **`dev-monitor build` no longer dies with `node: not found` (exit 127) right after an app launch.**
+  `BuildRunner` didn't resolve the shell `PATH` — it worked only because a prior dev-server launch had
+  already resolved it in the process. A build that ran first (fresh app, no server started yet) got the
+  bare launchd `PATH`. It now calls `ShellEnvironment.applyResolvedPATH()` before spawning, like
+  `DevSession`/`WorkerRunner`.
 - **The hub no longer dies when a `dev-monitor` client disconnects.** It now ignores `SIGPIPE`
   (as the CLI already did), so writing a reply to a client that has already exited can't terminate
   the whole app right after handling an `up`/`status`.

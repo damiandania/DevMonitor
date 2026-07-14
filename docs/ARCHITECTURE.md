@@ -54,7 +54,11 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   (`\n`-splitting with partial-line carryover), `LogNoise` (the shared shell session-restore filter).
 - **`BuildRunner`** — a one-shot tracked build process (same spawn/stream plumbing), reporting
   success/failure. A user-initiated `stop()` is not reported as a build *failure*. Records its
-  start time + duration (the latter becomes the next build's progress-bar ETA).
+  start time + duration (the latter becomes the next build's progress-bar ETA). Resolves the login
+  `PATH` (`ShellEnvironment`) before spawning — like `DevSession`, so a build that runs before any
+  server still finds `node` — and mirrors its **full** output (fresh per build) to
+  `Project.buildLogFileURL`, so the whole error outlives the capped in-memory buffer and the CLI's
+  failure tail (`dev-monitor logs --build`).
 - **`WorkerRunner`** — supervises a project's long-running background **worker** (a queue/job worker,
   `tsx watch …`): same spawn/stream plumbing as the build, but no port/health — it just runs and
   reports running / stopped / crashed.
@@ -78,7 +82,9 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   `MetricPoint` (one sample). `ProjectStore` loads/saves the project list.
 
 ### Views/
-- `RootSplitView` (sidebar + dashboard), `ProjectSidebar`, `LogPaneView`, `Charts/MetricsGrid`.
+- `RootSplitView` (sidebar + dashboard), `ProjectSidebar`, `LogPaneView` (an AppKit `NSTextView`-backed
+  terminal log — native multi-line selection + a copy-all button, over a live ANSI-colored feed),
+  `Charts/MetricsGrid`.
 - **`RunControl`** is the single source of a project's run-controls (dev, worker, build, preview):
   `AppState.runControls(for:)` lists them once, and the dashboard pills (`RunControlButton` driven by
   the shared `RunStatus`), the menu-bar rows and the terminal tabs all render that one list — so

@@ -66,21 +66,22 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 
 ### 🔨 Build runner — tuned for tight RAM
 - Runs the project's build as a **separate tracked tree** with its own Activity row and terminal tab; the **Build** button becomes a red **Stop build** while running. The CLI's `build` is **synchronous** — it waits for the build and reports the exit code plus a ✅/❌ verdict (so an agent or a script gets the real result).
+- **The whole build error is never lost.** Each build's complete output is mirrored to its own log file, so `dev-monitor build`'s printed tail (and a big tool dump like a Rollup `watchFiles` object that can bury the real message) never hides it: on failure the CLI prints `↳ full build log: <path>`, and `dev-monitor logs --build` prints the entire thing.
 - **Pauses all active dev servers** while building (relaunching them after): on an 8 GB Mac a build running alongside a multi-GB dev server gets SIGKILLed by the kernel before it can finish.
 - **Autoscales the build heap** 4 → 6 → 8 on OOM, with its **own** learned level independent from the dev server's.
 - **Frees RAM aggressively around the build**: `purge`s inactive/cached memory (before, and again under pressure during), surfaces the resource advisor to close heavy non-essential apps, watches memory pressure to act **before** the kernel jetsams the build, and runs Node with `--optimize-for-size`. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
 
 ### 🖥️ Global terminal &amp; notch bar
-- **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*). **Claude Code's shells and monitors get tabs too** — each tab shows the command/script it runs and a **Stop** button.
+- **Global terminal** — one resizable panel at the bottom of the detail pane with **one tab per running server and per build, across all projects** (*icon + project name + ✕*). **Claude Code's shells and monitors get tabs too** — each tab shows the command/script it runs and a **Stop** button. Each log pane supports **native click-drag selection across many lines** and a one-click **Copy** button (with a copied ✓ confirmation) that puts the whole log on the clipboard; a search field filters it live.
 - **Global Activity** — the meters and process list always reflect the whole machine, not just the selected project.
 - **Notch bar** — a single black strip that extends the notch's bezel: an animated, all-vector Claude **cat mascot** on the left that mirrors what the machine is doing (hammering while a build runs, a rocket on the pad while a server boots, red-X eyes on a failure, a warning face under pressure, a hard-hat salute when a worker starts, cat vignettes when idle), and the live **Claude quota** — 5-hour and 7-day usage — on the right. Hovering it opens the controls menu: every **online server** (status/uptime + Stop/Restart), every **build** in progress, any **external** servers, a Launch button and a CPU/memory snapshot — without opening the window. (macOS hides menu-bar icons *behind* the notch, so the status glyph moved here where it's always visible, even in fullscreen.)
 - **Appearance** — app-wide **Theme** (System / Light / Dark) and a separate **Terminal** theme for the log panes.
 
 ### ⌨️ CLI + central hub
-- Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f`. **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. → [CLI reference](#command-line-interface)
+- Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f` · `logs --build` (the full error of the last build). **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. Install it in one click from **Settings → Claude Code → Install CLI** (it's bundled in the app). → [CLI reference](#command-line-interface)
 
 ### 🤖 Claude integration
-- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw dev servers (`npm run dev` / `nuxt dev` / …), framework **builds**, and production **previews** (`npm run preview` / `next start` / …), redirecting each to the matching `dev-monitor` command so every terminal's servers land in one supervised place. → [`integrations/claude/`](integrations/claude/)
+- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw dev servers (`npm run dev` / `nuxt dev` / …), framework **builds**, and production **previews** (`npm run preview` / `next start` / …), redirecting each to the matching `dev-monitor` command so every terminal's servers land in one supervised place. When it blocks a build, the message also tells the agent to read the full error with `dev-monitor logs --build` — so a failing build is diagnosable, not a truncated tail. → [`integrations/claude/`](integrations/claude/)
 - **Agents coordinate instead of colliding** — if a build is in flight, `dev-monitor up`/`preview` won't interrupt it: it reports the build (elapsed + ETA), and with `--wait` **queues behind it** and starts the server once the build finishes. `status --json` exposes `building` so another Claude can see and wait.
 - **External alerts** — set a **Slack / Discord / incoming-webhook** URL in Settings and every notification that passes your category toggles is also POSTed there (one JSON body carries both Slack's `text` and Discord's `content`). Best-effort — a down webhook never affects supervision.
 - **Live Scan** (read-only) — the Doctor **watches** Dev Monitor + the machine for a chosen window (1 / 2 / 5 min, with a progress bar), then `claude` returns a **copyable** report: what every process is and *who it belongs to*, the activity over the window, any errors/bugs (correlated to the app's own source), and concrete improvement points. Never edits anything (`--permission-mode plan`, write tools disallowed).
@@ -114,10 +115,11 @@ Grab the latest build from [GitHub Releases](https://github.com/damiandania/DevM
    ```bash
    xattr -dr com.apple.quarantine "/Applications/Dev Monitor.app"
    ```
-3. Install the CLI from **`dev-monitor-<version>.zip`**:
+3. Install the CLI — **easiest:** open **Dev Monitor → Settings → General → Claude Code → Install CLI**. The `dev-monitor` binary ships inside the app; the button symlinks it into `~/.local/bin` so the CLI always matches the app. (Manual alternative, from **`dev-monitor-<version>.zip`**:)
    ```bash
    unzip dev-monitor-<version>.zip && mkdir -p ~/.local/bin && cp dev-monitor ~/.local/bin/ && chmod +x ~/.local/bin/dev-monitor
    ```
+   Make sure `~/.local/bin` is on your `PATH` (the button warns if it isn't).
 
 **Requires macOS 26 or later** (the UI uses SwiftUI / Liquid Glass). The CLI auto-starts the app when the hub isn't already running.
 
@@ -151,12 +153,13 @@ While the app is running it hosts a local hub (Unix socket). Any terminal — or
 |---|---|
 | `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent**; `--gb N` pins the heap; `--wait` blocks until HTTP-ready and prints the URL. If a build is running, `--wait` **queues behind it**; without `--wait` it reports the build and exits (never interrupts it). |
 | `dev-monitor preview [path] [--gb N] [--wait]` | Serve the **production build** (needs a `preview`/`start` script). Same build-coordination as `up`. |
-| `dev-monitor build [path]` | Build **alongside** the dev server (leaves it running); adds a build tab. |
-| `dev-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath` · `building` · `buildElapsed` · `buildETA`. |
+| `dev-monitor build [path]` | Build the project (synchronous; ✅/❌ + non-zero on failure); adds a build tab. On failure prints `↳ full build log: <path>` — read it all with `logs --build`. |
+| `dev-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath` · `buildLogPath` · `building` · `buildElapsed` · `buildETA`. |
 | `dev-monitor stop [path] [--all]` | Stop one server (default: cwd), or `--all`. |
 | `dev-monitor restart [path]` | Relaunch from **any** state — including `Failed` / `Idle`. |
 | `dev-monitor remove [path]` | Stop and **forget** the project. Aliases: `rm`, `forget`. |
-| `dev-monitor logs [path] [-f]` | Print, or follow with `-f`, that project's own log. |
+| `dev-monitor logs [path] [-f]` | Print, or follow with `-f`, that project's own dev-server log. |
+| `dev-monitor logs [path] --build` | Print the **whole** last build's output — the full error, not the tail. |
 | `dev-monitor version` · `docs` | Version (`-v`) · help (`-h`, `--help`). |
 
 Paths default to the current directory and resolve to absolute. Invalid input fails loudly: a non-project folder is rejected; unknown flags and a malformed `--gb` exit non-zero with a clear message. Full details — readiness semantics, heap sizing, failure diagnostics — in **[DevMonitor/USAGE.md](DevMonitor/USAGE.md)**.
@@ -166,7 +169,8 @@ Paths default to the current directory and resolve to absolute. Invalid input fa
 [
   { "name": "MiddleSpace", "path": "…/MiddleSpace", "state": "Running · :3000",
     "ready": true, "url": "http://localhost:3000/", "pid": 12345, "port": 3000,
-    "logPath": "…/DevMonitor/logs/MiddleSpace-CA6AA3C8.log" }
+    "logPath": "…/DevMonitor/logs/MiddleSpace-CA6AA3C8.log",
+    "buildLogPath": "…/DevMonitor/logs/MiddleSpace-CA6AA3C8.build.log" }
 ]
 ```
 
