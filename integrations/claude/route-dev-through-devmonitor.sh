@@ -51,7 +51,8 @@ case "$block" in
     exit 2 ;;
   build)
     echo "BLOCKED — builds run through DevMonitor so the project's dev server is stopped first." >&2
-    echo "Instead run:  dev-monitor build '$cwd'   (stops the server, builds, relaunches it)." >&2
+    echo "Instead run:  dev-monitor build '$cwd'   (stops the server, builds, relaunches it; prints a ✅/❌ verdict + exits non-zero on failure)." >&2
+    echo "If it fails, read the WHOLE error (not just the printed tail):  dev-monitor logs '$cwd' --build" >&2
     exit 2 ;;
   preview)
     echo "BLOCKED — preview servers (serving the production build) also run through DevMonitor." >&2

@@ -23,11 +23,23 @@ agent env vars), Nuxt's dev-lock never fires for app-spawned servers.
 | Raw command (blocked) | Use instead |
 |---|---|
 | `npm/pnpm/yarn/bun run dev`, `nuxt/next/astro/vinxi dev`, `vite`, `ng serve`, `webpack serve`, … | `dev-monitor up "<dir>" --wait` (blocks until ready, prints the URL) |
-| `npm/pnpm/yarn/bun run build`, `nuxt/next/astro/vite build`, … | `dev-monitor build "<dir>"` |
+| `npm/pnpm/yarn/bun run build`, `nuxt/next/astro/vite build`, … | `dev-monitor build "<dir>"` (synchronous; ✅/❌ verdict) |
 
 The block message also points to `dev-monitor status --json` (per-project `ready`/`url`/`pid`/
 `exitCode`/`lastError`) and `dev-monitor --help` for the full surface, so an agent can operate and
 self-diagnose without curling the port or reading internal files.
+
+**Capturing a failing build's error.** `dev-monitor build` prints only the *tail* of the build
+output — enough for most errors, but a big tool dump (e.g. a Rollup `watchFiles` object) can push the
+real message off the top. So on failure it also prints `↳ full build log: <path>`, and the whole
+build output is always readable with:
+
+```bash
+dev-monitor logs "<dir>" --build      # the ENTIRE last build — the real error header, not the tail
+```
+
+This is the reliable way for an agent to read a build error in full instead of guessing from a
+truncated tail.
 
 It deliberately does **not** touch `xcodebuild`, `go build`, `cargo build`, `docker build`,
 `make`, `npm install`, `npm test`, `npm run dev:<variant>`, or any command that already calls
