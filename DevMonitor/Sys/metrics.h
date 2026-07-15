@@ -64,6 +64,12 @@ int dm_proc_name(pid_t pid, char *buf, int size);
 /// privileged helper), else 0.
 int dm_proc_is_system(pid_t pid);
 
+/// The "responsible" process for `pid` — the app macOS attributes an XPC helper to (e.g. the Safari
+/// that owns a `com.apple.WebKit.WebContent` renderer). Returns that pid, or -1 if there's no distinct
+/// owner. Lets generic WebKit service processes — whose own argv names no `.app` — be labelled and
+/// iconned by their owning app.
+int dm_responsible_pid(pid_t pid);
+
 /// Best-effort process arguments (argv joined by spaces). Returns length, or 0.
 /// Used to tell apart generic helpers (e.g. which VS Code language server a "Code Helper" is).
 int dm_proc_args(pid_t pid, char *buf, int size);

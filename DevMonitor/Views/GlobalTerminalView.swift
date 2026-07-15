@@ -26,8 +26,10 @@ struct GlobalTerminalView: View {
         controls.sort { ($0.projectName, $0.rank) < ($1.projectName, $1.rank) }
         var result: [Tab] = controls.map { .control($0) }
         // Claude Code's own shells/monitors get their own tabs (rightmost), each closeable — like a
-        // terminal tab, but the "log" is the command/script it's running (its stdout isn't ours to tap).
-        result += app.systemSampler.processes.filter(\.isClaude).map { .claude($0) }
+        // terminal tab, but the "log" is the command/script it's running (its stdout isn't ours to
+        // tap). `claudeShells` (not `processes`) so the tab strip re-evaluates only when a shell
+        // appears/exits, not on every 2 s metrics tick.
+        result += app.systemSampler.claudeShells.map { .claude($0) }
         // The pressure tab is an alert — always first (leftmost).
         if app.systemUnderPressure { result.insert(.pressure, at: 0) }
         return result
@@ -210,10 +212,14 @@ struct GlobalTerminalView: View {
         }
 
         private var metrics: String {
-            let mem = shell.memBytes >= 1_073_741_824
-                ? String(format: "%.1f GB", shell.memBytes / 1_073_741_824)
-                : "\(Int(shell.memBytes / 1_048_576)) MB"
-            return String(format: "%.0f%% · %@", shell.cpuPerCore, mem)
+            // The tab's `shell` row comes from the membership-gated `claudeShells` list, whose
+            // CPU/mem snapshot is frozen at the last membership change — read the LIVE row here, so
+            // only this small pane (not the tab strip) re-renders on each metrics tick.
+            let live = app.systemSampler.processes.first { $0.id == shell.id } ?? shell
+            let mem = live.memBytes >= 1_073_741_824
+                ? String(format: "%.1f GB", live.memBytes / 1_073_741_824)
+                : "\(Int(live.memBytes / 1_048_576)) MB"
+            return String(format: "%.0f%% · %@", live.cpuPerCore, mem)
         }
 
         /// The real command a Claude shell runs — everything after the `source <snapshot> … && `

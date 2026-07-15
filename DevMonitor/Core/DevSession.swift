@@ -199,14 +199,17 @@ final class DevSession {
             let args = dm_proc_args(p, &argsBuf, 8192) > 0 ? String(cString: argsBuf) : ""
             let isJS = jsRuntimes.contains(comm)
             let isEditor = editorMarkers.contains { args.contains($0) }
-            let onPort = pinnedPort.map { Int(dm_proc_listen_port(p)) == $0 } ?? false
             let refsPath = Self.args(args, referencePath: project.path)
+            // Only a non-editor JS runtime or a process referencing this project can ever be a
+            // victim below — and the port check walks the process's whole fd table (the expensive
+            // part of this sweep) — so skip the port scan for every other process on the machine.
+            let couldBeVictim = !isEditor && (isJS || refsPath)
+            let onPort = couldBeVictim && (pinnedPort.map { Int(dm_proc_listen_port(p)) == $0 } ?? false)
             // (a) holds the exact port we'll bind (a JS server or this project's process), or
             // (b) a leftover dev-server tree of THIS project still lingering.
-            let portVictim = onPort && !isEditor && (isJS || refsPath)
             let projectVictim = isJS && !isEditor && refsPath
                 && devTokens.contains { args.contains($0) }
-            guard portVictim || projectVictim else { continue }
+            guard onPort || projectVictim else { continue }
             let pgid = getpgid(p)
             append(line: "cleanup: reaping leftover pid \(p) (\(comm))\(onPort ? " on port \(pinnedPort.map(String.init) ?? "")" : "")")
             if pgid > 1 { killpg(pgid, SIGKILL) }
@@ -434,7 +437,10 @@ final class DevSession {
         sampleTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 self?.sampleOnce()
-                try? await Task.sleep(for: .seconds(1))
+                // 2 s, matching the SystemSampler's cadence: each append re-renders the dashboard's
+                // session charts, and 1 Hz doubled that Swift Charts work for no visible gain on
+                // metrics that move in seconds. The 120-point history now spans ~4 min.
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }

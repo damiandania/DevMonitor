@@ -66,6 +66,7 @@ struct QuotaHUDView: View {
 /// `.onHover` can't cover it) — hovering the mascot opens the same controls menu as the readout.
 private final class HoverTrackingView: NSView {
     var onHover: ((Bool) -> Void)?
+    var onClick: (() -> Void)?
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -74,6 +75,9 @@ private final class HoverTrackingView: NSView {
     }
     override func mouseEntered(with event: NSEvent) { onHover?(true) }
     override func mouseExited(with event: NSEvent) { onHover?(false) }
+    // Click the cat to pet it (fires the heart burst). A non-activating panel still delivers the
+    // click without stealing focus from whatever you're working in.
+    override func mouseDown(with event: NSEvent) { onClick?() }
 }
 
 /// Owns the notch bar: ONE borderless panel spanning mascot strip + notch + quota readout, drawn as a
@@ -102,8 +106,8 @@ final class QuotaHUDController {
     /// Both ends of the bar use the SAME fixed width: the mascot's stage on the left mirrors the
     /// readout on the right, so the bar is symmetric around the notch and never resizes as the quota
     /// numbers appear/disappear (the readout content just centres in its half). Slimmer now that the
-    /// readout is just the two quota numbers (the status icon is gone).
-    private static let sideWidth: CGFloat = 150
+    /// readout is just the two quota numbers in a smaller font (the status icon is gone).
+    private static let sideWidth: CGFloat = 130
 
     /// Edge-detection state for the event animations: the previous tick's snapshot of what was
     /// running/launching, so transitions (started, finished, failed) can fire transient animations.
@@ -170,6 +174,7 @@ final class QuotaHUDController {
                                             DispatchQueue.main.async { self?.reposition() }
                                         })
         mascotHost.onHover = { [weak self] in self?.zoneHover($0) }
+        mascotHost.onClick = { [weak self] in self?.love() }
 
         updateMood()
         // State (builds, health, keep-awake, quota) isn't one cheap stream to subscribe to, so poll —
@@ -278,6 +283,16 @@ final class QuotaHUDController {
     private func fire(_ mood: ClaudeMascot.Mood, at now: Date) {
         transientMood = mood
         transientUntil = now.addingTimeInterval(3)
+    }
+
+    /// You clicked the cat: reward it with a 3-second heart burst. `poke` forces the animation to
+    /// (re)start even on a rapid repeat click, and the transient window keeps it up until the next
+    /// real event (or pressure) reclaims the slot on the poll tick.
+    private func love() {
+        let now = Date()
+        transientMood = .loved
+        transientUntil = now.addingTimeInterval(3)
+        mascot.poke(.loved)
     }
 
     // MARK: - Hover / popover

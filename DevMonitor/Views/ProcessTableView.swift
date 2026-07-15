@@ -221,6 +221,7 @@ private struct ProcessRowView: View {
     private var logoAsset: String? {
         if row.isClaude { return "ClaudeLogo" }   // Claude Code's own shells/monitors
         let n = row.name.lowercased()
+        if n.contains("dev monitor") || n.contains("dev-monitor") { return "DevMonitorLogo" }  // us
         if n.contains("xcode") { return "XcodeLogo" }                          // before "code"
         if n.contains("codex") { return "CodexLogo" }                          // before "code"
         if n.contains("visual studio code") || n == "code" { return "VSCodeLogo" }

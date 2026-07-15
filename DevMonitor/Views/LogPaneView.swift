@@ -177,6 +177,12 @@ private struct TerminalTextView: NSViewRepresentable {
         weak var scroll: NSScrollView?
         weak var textView: NSTextView?
 
+        /// What the document currently shows, so a live burst appends ONLY the new tail instead of
+        /// re-attributing and re-laying-out all ~2000 lines on every chunk (the strings share storage
+        /// with the source array, so the prefix comparison is pointer-fast).
+        private var rendered: [String] = []
+        private var renderedColor: NSColor?
+
         private let font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         private let boldFont = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold)
 
@@ -189,14 +195,34 @@ private struct TerminalTextView: NSViewRepresentable {
             // burst mustn't yank the highlight out from under a drag. It catches up on the next update.
             guard tv.selectedRange().length == 0 else { return }
 
+            let sameTheme = renderedColor == textColor
+            // Unrelated SwiftUI update (hover, timer, …) — the log itself didn't change.
+            if sameTheme, lines.count == rendered.count, lines.elementsEqual(rendered) { return }
+
             let atBottom = isScrolledToBottom(scroll)
 
-            let full = NSMutableAttributedString()
-            for (i, line) in lines.enumerated() {
-                if i > 0 { full.append(NSAttributedString(string: "\n")) }
-                full.append(attributed(line.isEmpty ? " " : line, textColor: textColor))
+            if sameTheme, lines.count > rendered.count, lines.prefix(rendered.count).elementsEqual(rendered) {
+                // Pure append — the common case for live output.
+                let tail = NSMutableAttributedString()
+                var needsNewline = !rendered.isEmpty
+                for line in lines[rendered.count...] {
+                    if needsNewline { tail.append(NSAttributedString(string: "\n")) }
+                    needsNewline = true
+                    tail.append(attributed(line.isEmpty ? " " : line, textColor: textColor))
+                }
+                tv.textStorage?.append(tail)
+            } else {
+                // Front-trim, filter or theme change — rebuild wholesale (rare: at most once per
+                // trim batch, or on a user action).
+                let full = NSMutableAttributedString()
+                for (i, line) in lines.enumerated() {
+                    if i > 0 { full.append(NSAttributedString(string: "\n")) }
+                    full.append(attributed(line.isEmpty ? " " : line, textColor: textColor))
+                }
+                tv.textStorage?.setAttributedString(full)
             }
-            tv.textStorage?.setAttributedString(full)
+            rendered = lines
+            renderedColor = textColor
 
             // Only follow the tail if the user was already parked there — don't fight a scroll-up.
             if atBottom { tv.scrollToEndOfDocument(nil) }

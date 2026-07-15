@@ -20,7 +20,7 @@ struct BranchWorktreeMenu: View {
     /// a terminal) is picked up. The read is a cheap `.git/HEAD` file read; the worktree/branch LISTS
     /// reload on project change, an in-app action, and each time the menu is opened (see
     /// `refreshListsOnOpen`) so a branch deleted outside the app drops off next time you look.
-    private let poll = Timer.publish(every: 2.5, on: .main, in: .common).autoconnect()
+    private let poll = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let _ = refreshToken
@@ -131,11 +131,14 @@ struct BranchWorktreeMenu: View {
 
     /// Refresh the worktree/branch lists when the menu opens so branches deleted outside the app stop
     /// showing. Deferred to the next runloop tick (never mutate state during a view update) and
-    /// throttled: reassigning the lists rebuilds the menu content, which would re-enter here in a loop
-    /// while the menu is open — the 1s guard breaks that, while real re-opens are always further apart.
+    /// throttled HARD: on macOS the Menu's content closure is evaluated eagerly on every body
+    /// re-evaluation (every poll tick), not just when the menu actually opens — with the old 1 s
+    /// guard that spawned `git worktree list` + `git branch` every poll, forever. 30 s keeps a real
+    /// re-open reasonably fresh (project switch, in-app actions and app re-activation still reload
+    /// immediately) without turning the poll into a git-spawn loop.
     private func refreshListsOnOpen() {
         Task { @MainActor in
-            guard Date().timeIntervalSince(lastListReload) > 1 else { return }
+            guard Date().timeIntervalSince(lastListReload) > 30 else { return }
             lastListReload = Date()
             await reload()
         }
@@ -163,11 +166,16 @@ struct BranchWorktreeMenu: View {
 /// red, no chrome (no capsule) — just the numbers. Reads `git diff HEAD --numstat` off the main
 /// thread, refreshing on a gentle poll and when the app reactivates (tabbing back from an editor).
 /// Renders nothing when the tree is clean or the folder isn't a git repo.
+///
+/// 30 s, not seconds: every poll SPAWNS a `git diff HEAD --numstat` (a full working-tree diff on
+/// the child side), and edits land through an editor — so the didBecomeActive catch-up is what
+/// makes the numbers feel live; the poll only covers edits made while Dev Monitor itself is
+/// frontmost, where a slow drift is fine.
 struct UncommittedDiffStat: View {
     let project: Project
     @State private var stat: GitInfo.DiffStat?
 
-    private let poll = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+    private let poll = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Group {

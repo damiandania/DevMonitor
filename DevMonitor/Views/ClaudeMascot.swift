@@ -34,6 +34,7 @@ final class ClaudeMascot {
         case exploded     // event: a server died mid-launch — the rocket EXPLODES + red X eyes
         case celebrating  // event: a build finished OK — check eyes, hops + confetti
         case caffeinated  // event: keep-awake switched on — a steaming coffee, a couple of sips
+        case loved        // event: you CLICKED the cat — heart eyes + a shower of hearts float up
     }
 
     /// Add the cat's root layer to the host (the bar's left strip). Sizing happens in `layout`,
@@ -71,7 +72,7 @@ final class ClaudeMascot {
 
     /// Idle variety: every few seconds pick a different little scene, so "nothing happening" still
     /// feels alive. `.rest` is the sitting-cat baseline (slow blinks, glances).
-    private enum Vignette: CaseIterable { case rest, prowl, pounce, groom, gym, doze }
+    private enum Vignette: CaseIterable { case rest, prowl, pounce, groom, gym, doze, jam, stretch }
     private var idleTimer: Timer?
     private var lastVignette: Vignette = .rest
 
@@ -97,6 +98,7 @@ final class ClaudeMascot {
     private static let cRed   = rgb(0xE5, 0x4B, 0x42)      // failure flash
     private static let cAmber = rgb(0xE8, 0xA8, 0x4C)      // launching dots
     private static let cGreen = rgb(0x5F, 0xB8, 0x6E)      // success check
+    private static let cHeart = rgb(0xE8, 0x6A, 0x8E)      // love-burst hearts + heart eyes (warm pink)
 
     init() {
         build()
@@ -291,6 +293,12 @@ final class ClaudeMascot {
         install(newMood)
     }
 
+    /// Force-(re)play a mood even if it's already the current one — the click heart-burst uses this
+    /// so every click re-triggers the shower, where `set` would no-op on the repeat.
+    func poke(_ newMood: Mood) {
+        install(newMood)
+    }
+
     private func install(_ newMood: Mood) {
         mood = newMood
         reset()
@@ -306,6 +314,7 @@ final class ClaudeMascot {
         case .exploded:    exploded()
         case .celebrating: celebrating()
         case .caffeinated: caffeinated()
+        case .loved:       loved()
         }
     }
 
@@ -387,6 +396,8 @@ final class ClaudeMascot {
         case .groom:     groom()
         case .gym:       gym()
         case .doze:      doze()
+        case .jam:       jam()
+        case .stretch:   stretch()
         }
     }
 
@@ -553,6 +564,58 @@ final class ClaudeMascot {
         tail.add(basic("transform.rotation.z", from: -0.55, to: -0.45, duration: 2.2), forKey: "stir")
     }
 
+    /// Vibing to music: eyes half-lidded and blissed-out, the head nodding to a two-step beat with a
+    /// little side groove, ears flicking on the downbeat, the tail tapping time, and musical notes
+    /// drifting up beside the head. The cat's got its own soundtrack.
+    private func jam() {
+        configureNotes()
+        breathe(period: 2.4, amount: 0.03)
+        leftEye.transform = CATransform3DMakeScale(1, 0.5, 1)            // half-lidded, into it
+        rightEye.transform = CATransform3DMakeScale(1, 0.5, 1)
+        let beat = 1.4
+        // Head bob: dip on the beat, lift on the off-beat — nods twice per bar, not a metronome.
+        let bob = keyframe("transform.translation.y", values: [0, -2.6, 0.4, -2.6, 0],
+                           times: [0, 0.25, 0.5, 0.75, 1], duration: beat,
+                           easings: [.easeIn, .easeOut, .easeIn, .easeOut])
+        body.add(bob, forKey: "bob")
+        // A slow side-to-side sway underneath, one full swing per two beats — that's the groove.
+        let sway = keyframe("transform.rotation.z", values: [-0.035, 0.035, -0.035], times: [0, 0.5, 1],
+                            duration: beat * 2, easings: [.easeInOut, .easeInOut])
+        body.add(sway, forKey: "sway")
+        // Ears flick on the downbeat (mirrored, so they snap in sync with the nod).
+        leftEar.add(keyframe("transform.rotation.z", values: [-0.1, 0.14, -0.1], times: [0, 0.25, 0.6],
+                             duration: beat, easings: [.easeOut, .easeInOut]), forKey: "flick")
+        rightEar.add(keyframe("transform.rotation.z", values: [0.1, -0.14, 0.1], times: [0, 0.25, 0.6],
+                              duration: beat, easings: [.easeOut, .easeInOut]), forKey: "flick")
+        tail.add(basic("transform.rotation.z", from: 0.1, to: 0.5, duration: beat / 2), forKey: "tap")
+    }
+
+    /// A big satisfying stretch: the cat elongates into a long, low sprawl (front paws reaching,
+    /// back dropping), holds the strain a beat with eyes screwed shut and ears flattened, then
+    /// springs back upright with the signature overshoot — the classic cat wake-up.
+    private func stretch() {
+        // The stretch itself IS the body motion, so no breathe() (it fights on the same scale keys).
+        let t: [Double] = [0, 0.22, 0.55, 0.72, 1]
+        // Long and low: widen out and flatten down, hold, then overshoot back to normal shape.
+        body.add(keyframe("transform.scale.x", values: [1, 1.22, 1.22, 0.97, 1], times: t,
+                          duration: 6.0, easings: [.easeOut, .linear, .easeInOut, .easeOutBack]), forKey: "stretchX")
+        body.add(keyframe("transform.scale.y", values: [1, 0.8, 0.8, 1.04, 1], times: t,
+                          duration: 6.0, easings: [.easeOut, .linear, .easeInOut, .easeOutBack]), forKey: "stretchY")
+        // Eyes screw shut through the strain, blink open on the release.
+        let squint = keyframe("transform.scale.y", values: [1, 0.12, 0.12, 1, 1], times: t,
+                              duration: 6.0, easings: [.easeInOut, .linear, .easeOut, .linear])
+        leftEye.add(squint, forKey: "squint")
+        rightEye.add(squint, forKey: "squint")
+        // Ears flatten back with the effort, perk up again at the finish.
+        leftEar.add(keyframe("transform.rotation.z", values: [-0.1, -0.42, -0.42, 0.05, -0.1], times: t,
+                             duration: 6.0, easings: [.easeOut, .linear, .easeInOut, .easeInOut]), forKey: "flat")
+        rightEar.add(keyframe("transform.rotation.z", values: [0.1, 0.42, 0.42, -0.05, 0.1], times: t,
+                              duration: 6.0, easings: [.easeOut, .linear, .easeInOut, .easeInOut]), forKey: "flat")
+        // Tail lifts and quivers at the peak of the stretch, then settles.
+        tail.add(keyframe("transform.rotation.z", values: [0.1, 0.55, 0.55, 0.15, 0.1], times: t,
+                          duration: 6.0, easings: [.easeOut, .linear, .easeInOut, .easeInOut]), forKey: "lift")
+    }
+
     /// A build is running: hammering to the RIGHT. The swing lives on the PROP, anchored at its
     /// base in the paw — so the paw barely moves and the HEAD does all the travelling: a slow
     /// wind-up leaning left (anticipation), then it whips clockwise and slams down on the right,
@@ -675,6 +738,29 @@ final class ClaudeMascot {
         tailFlick(period: 2.2, from: 0.1, to: 0.3)
     }
 
+    /// 3-second "aww": you CLICKED the cat — its eyes turn into pink hearts (popping in with the
+    /// signature overshoot) while a shower of hearts floats up and out the top, and the whole cat
+    /// does a bashful side-to-side squirm with a little bounce. The reward for petting it.
+    private func loved() {
+        configureHearts()
+        showEyeMarks(.heart)
+        leftEar.transform = CATransform3DMakeRotation(0.06, 0, 0, 1)     // ears perk, pleased
+        rightEar.transform = CATransform3DMakeRotation(-0.06, 0, 0, 1)
+        // A happy squirm: the body sways a couple of times, softening as it settles.
+        let squirm = keyframe("transform.rotation.z",
+                              values: [0, 0.07, -0.07, 0.05, -0.04, 0.02, 0],
+                              times:  [0, 0.13, 0.3, 0.47, 0.64, 0.8, 1],
+                              duration: 1.5,
+                              easings: [.easeInOut, .easeInOut, .easeInOut, .easeInOut, .easeInOut, .easeInOut])
+        body.add(squirm, forKey: "squirm")
+        // …lifting a touch with each sway — the joy lifts the whole cat.
+        let bounce = keyframe("transform.translation.y", values: [0, 3, 0, 2.4, 0],
+                              times: [0, 0.22, 0.45, 0.68, 0.92], duration: 1.5,
+                              easings: [.easeOut, .easeIn, .easeOut, .easeIn])
+        body.add(bounce, forKey: "bounce")
+        tailFlick(period: 1.1, from: 0.15, to: 0.55)
+    }
+
     /// 3-second alarm: something FAILED — the eyes themselves turn into red X's, and the body gives
     /// one firm shake burst. Unmissable from across the room, then gone.
     private func failed() {
@@ -758,7 +844,7 @@ final class ClaudeMascot {
     }
 
     /// What the event eyes show instead of the white eyes.
-    private enum EyeMark { case cross, check, warning }
+    private enum EyeMark { case cross, check, warning, heart }
 
     /// Swap the white eyes for event marks — red X's (failure), green checks (success) or yellow
     /// warning triangles (pressure) — popping in with the signature overshoot. `clearAnimations`
@@ -799,6 +885,13 @@ final class ClaudeMascot {
                 fx.addSublayer(tri)
                 addRect(to: fx, x: 6.15, y: 5.2, w: 1.7, h: 3.8, color: Self.cBody, radius: 0.85)
                 addRect(to: fx, x: 6.15, y: 2.8, w: 1.7, h: 1.7, color: Self.cBody, radius: 0.85)
+            case .heart:
+                let heart = CAShapeLayer()
+                heart.frame = fx.bounds
+                heart.path = Self.heartPath(w: 12, h: 11, ox: 1, oy: 1.5)
+                heart.fillColor = Self.cHeart
+                heart.contentsScale = backing
+                fx.addSublayer(heart)
             }
             fx.add(keyframe("transform.scale", values: [0.3, 1], times: [0, 1], duration: 0.28,
                             easings: [.easeOutBack], repeats: 1), forKey: "pop")
@@ -1044,6 +1137,78 @@ final class ClaudeMascot {
         fx.add(fade, forKey: "fade")
     }
 
+    /// A continuous shower of little hearts rising from the cat's chest, fanning out, tilting and
+    /// shrinking away as they climb past the face — the click "love" burst. Reuses the confetti
+    /// container (cleared/hidden by `clearAnimations` when the event ends).
+    private func configureHearts() {
+        confetti.sublayers?.forEach { $0.removeFromSuperlayer() }
+        confetti.isHidden = false
+        for i in 0..<9 {
+            let heart = CAShapeLayer()
+            heart.bounds = CGRect(x: 0, y: 0, width: 12, height: 11)
+            heart.path = Self.heartPath(w: 12, h: 11)
+            heart.fillColor = (i % 3 == 0) ? Self.cCream : Self.cHeart
+            heart.position = CGPoint(x: 50, y: 42)       // from the chest, up through the face band
+            heart.opacity = 0
+            heart.contentsScale = backing
+            confetti.addSublayer(heart)
+
+            let dx = CGFloat.random(in: -22...22)
+            let dur = Double.random(in: 1.3...2.0)
+            let rise = keyframe("transform.translation.y", values: [0, 34], times: [0, 1],
+                                duration: dur, easings: [.easeOut])
+            let drift = keyframe("transform.translation.x", values: [0, dx * 0.45, dx], times: [0, 0.5, 1],
+                                 duration: dur, easings: [.easeInOut, .easeInOut])
+            let pop = keyframe("transform.scale", values: [0.2, 1.15, 0.9, 0.45], times: [0, 0.2, 0.5, 1],
+                              duration: dur, easings: [.easeOutBack, .easeInOut, .easeIn])
+            let tilt = keyframe("transform.rotation.z", values: [0, 0.22, -0.22, 0.1], times: [0, 0.33, 0.66, 1],
+                                duration: dur, easings: nil)
+            let fade = keyframe("opacity", values: [0, 1, 1, 0], times: [0, 0.18, 0.6, 1],
+                                duration: dur, easings: nil)
+            let group = CAAnimationGroup()
+            group.animations = [rise, drift, pop, tilt, fade]
+            group.duration = dur
+            group.repeatCount = .infinity
+            group.timeOffset = Double(i) * dur / 9        // even stagger so the shower is continuous
+            heart.add(group, forKey: "float")
+        }
+    }
+
+    /// Musical notes drifting up and fading beside the head while the cat vibes to its music, each
+    /// sashaying side to side as it climbs. Real note glyphs (text layers) on a staggered loop.
+    private func configureNotes() {
+        floatProp.sublayers?.forEach { $0.removeFromSuperlayer() }
+        floatProp.isHidden = false
+        floatProp.position = CGPoint(x: 86, y: 50)       // off the right cheek, inside the face band
+        let glyphs = ["♪", "♫", "♩"]
+        for (i, g) in glyphs.enumerated() {
+            let note = CATextLayer()
+            note.string = g
+            note.font = NSFont.systemFont(ofSize: 12, weight: .bold)
+            note.fontSize = 11 + CGFloat(i)
+            note.foregroundColor = (i == 1) ? Self.cCoral : Self.cCream
+            note.alignmentMode = .center
+            note.frame = CGRect(x: CGFloat(i) * 6 - 6, y: 0, width: 16, height: 16)
+            note.contentsScale = backing * 2             // glyphs need extra sharpness this small
+            note.opacity = 0
+            floatProp.addSublayer(note)
+            let dur = 2.4
+            let off = Double(i) * 0.7
+            let rise = keyframe("transform.translation.y", values: [0, 17], times: [0, 1],
+                                duration: dur, easings: [.easeOut])
+            rise.timeOffset = off
+            let sway = keyframe("transform.translation.x", values: [0, 3, -3, 2], times: [0, 0.33, 0.66, 1],
+                                duration: dur, easings: [.easeInOut, .easeInOut, .easeInOut])
+            sway.timeOffset = off
+            let fade = keyframe("opacity", values: [0, 0.95, 0.95, 0], times: [0, 0.2, 0.6, 1],
+                                duration: dur, easings: nil)
+            fade.timeOffset = off
+            note.add(rise, forKey: "rise")
+            note.add(sway, forKey: "sway")
+            note.add(fade, forKey: "fade")
+        }
+    }
+
     // MARK: - The launch rocket (launching / completed / exploded)
 
     /// The launch rocket, cartoon-classic (per the reference): an amber teardrop fuselage that
@@ -1231,6 +1396,25 @@ final class ClaudeMascot {
         l.contentsScale = backing
         parent.addSublayer(l)
         return l
+    }
+
+    /// A symmetric heart in a `w`×`h` box offset by (ox, oy), drawn y-up (two lobes at the top, the
+    /// point at the bottom) — used for the love-burst hearts and the heart eyes. Two mirrored cubic
+    /// curves: tip → left lobe → top dip → right lobe → tip.
+    private static func heartPath(w: CGFloat, h: CGFloat, ox: CGFloat = 0, oy: CGFloat = 0) -> CGPath {
+        let p = CGMutablePath()
+        let cx = ox + w / 2
+        let tip = CGPoint(x: cx, y: oy + h * 0.06)
+        let dip = CGPoint(x: cx, y: oy + h * 0.60)
+        p.move(to: tip)
+        p.addCurve(to: dip,                                                   // up the left lobe
+                   control1: CGPoint(x: ox + w * 0.02, y: oy + h * 0.32),
+                   control2: CGPoint(x: ox + w * 0.06, y: oy + h * 0.96))
+        p.addCurve(to: tip,                                                   // down the right lobe
+                   control1: CGPoint(x: ox + w * 0.94, y: oy + h * 0.96),
+                   control2: CGPoint(x: ox + w * 0.98, y: oy + h * 0.32))
+        p.closeSubpath()
+        return p
     }
 
     // MARK: - Animation builders

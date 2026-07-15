@@ -140,7 +140,10 @@ struct RootSplitView: View {
             ActivityView()
             if !app.sessions.isEmpty || !app.builds.isEmpty || !app.workers.isEmpty
                 || !app.previews.isEmpty || app.systemUnderPressure
-                || app.systemSampler.processes.contains(where: \.isClaude) {
+                // `hasClaudeShells`, not `processes`: reading `processes` here re-evaluated this
+                // whole detail stack on every 2 s sampler tick; the derived flag changes only when
+                // a Claude shell actually appears or exits.
+                || app.systemSampler.hasClaudeShells {
                 GlobalTerminalView()
             }
         }

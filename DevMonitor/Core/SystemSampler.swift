@@ -38,6 +38,14 @@ final class SystemSampler {
     var devTreeCPU: Double { processes.first { $0.isDevServer }?.cpuPerCore ?? 0 }
     var devTreeMem: Double { processes.first { $0.isDevServer }?.memBytes ?? 0 }
 
+    /// The Claude Code shells/monitors among the current rows — reassigned ONLY when membership
+    /// (pids/names) changes, never on a plain metrics tick. `@Observable` fires on every willSet,
+    /// so views that just need "which shells exist" (the terminal tabs, the root layout) would
+    /// otherwise re-evaluate at 2 Hz; against this list they re-evaluate only when a shell actually
+    /// appears, renames or exits. Live per-shell CPU/mem still comes from `processes`.
+    private(set) var claudeShells: [ProcessRow] = []
+    var hasClaudeShells: Bool { !claudeShells.isEmpty }
+
     /// Rolling whole-machine timeline for the Activity charts — one point per sample (~2 Hz), capped
     /// at `maxHistory` (~5 min). Appended only once we have a real CPU delta, so the first tick's
     /// placeholder 0 never shows as a spike. `@Observable` is per-property, so appends here don't
@@ -59,6 +67,9 @@ final class SystemSampler {
     private var prev: [Int32: (cpu: Int64, wall: UInt64)] = [:]
     private var nameCache: [Int32: String] = [:]
     private var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)] = [:]
+    /// Whether each pid's executable lives under a system path — the path of a live pid never
+    /// changes, so one proc_pidpath per process lifetime instead of one per tick.
+    private var isSystemCache: [Int32: Bool] = [:]
     /// External dev servers that haven't bound a port yet: pid → uptime-ns after which the port scan
     /// (an fd walk — the expensive part of enrichment) may run again. Absent = entry is final.
     private var portRecheckAt: [Int32: UInt64] = [:]
@@ -101,28 +112,40 @@ final class SystemSampler {
         let input = SampleInput(
             devs: devServerInfo?() ?? [], build: buildInfo?(), workers: workerInfo?() ?? [],
             prev: prev, nameCache: nameCache, richNameCache: richNameCache,
+            isSystemCache: isSystemCache,
             portRecheckAt: portRecheckAt, prevSysTicks: prevSysTicks,
             coreCount: coreCount, totalMem: totalMem, topN: topN)
         let out = await Task.detached(priority: .utility) { Self.collect(input) }.value
 
         prevSysTicks = out.sysTicks
-        systemMemUsed = out.memUsed
+        // Publish a reading only when the change is VISIBLE at the meters' display precision
+        // (0.1 GB, 0.01 load, 1 °C, 1 %): `@Observable` notifies on every reassignment, equal or
+        // not, so republishing an unchanged value re-rendered every meter tile twice a second for
+        // nothing. History (below) still records the exact values every tick.
+        let memQuantum = 100_000_000.0   // 0.1 GB display step
+        if Int(out.memUsed / memQuantum) != Int(systemMemUsed / memQuantum) { systemMemUsed = out.memUsed }
         if let swap = out.swap {
-            systemSwapUsed = swap.used
-            systemSwapTotal = swap.total
+            if Int(swap.used / memQuantum) != Int(systemSwapUsed / memQuantum) { systemSwapUsed = swap.used }
+            if swap.total != systemSwapTotal { systemSwapTotal = swap.total }
         }
-        loadAverage = out.loadAvg
-        cpuTemperature = out.temperature
+        if Int(out.loadAvg * 100) != Int(loadAverage * 100) { loadAverage = out.loadAvg }
+        if Int(out.temperature.rounded()) != Int(cpuTemperature.rounded()) { cpuTemperature = out.temperature }
         processes = out.processes
+        let shells = out.processes.filter(\.isClaude)
+        if shells.count != claudeShells.count
+            || !zip(shells, claudeShells).allSatisfy({ $0.id == $1.id && $0.name == $1.name }) {
+            claudeShells = shells
+        }
         prev = out.prev
         nameCache = out.nameCache
         richNameCache = out.richNameCache
+        isSystemCache = out.isSystemCache
         portRecheckAt = out.portRecheckAt
 
         // Timeline history — only once we have a real CPU delta (the first tick has no previous
         // ticks to diff, so `out.systemCPU` is nil; skip it rather than record a 0-CPU spike).
         if let cpu = out.systemCPU {
-            systemCPU = cpu
+            if Int(cpu) != Int(systemCPU) { systemCPU = cpu }
             let point = SystemMetricPoint(
                 id: historyTick, date: Date(), systemCPU: cpu,
                 memUsed: out.memUsed, memTotal: totalMem,
@@ -143,6 +166,7 @@ final class SystemSampler {
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
         var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)]
+        var isSystemCache: [Int32: Bool]
         var portRecheckAt: [Int32: UInt64]
         var prevSysTicks: dm_cpu_ticks?
         var coreCount: Int
@@ -161,6 +185,7 @@ final class SystemSampler {
         var prev: [Int32: (cpu: Int64, wall: UInt64)]
         var nameCache: [Int32: String]
         var richNameCache: [Int32: (name: String, ext: Bool, isExtension: Bool, isClaude: Bool, extBuild: Bool)]
+        var isSystemCache: [Int32: Bool]
         var portRecheckAt: [Int32: UInt64]
     }
 
@@ -255,15 +280,23 @@ final class SystemSampler {
             .union(build?.pids ?? [])
         var rich = s.richNameCache
         var recheckAt = s.portRecheckAt
+        var isSystem = s.isSystemCache
         let enrichedRows = rows.map { row -> ProcessRow in
-            // Enrich every shown real (unsupervised) row — not just the "generic"-named ones — so an
+            // Enrich every real (unsupervised) row — not just the "generic"-named ones — so an
             // app-bundled binary with an opaque name (e.g. Warp's "stable") is identified from its
-            // `.app` path too. It's cheap: enrichment reads argv once per pid and is cached across
-            // ticks, and only ~topN rows are ever shown, so new argv reads per tick are near-zero.
+            // `.app` path too. It's cheap: enrichment reads argv (and the system-path check runs
+            // proc_pidpath) once per pid LIFETIME — both are cached across ticks for every scanned
+            // pid, so a steady-state tick does near-zero syscalls here.
             guard row.id > 0, !supervisedPids.contains(row.id) else { return row }
             let e = enrichedName(pid: row.id, comm: row.name, now: now,
                                  cache: &rich, portRecheckAt: &recheckAt)
-            let system = dm_proc_is_system(row.id) != 0
+            let system: Bool
+            if let cached = isSystem[row.id] {
+                system = cached
+            } else {
+                system = dm_proc_is_system(row.id) != 0
+                isSystem[row.id] = system
+            }
             guard e.ext || e.isExtension || e.isClaude || e.extBuild || e.name != row.name || system else { return row }
             return ProcessRow(id: row.id, name: e.name, cpuPerCore: row.cpuPerCore,
                               memBytes: row.memBytes, isExternalDev: e.ext,
@@ -277,14 +310,20 @@ final class SystemSampler {
         let result = aggregate(rows: enrichedRows, devs: devs, build: build, workers: workers,
                                coreCount: s.coreCount, totalMem: s.totalMem, topN: s.topN)
 
-        let liveIDs = Set(result.map { $0.id })
-        rich = rich.filter { liveIDs.contains($0.key) }
-        recheckAt = recheckAt.filter { liveIDs.contains($0.key) }
+        // Prune the enrichment caches by the pids SCANNED this tick, not by the shown rows: an entry
+        // must survive for every live process, or the next tick re-reads its argv (a KERN_PROCARGS2
+        // sysctl + an argmax-sized malloc) and re-walks node runtimes' fd tables — for the hundreds
+        // of processes that never make the table. Pruning to the visible rows silently cost more per
+        // tick than everything else in this sweep combined.
+        let scanned = Set(seenNames.keys)
+        rich = rich.filter { scanned.contains($0.key) }
+        recheckAt = recheckAt.filter { scanned.contains($0.key) }
+        isSystem = isSystem.filter { scanned.contains($0.key) }
 
         return SampleOutput(systemCPU: systemCPU, sysTicks: ticks, memUsed: Double(sysMem.used),
                             swap: swap, loadAvg: dm_load_avg(), temperature: dm_cpu_temperature(),
                             processes: result, prev: newPrev, nameCache: seenNames,
-                            richNameCache: rich, portRecheckAt: recheckAt)
+                            richNameCache: rich, isSystemCache: isSystem, portRecheckAt: recheckAt)
     }
 
     private func updatePressure() {
@@ -376,6 +415,22 @@ final class SystemSampler {
         // Unsupervised framework builds ALWAYS show too — a build is heavy by nature, and the user
         // wants to see (and be able to stop) one that's running outside the app.
         result.append(contentsOf: externalBuilds.sorted { impact($0) > impact($1) })
+        // Collapse Claude *subshells*: the Bash tool forks a child `/bin/zsh` for a pipeline or `eval`
+        // that inherits the same shell-snapshot argv, so it also matches `isClaudeShell` — which made
+        // ONE running command show up as two shells (a tab/row each). Keep session roots: drop a Claude
+        // shell that is a child of another Claude shell. Background `monitor`s are detached (never
+        // children), and are excluded so one can never be folded away.
+        if claudeShells.count > 1 {
+            let shellPids = Set(claudeShells.map(\.id))
+            let monitorPids = Set(claudeShells.filter { $0.name.localizedCaseInsensitiveContains("monitor") }.map(\.id))
+            var subshells = Set<Int32>()
+            for parent in claudeShells {
+                for child in Self.childPids(of: parent.id) where shellPids.contains(child) && !monitorPids.contains(child) {
+                    subshells.insert(child)
+                }
+            }
+            claudeShells.removeAll { subshells.contains($0.id) }
+        }
         // Claude Code's shells ALWAYS show too — even a near-idle one (e.g. a background `tail -f`
         // monitor) matters here, so no impact filter; the user wants to see and be able to stop them.
         result.append(contentsOf: claudeShells.sorted { impact($0) > impact($1) })
@@ -489,6 +544,24 @@ final class SystemSampler {
             portRecheckAt.removeValue(forKey: pid)
             return entry
         }
+        // A WebKit XPC service (com.apple.WebKit.WebContent / GPU / Networking) is spawned by the
+        // WebKit framework, so — unlike an Electron helper — its argv names no owning .app. Attribute
+        // it to the app that owns the web view via the responsible process, so Safari's WebContent
+        // shows Safari's name + icon instead of a bare "com.apple.WebKit.WebContent" system row. Other
+        // WebKit hosts (Mail, App Store, …) get their own name the same way.
+        if comm.hasPrefix("com.apple.WebKit.") {
+            let owner = dm_responsible_pid(pid)
+            if owner > 1, owner != pid {
+                var nameBuf = [CChar](repeating: 0, count: 1024)
+                let named = dm_proc_name(owner, &nameBuf, 1024) > 0 ? String(cString: nameBuf) : ""
+                if !named.isEmpty, named != comm {
+                    let entry = (name: named, ext: false, isExtension: false, isClaude: false, extBuild: false)
+                    cache[pid] = entry
+                    portRecheckAt.removeValue(forKey: pid)
+                    return entry
+                }
+            }
+        }
         let d = describe(comm: comm, args: args)
         let entry = (name: d.name, ext: false, isExtension: d.isExtension, isClaude: false, extBuild: false)
         cache[pid] = entry
@@ -505,6 +578,14 @@ final class SystemSampler {
     /// `until …`) left running to watch for a condition, not a one-shot foreground command.
     nonisolated private static func isClaudeMonitor(_ args: String) -> Bool {
         args.contains("while true") || args.contains("while :") || args.contains("until ")
+    }
+
+    /// Direct child pids of `pid` (wraps `dm_child_pids`). Used to fold a Bash-tool subshell into its
+    /// parent so one command isn't listed as two shells.
+    nonisolated private static func childPids(of pid: Int32) -> [Int32] {
+        var buf = [pid_t](repeating: 0, count: 64)
+        let n = dm_child_pids(pid, &buf, Int32(buf.count))
+        return n > 0 ? Array(buf.prefix(Int(min(n, Int32(buf.count))))) : []
     }
 
     /// The project folder name from a dev-server argv: the directory just before `/node_modules/`

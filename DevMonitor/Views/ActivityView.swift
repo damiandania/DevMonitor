@@ -21,26 +21,37 @@ struct ActivityView: View {
                 VStack(spacing: 0) {
                     disclosure(title: chartsExpanded ? "Hide charts" : "Show charts",
                                isOpen: chartsExpanded) { chartsExpanded.toggle() }
-                    ActivityTimelineView(sampler: app.systemSampler)
-                        .frame(height: chartsExpanded ? 172 : 0)
-                        .padding(.top, chartsExpanded ? 8 : 0)
-                        .opacity(chartsExpanded ? 1 : 0)
-                        .clipped()
-                        .accessibilityHidden(!chartsExpanded)
+                    // Collapsed content is UNMOUNTED (`if`), not merely zero-height: a hidden view's
+                    // body still re-evaluates on every observed tick, so a "collapsed" timeline kept
+                    // re-rendering 3×300 chart points at 2 Hz invisibly. The container still animates
+                    // the height (the accordion), and the child fades via its transition.
+                    Group {
+                        if chartsExpanded {
+                            ActivityTimelineView(sampler: app.systemSampler).transition(.opacity)
+                        }
+                    }
+                    .frame(height: chartsExpanded ? 172 : 0)
+                    .padding(.top, chartsExpanded ? 8 : 0)
+                    .clipped()
+                    .accessibilityHidden(!chartsExpanded)
                 }
             }
-            // Disclosure region: the table is always in the hierarchy but collapses to zero height
-            // and is clipped, so expand/collapse is a smooth accordion (height + opacity) driven by
-            // a single spring on the card — no content spilling past the card edge mid-animation.
+            // Disclosure region: the container collapses to zero height and is clipped, so
+            // expand/collapse is a smooth accordion driven by a single spring on the card. The table
+            // itself is unmounted while collapsed — same reasoning as the charts above.
             VStack(spacing: 0) {
                 disclosure(title: expanded ? "Hide processes" : "Show processes",
                            isOpen: expanded) { expanded.toggle() }
-                ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
-                    .frame(height: expanded ? 240 : 0)
-                    .padding(.top, expanded ? 10 : 0)
-                    .opacity(expanded ? 1 : 0)
-                    .clipped()
-                    .accessibilityHidden(!expanded)
+                Group {
+                    if expanded {
+                        ProcessTableView(sampler: app.systemSampler, percentOfMachine: $percentOfMachine)
+                            .transition(.opacity)
+                    }
+                }
+                .frame(height: expanded ? 240 : 0)
+                .padding(.top, expanded ? 10 : 0)
+                .clipped()
+                .accessibilityHidden(!expanded)
             }
         }
         .dmCard()

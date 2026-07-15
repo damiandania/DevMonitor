@@ -39,7 +39,20 @@ static int dm_name_is_cpu(const char *n) {
            strstr(n, "eACC") || strstr(n, "pACC");
 }
 
+static double dm_timebase_scale(void);
+
 double dm_cpu_temperature(void) {
+    // Sensors move on a seconds scale, but every read walks the whole HID service list — the most
+    // expensive single call in the sampling tick — so cache the answer for ~10 s. Only the
+    // sampler's (serialized) background pass calls this, so the statics need no locking. A -1
+    // (no readable sensor) is cached too: retrying a missing sensor every tick buys nothing.
+    static double cachedTemp = 0;
+    static uint64_t cachedAt = 0;
+    uint64_t now = mach_absolute_time();
+    if (cachedAt != 0 && (double)(now - cachedAt) * dm_timebase_scale() < 10e9) {
+        return cachedTemp;
+    }
+
     static DMIOHIDEventSystemClientRef client = NULL;
     if (client == NULL) {
         client = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
@@ -97,9 +110,11 @@ double dm_cpu_temperature(void) {
         services = NULL;
     }
 
-    if (cpuCount > 0) return cpuSum / cpuCount;   // average of the CPU/SoC sensors
-    if (allCount > 0) return allSum / allCount;   // fallback: average of every thermal sensor
-    return -1;
+    if (cpuCount > 0) cachedTemp = cpuSum / cpuCount;        // average of the CPU/SoC sensors
+    else if (allCount > 0) cachedTemp = allSum / allCount;   // fallback: average of every sensor
+    else cachedTemp = -1;
+    cachedAt = now;
+    return cachedTemp;
 }
 
 // rusage CPU times are in mach absolute-time units; this scales them to ns.
@@ -283,6 +298,17 @@ int dm_proc_name(pid_t pid, char *buf, int size) {
         return (int)strlen(buf);
     }
     return proc_name(pid, buf, size);
+}
+
+// The app macOS holds "responsible" for `pid` — e.g. the Safari that owns a
+// com.apple.WebKit.WebContent renderer. WebKit's XPC services carry no owning-app path in their own
+// argv (unlike an Electron helper), so this is the only way to attribute them. Private but stable
+// libSystem symbol (Activity Monitor / TCC use the same attribution).
+extern pid_t responsibility_get_pid_responsible_for_pid(pid_t pid);
+
+int dm_responsible_pid(pid_t pid) {
+    pid_t r = responsibility_get_pid_responsible_for_pid(pid);
+    return r > 0 ? (int)r : -1;
 }
 
 // 1 if the process's executable lives under a macOS system location (Apple daemons, system
