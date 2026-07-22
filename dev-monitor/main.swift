@@ -28,8 +28,9 @@ One supervised server PER PROJECT; several projects can run at once. Paths defau
 current directory and are resolved to absolute. The Dev Monitor app hosts the hub at
 ~/Library/Application Support/DevMonitor/dm.sock — if it isn't running, it's started for you.
 
-If a build is in progress for the project, `up`/`preview` won't interrupt it: without --wait they
-report the build and exit; with --wait they queue behind it and start the server once it finishes.
+If a build is in progress (this project's OR another's), `up`/`preview` do NOT interrupt it: they
+WAIT, keep listening, and start the server automatically once every build finishes — no --wait
+needed. `--wait` additionally blocks until the server answers HTTP and prints its URL.
 `status --json` includes `building`/`buildElapsed`/`buildETA` so an agent can coordinate.
 """
 
@@ -125,46 +126,60 @@ func fetchServers() -> [IPCServerInfo] {
 /// THEN launch and wait for readiness — so another Claude can queue behind a build instead of
 /// killing it. With no conflict, behaves like the old path.
 func startServer(cmd: String, path: String, gb: Int?, wait: Bool) {
-    let messages = requireHub(IPCRequest(cmd: cmd, path: path, name: nil, gb: gb, all: nil))
-    if let busy = messages.first(where: { $0.type == "busy" }) {
-        let note = busy.message ?? "a build is in progress"
-        guard wait else {
-            FileHandle.standardError.write(Data("dev-monitor: \(note)\n".utf8))
-            exit(1)
+    var announced = false
+    while true {
+        let messages = requireHub(IPCRequest(cmd: cmd, path: path, name: nil, gb: gb, all: nil))
+        if let busy = messages.first(where: { $0.type == "busy" }) {
+            // A build is in progress (this project's or another's). WAIT by default — the caller
+            // "keeps listening" — and relaunch once every build clears; no --wait needed. The hub's
+            // message explains which build and why. The loop re-checks after the wait so a build that
+            // starts in the meantime just defers us again instead of slipping a server in beside it.
+            if !announced {
+                let note = busy.message ?? "a build is in progress"
+                FileHandle.standardError.write(Data("dev-monitor: \(note)\n".utf8))
+                announced = true
+            }
+            waitForBuildsToClear(path)
+            usleep(500_000)   // guard: never spin the re-issue loop faster than 2×/s on a hub↔status race
+            continue
         }
-        FileHandle.standardError.write(Data(
-            "dev-monitor: \(note)\ndev-monitor: waiting for the build to finish, then starting…\n".utf8))
-        waitForBuildToFinish(path)
-        runAndReport(IPCRequest(cmd: cmd, path: path, name: nil, gb: gb, all: nil))
-        waitUntilReady(path)
+        for m in messages {
+            if m.type == "error" {
+                FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
+            }
+            print(m.message ?? m.type)
+        }
+        if wait { waitUntilReady(path) }
         return
     }
-    for m in messages {
-        if m.type == "error" {
-            FileHandle.standardError.write(Data("dev-monitor: \(m.message ?? "error")\n".utf8)); exit(1)
-        }
-        print(m.message ?? m.type)
-    }
-    if wait { waitUntilReady(path) }
 }
 
-/// Poll `status` until the project's build finishes (or the project vanishes / the timeout elapses),
-/// printing occasional progress to stderr. Builds can be long, so the cap is generous.
-func waitForBuildToFinish(_ path: String, timeoutSeconds: Double = 900) {
+/// Block until NO project is building (or the timeout elapses), printing occasional progress to
+/// stderr. Used when a launch is deferred behind an in-flight build — this project's OR another's,
+/// since a build pauses every dev server for RAM, so we wait for ALL builds to clear before starting
+/// the server. Builds can be long (plus OOM heap-retries), so the cap is generous.
+func waitForBuildsToClear(_ path: String, timeoutSeconds: Double = 1800) {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     var lastNote = -15
     while Date() < deadline {
-        guard let s = fetchServers().first(where: { $0.path == path }) else { return }  // project gone
-        if s.building != true { return }                                                // build done
-        let elapsed = Int(s.buildElapsed ?? 0)
+        let building = fetchServers().filter { $0.building == true }
+        if building.isEmpty {
+            FileHandle.standardError.write(Data("dev-monitor: build finished — starting the server now…\n".utf8))
+            return
+        }
+        let elapsed = building.compactMap { $0.buildElapsed }.map { Int($0) }.max() ?? 0
         if elapsed >= lastNote + 15 {
             lastNote = elapsed
-            let eta = s.buildETA.map { " / ~\(Int($0))s" } ?? ""
-            FileHandle.standardError.write(Data("dev-monitor: still building (\(elapsed)s\(eta))…\n".utf8))
+            let names = building.map { s -> String in
+                let e = s.buildElapsed.map { Int($0) } ?? 0
+                let eta = s.buildETA.map { " / ~\(Int($0))s" } ?? ""
+                return "\(s.name) (\(e)s\(eta))"
+            }.sorted().joined(separator: ", ")
+            FileHandle.standardError.write(Data("dev-monitor: still building: \(names) — waiting, keep listening…\n".utf8))
         }
         usleep(1_000_000)
     }
-    die("timed out after \(Int(timeoutSeconds))s waiting for the build to finish (see: dev-monitor logs '\(path)')")
+    die("timed out after \(Int(timeoutSeconds))s waiting for the build(s) to finish (see: dev-monitor logs '\(path)')")
 }
 
 /// Block until the project at `path` is HTTP-ready (print its URL, exit 0), has Failed (print the

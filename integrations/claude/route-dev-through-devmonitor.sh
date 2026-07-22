@@ -46,7 +46,8 @@ case "$block" in
   dev)
     echo "BLOCKED — dev servers on this machine run through DevMonitor (one supervised server per project)." >&2
     echo "Do not start a dev server directly. Instead run:  dev-monitor up '$cwd' --wait   (blocks until ready, prints the URL)" >&2
-    echo "Inspect with: dev-monitor status --json   (ready/url/pid/exitCode/lastError per project)" >&2
+    echo "If a build is in progress (this or ANY project), that command WAITS and starts the server automatically once the build finishes — keep listening for the 'ready:' line; do NOT retry, kill the build, or launch it another way." >&2
+    echo "Inspect with: dev-monitor status --json   (ready/url/pid/exitCode/lastError + building/buildElapsed/buildETA per project)" >&2
     echo "Full surface: dev-monitor --help" >&2
     exit 2 ;;
   build)
@@ -57,6 +58,7 @@ case "$block" in
   preview)
     echo "BLOCKED — preview servers (serving the production build) also run through DevMonitor." >&2
     echo "Instead run:  dev-monitor preview '$cwd' --wait   (blocks until ready, prints the URL)." >&2
+    echo "If a build is in progress, that command WAITS and starts the preview automatically once it finishes — keep listening; do NOT retry or launch it another way." >&2
     exit 2 ;;
 esac
 exit 0

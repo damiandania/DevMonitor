@@ -240,15 +240,30 @@ final class IPCServer {
         return project
     }
 
-    /// If a build is running for `project`, an agent-friendly "busy" message (elapsed + ETA) telling
-    /// the caller to wait rather than interrupt it; nil when no build is running. Starting a dev /
-    /// preview server stops the build (mutual exclusion), so `up`/`preview` short-circuit on this.
+    /// If ANY build is running (this project's OR another's), an agent-directed "busy" message; nil
+    /// when nothing is building. Two reasons a launch waits, not just the same-project mutual
+    /// exclusion: (1) this project's own build stops its server first, so the server can only start
+    /// after it; (2) a build on a RAM-constrained Mac PAUSES every other project's dev server to
+    /// claim the memory (see `pauseActiveServersForBuild`), so launching a different project mid-build
+    /// both fights the build for RAM and would be paused anyway. The CLI waits on this reply and
+    /// relaunches once builds clear, so the message tells the agent exactly that — keep listening,
+    /// Dev Monitor will start it automatically, don't work around it.
     private static func buildBusyMessage(_ project: Project, app: AppState) -> String? {
-        guard let b = app.builds[project.id], b.isRunning else { return nil }
-        let elapsed = b.startedAt.map { Int(Date().timeIntervalSince($0)) } ?? 0
-        let eta = project.lastBuildSeconds.map { " (~\(Int($0))s total)" } ?? ""
-        return "\(project.name) is building — \(elapsed)s elapsed\(eta). Not starting the server so the "
-            + "build isn't interrupted. Re-run with --wait to start it automatically when the build "
-            + "finishes, or watch `dev-monitor status`."
+        let running = app.builds.values.filter { $0.isRunning }
+        guard !running.isEmpty else { return nil }
+        let parts = running.map { b -> String in
+            let elapsed = b.startedAt.map { Int(Date().timeIntervalSince($0)) } ?? 0
+            let eta = b.project.lastBuildSeconds.map { " / ~\(Int($0))s" } ?? ""
+            return "\(b.project.name) (\(elapsed)s\(eta))"
+        }.sorted()
+        let which = parts.count == 1 ? "A build is in progress: \(parts[0])."
+                                     : "Builds are in progress: \(parts.joined(separator: ", "))."
+        let sameProject = running.contains { $0.project.id == project.id }
+        let why = sameProject
+            ? "\(project.name)'s build stops its server first, so the server can only start once the build finishes."
+            : "On this RAM-constrained Mac a build pauses every dev server to free memory, so starting \(project.name) now would fight the build for RAM and be paused anyway."
+        return "\(which) \(why) Dev Monitor will start \(project.name) automatically as soon as the "
+            + "build finishes — do NOT retry, run the build yourself, kill the build, or launch the "
+            + "server unsupervised. Waiting now; keep listening for the ready line."
     }
 }
