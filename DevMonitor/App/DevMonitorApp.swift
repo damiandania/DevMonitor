@@ -45,12 +45,13 @@ struct DevMonitorApp: App {
     }
 }
 
-/// Hosts the always-visible Claude quota HUD (a floating panel beside the notch). Kept in an
-/// AppDelegate because it's a plain AppKit window with no place in the SwiftUI scene graph, and it
-/// must come up once at launch and live for the whole app session.
+/// Hosts the always-visible quota HUD (a floating panel beside the notch). Kept in an AppDelegate
+/// because it's a plain AppKit window with no place in the SwiftUI scene graph, and it must come up
+/// once at launch and live for the whole app session.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let quota = ClaudeQuotaMonitor()
+    private let claudeQuota = ClaudeQuotaMonitor()
+    private let gptQuota = CodexQuotaMonitor()
     private var quotaHUD: QuotaHUDController?
 
     /// Called once from the main window's `onAppear` with the app's shared state — the HUD needs it to
@@ -58,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func attach(appState: AppState) {
         guard quotaHUD == nil else { return }
         // One continuous notch bar: animated mascot (left) + notch + quota readout (right).
-        quotaHUD = QuotaHUDController(quota: quota, appState: appState)
+        quotaHUD = QuotaHUDController(claudeQuota: claudeQuota, gptQuota: gptQuota, appState: appState)
     }
 }
 

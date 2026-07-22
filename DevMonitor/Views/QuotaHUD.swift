@@ -19,25 +19,45 @@ extension NSScreen {
     var hasNotch: Bool { safeAreaInsets.top > 0 }
 }
 
-/// The always-visible readout on the RIGHT side of the notch bar: just the Claude 5h/7d usage (the
-/// old constellation status icon is gone — the mascot's event animations carry that job now; hover
-/// the bar for the controls menu). Instead of matching the menu-bar tint (unreliable in fullscreen /
-/// over rotating wallpapers), it sits on the bar's black strip that visually extends the notch's
-/// bezel — so a plain white glyph is always legible, everywhere. The black background itself is drawn
-/// by `QuotaHUDController`'s container (one continuous shape from the mascot, across the notch, to
-/// here), not by this view.
+enum QuotaSource { case claude, gpt }
+
+/// The always-visible readout on the RIGHT side of the notch bar. Clicking it alternates between
+/// Claude's 5-hour / 7-day usage and the signed-in GPT (Codex) quota. The black background itself is
+/// drawn by `QuotaHUDController`'s container (one continuous shape from the mascot, across the notch,
+/// to here), not by this view.
 struct QuotaHUDView: View {
-    var quota: ClaudeQuotaMonitor
+    var claudeQuota: ClaudeQuotaMonitor
+    var gptQuota: CodexQuotaMonitor
+    var source: QuotaSource
     var appState: AppState
     var barHeight: CGFloat
     var onZoneHover: (Bool) -> Void
     var onContentChange: () -> Void
+    var onToggle: () -> Void
 
     var body: some View {
-        let numberColor: Color = quota.isStale ? .white.opacity(0.5) : .claudeCoral
         HStack(spacing: 8) {
-            if let five = quota.fiveHour { metric("clock", five, numberColor) }
-            if let seven = quota.sevenDay { metric("calendar", seven, numberColor) }
+            switch source {
+            case .claude:
+                if claudeQuota.status == .ok {
+                    let numberColor: Color = claudeQuota.isStale ? .white.opacity(0.5) : .claudeCoral
+                    if let five = claudeQuota.fiveHour { claudeMetric("clock", five, numberColor) }
+                    if let seven = claudeQuota.sevenDay { claudeMetric("calendar", seven, numberColor) }
+                } else {
+                    statusBadge(claudeQuota.status, cli: "Claude",
+                                reauth: "run `claude` in a terminal and sign in")
+                }
+            case .gpt:
+                Image("CodexLogo").renderingMode(.template).resizable().scaledToFit()
+                    .frame(width: 13, height: 13).foregroundStyle(.white)
+                if gptQuota.status == .ok {
+                    if let primary = gptQuota.primary { gptMetric(primary) }
+                    if let secondary = gptQuota.secondary { gptMetric(secondary) }
+                    if !gptQuota.hasData { Text("—").foregroundStyle(.white.opacity(0.6)) }
+                } else {
+                    statusBadge(gptQuota.status, cli: "Codex", reauth: "run `codex login` in a terminal")
+                }
+            }
         }
         .font(.system(size: 12, weight: .semibold)).monospacedDigit()
         .imageScale(.medium)
@@ -46,19 +66,65 @@ struct QuotaHUDView: View {
         .fixedSize(horizontal: true, vertical: false)
         .contentShape(Rectangle())
         .onHover { onZoneHover($0) }
-        .onChange(of: quota.fiveHour == nil) { _, _ in onContentChange() }
-        .onChange(of: quota.sevenDay == nil) { _, _ in onContentChange() }
+        .onTapGesture { onToggle() }
+        .onChange(of: claudeQuota.fiveHour == nil) { _, _ in onContentChange() }
+        .onChange(of: claudeQuota.sevenDay == nil) { _, _ in onContentChange() }
+        .onChange(of: claudeQuota.status) { _, _ in onContentChange() }
+        .onChange(of: gptQuota.hasData) { _, _ in onContentChange() }
+        .onChange(of: gptQuota.status) { _, _ in onContentChange() }
     }
 
-    private func metric(_ symbol: String, _ pct: Int, _ color: Color) -> some View {
+    /// Shown INSTEAD OF the percentages when a probe can't get a real reading — a frozen old value
+    /// would otherwise look like a fresh, reassuring "usage is low" signal. Each failure mode gets
+    /// its own glyph + tooltip so the badge tells the user what to DO: `?` = the CLI isn't installed;
+    /// a person-with-warning = the login/session expired (re-auth); a triangle = ran but returned
+    /// nothing (transient — retrying). `cli` names the tool; `reauth` is the sign-in hint.
+    @ViewBuilder private func statusBadge(_ status: QuotaStatus, cli: String, reauth: String) -> some View {
+        switch status {
+        case .ok:
+            EmptyView()
+        case .notInstalled:
+            Image(systemName: "questionmark.circle")
+                .foregroundStyle(.white.opacity(0.6))
+                .help("\(cli) CLI not found on PATH — install it (or check your PATH) to show usage")
+        case .signedOut:
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .foregroundStyle(.yellow)
+                .help("\(cli) usage unavailable — the session expired. \(reauth.prefix(1).uppercased() + reauth.dropFirst()) to restore it.")
+        case .unavailable:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+                .help("Couldn't read \(cli) usage — no data returned (e.g. several Claude Code sessions competing). Retrying.")
+        }
+    }
+
+    private func claudeMetric(_ symbol: String, _ pct: Int, _ color: Color) -> some View {
         HStack(spacing: 3) {
             Image(systemName: symbol)
             Text("\(pct)%")
         }
         .foregroundStyle(color)
-        .help(quota.isStale
+        .help(claudeQuota.isStale
               ? "Claude quota — no recent update; run a Claude session to refresh"
               : "Claude usage · clock = 5-hour window · calendar = 7-day window")
+    }
+
+    private func gptMetric(_ window: CodexQuotaMonitor.Window) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: (window.durationMinutes ?? 0) <= 360 ? "clock" : "calendar")
+            Text("\(window.usedPercent)%")
+        }
+        .foregroundStyle(gptQuota.isStale ? .white.opacity(0.5) : .white)
+        .help(gptQuota.isStale
+              ? "GPT quota — no recent update; make sure Codex is installed and signed in"
+              : "GPT usage · \(windowDescription(window))")
+    }
+
+    private func windowDescription(_ window: CodexQuotaMonitor.Window) -> String {
+        guard let minutes = window.durationMinutes else { return "usage limit" }
+        if minutes < 60 { return "\(minutes)-minute window" }
+        if minutes < 24 * 60 { return "\(minutes / 60)-hour window" }
+        return "\(minutes / (24 * 60))-day window"
     }
 }
 
@@ -96,7 +162,9 @@ final class QuotaHUDController {
     private let popover: NSPopover
     private let barHeight: CGFloat
     private let appState: AppState
-    private let quota: ClaudeQuotaMonitor
+    private let claudeQuota: ClaudeQuotaMonitor
+    private let gptQuota: CodexQuotaMonitor
+    private var quotaSource: QuotaSource = .claude
 
     private var hudHovered = false
     private var menuHovered = false
@@ -121,17 +189,19 @@ final class QuotaHUDController {
     private var transientMood: ClaudeMascot.Mood?
     private var transientUntil = Date.distantPast
 
-    init(quota: ClaudeQuotaMonitor, appState: AppState) {
+    init(claudeQuota: ClaudeQuotaMonitor, gptQuota: CodexQuotaMonitor, appState: AppState) {
         self.appState = appState
-        self.quota = quota
+        self.claudeQuota = claudeQuota
+        self.gptQuota = gptQuota
         barHeight = NSScreen.notched?.auxiliaryTopRightArea?.height ?? Self.menuBarHeight()
 
         popover = NSPopover()
         popover.behavior = .transient
 
-        hosting = NSHostingView(rootView: QuotaHUDView(quota: quota, appState: appState,
+        hosting = NSHostingView(rootView: QuotaHUDView(claudeQuota: claudeQuota, gptQuota: gptQuota,
+                                                       source: .claude, appState: appState,
                                                        barHeight: barHeight,
-                                                       onZoneHover: { _ in }, onContentChange: {}))
+                                                       onZoneHover: { _ in }, onContentChange: {}, onToggle: {}))
 
         container = NSView()
         container.wantsLayer = true
@@ -168,11 +238,7 @@ final class QuotaHUDController {
                 .environment(appState).environment(\.locale, appState.uiLocale)
                 .onHover { [weak self] in self?.menuHover($0) })
 
-        hosting.rootView = QuotaHUDView(quota: quota, appState: appState, barHeight: barHeight,
-                                        onZoneHover: { [weak self] in self?.zoneHover($0) },
-                                        onContentChange: { [weak self] in
-                                            DispatchQueue.main.async { self?.reposition() }
-                                        })
+        updateQuotaView()
         mascotHost.onHover = { [weak self] in self?.zoneHover($0) }
         mascotHost.onClick = { [weak self] in self?.love() }
 
@@ -190,6 +256,21 @@ final class QuotaHUDController {
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
+
+    private func updateQuotaView() {
+        hosting.rootView = QuotaHUDView(claudeQuota: claudeQuota, gptQuota: gptQuota,
+                                        source: quotaSource, appState: appState, barHeight: barHeight,
+                                        onZoneHover: { [weak self] in self?.zoneHover($0) },
+                                        onContentChange: { [weak self] in
+                                            DispatchQueue.main.async { self?.reposition() }
+                                        }, onToggle: { [weak self] in self?.toggleQuotaSource() })
+    }
+
+    private func toggleQuotaSource() {
+        quotaSource = quotaSource == .claude ? .gpt : .claude
+        if quotaSource == .gpt { gptQuota.activate() }
+        updateQuotaView()
+    }
 
     // MARK: - Mascot mood
 

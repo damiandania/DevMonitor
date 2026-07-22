@@ -223,6 +223,7 @@ private struct ProcessRowView: View {
         let n = row.name.lowercased()
         if n.contains("dev monitor") || n.contains("dev-monitor") { return "DevMonitorLogo" }  // us
         if n.contains("xcode") { return "XcodeLogo" }                          // before "code"
+        if n.contains("chatgpt") { return "CodexLogo" }
         if n.contains("codex") { return "CodexLogo" }                          // before "code"
         if n.contains("visual studio code") || n == "code" { return "VSCodeLogo" }
         if n.contains("safari") { return "SafariLogo" }
