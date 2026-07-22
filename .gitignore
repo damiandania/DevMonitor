@@ -13,8 +13,9 @@ dist/
 .swiftpm/
 *.swiftmodule
 
-# Claude Code skills (instaladas localmente, no versionadas)
+# Claude Code skills / agent tooling (instaladas localmente, no versionadas)
 .claude/skills/
+.agents/
 
 # Per-machine code-signing override (written by tools/ensure-signing-cert.sh)
 tools/Signing.local.xcconfig
