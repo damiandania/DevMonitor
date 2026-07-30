@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Package a public release into dist/:
-#   - "Dev Monitor-<ver>.dmg"   the app + an /Applications drop target
-#   - "dev-monitor-<ver>.zip"   the universal CLI binary
+#   - "Owl Monitor-<ver>.dmg"   the app + an /Applications drop target
+#   - "owl-monitor-<ver>.zip"   the universal CLI binary
 #
 # Usage: bash tools/package-release.sh
 # Requires: xcodegen, Xcode (macOS 26 SDK).
@@ -13,7 +13,7 @@
 #   AC_NOTARY_PROFILE   a `notarytool store-credentials` profile name → notarize + staple the .dmg.
 #       (or AC_APPLE_ID + AC_TEAM_ID + AC_PASSWORD for an app-specific-password submission)
 # Without DEVELOPER_ID the app stays unsigned and first launch needs right-click -> Open, or
-#   `xattr -dr com.apple.quarantine "/Applications/Dev Monitor.app"`.
+#   `xattr -dr com.apple.quarantine "/Applications/Owl Monitor.app"`.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -21,19 +21,19 @@ cd "$ROOT"
 VER=$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
 [ -n "$VER" ] || { echo "could not read MARKETING_VERSION from project.yml" >&2; exit 1; }
 SIGNED=0; [ -n "${DEVELOPER_ID:-}" ] && SIGNED=1
-echo "Packaging Dev Monitor $VER ($([ "$SIGNED" = 1 ] && echo "signed: $DEVELOPER_ID" || echo unsigned))…"
+echo "Packaging Owl Monitor $VER ($([ "$SIGNED" = 1 ] && echo "signed: $DEVELOPER_ID" || echo unsigned))…"
 
 xcodegen generate >/dev/null
-xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor  -configuration Release -derivedDataPath build build >/dev/null
-xcodebuild -project DevMonitor.xcodeproj -scheme dev-monitor -configuration Release -derivedDataPath build build >/dev/null
+xcodebuild -project OwlMonitor.xcodeproj -scheme OwlMonitor  -configuration Release -derivedDataPath build build >/dev/null
+xcodebuild -project OwlMonitor.xcodeproj -scheme owl-monitor -configuration Release -derivedDataPath build build >/dev/null
 
-APP="build/Build/Products/Release/Dev Monitor.app"
-CLI="build/Build/Products/Release/dev-monitor"
+APP="build/Build/Products/Release/Owl Monitor.app"
+CLI="build/Build/Products/Release/owl-monitor"
 [ -d "$APP" ] && [ -x "$CLI" ] || { echo "Release build artifacts missing" >&2; exit 1; }
 
 # Developer ID signing (hardened runtime) — only when DEVELOPER_ID is set.
 if [ "$SIGNED" = 1 ]; then
-  ENT="DevMonitor/Resources/DevMonitor.entitlements"
+  ENT="OwlMonitor/Resources/OwlMonitor.entitlements"
   echo "Signing CLI + app with hardened runtime…"
   codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$CLI"
   codesign --force --timestamp --options runtime --entitlements "$ENT" \
@@ -47,11 +47,11 @@ rm -rf dist && mkdir -p dist
 STAGE="$(mktemp -d)"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Dev Monitor" -srcfolder "$STAGE" -ov -format UDZO "dist/Dev Monitor-$VER.dmg" >/dev/null
+hdiutil create -volname "Owl Monitor" -srcfolder "$STAGE" -ov -format UDZO "dist/Owl Monitor-$VER.dmg" >/dev/null
 rm -rf "$STAGE"
 
 # Notarize + staple the DMG — only when signed AND notary credentials are present.
-DMG="dist/Dev Monitor-$VER.dmg"
+DMG="dist/Owl Monitor-$VER.dmg"
 if [ "$SIGNED" = 1 ] && { [ -n "${AC_NOTARY_PROFILE:-}" ] || [ -n "${AC_APPLE_ID:-}" ]; }; then
   echo "Submitting to the notary service (this can take a few minutes)…"
   if [ -n "${AC_NOTARY_PROFILE:-}" ]; then
@@ -66,19 +66,19 @@ fi
 
 # CLI zip (universal binary).
 ZIP="$(mktemp -d)"
-cp "$CLI" "$ZIP/dev-monitor"
-( cd "$ZIP" && zip -q "dev-monitor-$VER.zip" dev-monitor )
-cp "$ZIP/dev-monitor-$VER.zip" "dist/"
+cp "$CLI" "$ZIP/owl-monitor"
+( cd "$ZIP" && zip -q "owl-monitor-$VER.zip" owl-monitor )
+cp "$ZIP/owl-monitor-$VER.zip" "dist/"
 rm -rf "$ZIP"
 
 echo
 echo "Artifacts ($([ "$SIGNED" = 1 ] && echo signed || echo unsigned)):"
 ls -lh dist/
-echo "arch (app):"; lipo -archs "$APP/Contents/MacOS/Dev Monitor" 2>/dev/null || true
+echo "arch (app):"; lipo -archs "$APP/Contents/MacOS/Owl Monitor" 2>/dev/null || true
 echo "arch (cli):"; lipo -archs "$CLI" 2>/dev/null || true
 if [ "$SIGNED" != 1 ]; then
   echo
   echo "Reminder: unsigned — first launch needs right-click -> Open, or:"
-  echo '  xattr -dr com.apple.quarantine "/Applications/Dev Monitor.app"'
+  echo '  xattr -dr com.apple.quarantine "/Applications/Owl Monitor.app"'
   echo "Set DEVELOPER_ID (+ AC_NOTARY_PROFILE) to sign + notarize. See docs/DISTRIBUTION.md."
 fi

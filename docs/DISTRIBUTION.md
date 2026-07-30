@@ -1,6 +1,6 @@
 # Distribution
 
-How to ship Dev Monitor as a signed, notarized, auto-updating app with a Homebrew cask. The
+How to ship Owl Monitor as a signed, notarized, auto-updating app with a Homebrew cask. The
 scaffolding is in the repo; the steps below are what *you* complete with an Apple Developer account.
 Everything here is opt-in — without credentials the build and `package-release.sh` still produce the
 unsigned artifacts they always did.
@@ -8,26 +8,26 @@ unsigned artifacts they always did.
 ## 1. Code signing + notarization
 
 The Release config already enables the **hardened runtime** and uses
-`DevMonitor/Resources/DevMonitor.entitlements` (see `project.yml`). To sign + notarize locally:
+`OwlMonitor/Resources/OwlMonitor.entitlements` (see `project.yml`). To sign + notarize locally:
 
 ```bash
 # One-time: store an app-specific password for the notary service.
-xcrun notarytool store-credentials devmonitor-notary \
+xcrun notarytool store-credentials owlmonitor-notary \
   --apple-id "you@example.com" --team-id "TEAMID" --password "app-specific-pw"
 
 # Then package signed + notarized + stapled:
 DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" \
-AC_NOTARY_PROFILE="devmonitor-notary" \
+AC_NOTARY_PROFILE="owlmonitor-notary" \
   bash tools/package-release.sh
 ```
 
 `tools/package-release.sh` signs the CLI and the app with the hardened runtime, submits the `.dmg`
-to the notary service, and staples the ticket. Verify with `spctl -a -vvv "dist/.../Dev Monitor.app"`
+to the notary service, and staples the ticket. Verify with `spctl -a -vvv "dist/.../Owl Monitor.app"`
 and `codesign --verify --deep --strict`.
 
 ## 2. Auto-update (Sparkle)
 
-`DevMonitor/App/Updater.swift` is ready but inert (`#if canImport(Sparkle)`). To activate:
+`OwlMonitor/App/Updater.swift` is ready but inert (`#if canImport(Sparkle)`). To activate:
 
 1. Add the package in `project.yml`:
    ```yaml
@@ -36,14 +36,14 @@ and `codesign --verify --deep --strict`.
        url: https://github.com/sparkle-project/Sparkle
        from: "2.6.0"
    targets:
-     DevMonitor:
+     OwlMonitor:
        dependencies:
          - package: Sparkle
    ```
-2. Add to `DevMonitor/Resources/Info.plist`:
+2. Add to `OwlMonitor/Resources/Info.plist`:
    - `SUFeedURL` → the hosted `appcast.xml` URL (e.g. GitHub Pages / Releases).
    - `SUPublicEDKey` → the EdDSA public key from Sparkle's `generate_keys`.
-3. In `DevMonitorApp`, hold an `UpdaterController` and add `UpdaterCommands(updater:)` to
+3. In `OwlMonitorApp`, hold an `UpdaterController` and add `UpdaterCommands(updater:)` to
    `.commands { }` — the "Check for Updates…" menu item then appears.
 4. Sign updates with `sign_update` and publish `appcast.xml` alongside each release `.dmg`.
 
@@ -52,12 +52,12 @@ don't build the app).
 
 ## 3. Homebrew cask
 
-Template: `distribution/dev-monitor.rb`. Publish it in a tap repo as `Casks/dev-monitor.rb`, fill in
+Template: `distribution/owl-monitor.rb`. Publish it in a tap repo as `Casks/owl-monitor.rb`, fill in
 `version`, the two `sha256` values (`shasum -a 256 dist/*.dmg dist/*.zip`) and the release URLs. Then:
 
 ```bash
 brew tap <you>/tap
-brew install --cask dev-monitor   # installs the app + the dev-monitor CLI
+brew install --cask owl-monitor   # installs the app + the owl-monitor CLI
 ```
 
 The cask needs a **notarized** `.dmg` — Gatekeeper blocks an unsigned cask install.

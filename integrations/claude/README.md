@@ -1,12 +1,12 @@
-# Claude Code integration — route dev servers through Dev Monitor
+# Claude Code integration — route dev servers through Owl Monitor
 
 A **PreToolUse hook** that makes every Claude Code session on this machine route dev servers and
-JS/framework builds through the Dev Monitor app instead of running them directly. It hard-blocks
-raw commands and tells Claude to use the `dev-monitor` CLI.
+JS/framework builds through the Owl Monitor app instead of running them directly. It hard-blocks
+raw commands and tells Claude to use the `owl-monitor` CLI.
 
 ## Why
 
-Dev Monitor is the single authority that supervises **one dev server per project**. Starting a
+Owl Monitor is the single authority that supervises **one dev server per project**. Starting a
 server (or a build) directly fights it:
 
 - two servers on the same project collide on the build dir (e.g. Nuxt's `.nuxt` → `component-meta`
@@ -22,21 +22,33 @@ agent env vars), Nuxt's dev-lock never fires for app-spawned servers.
 
 | Raw command (blocked) | Use instead |
 |---|---|
-| `npm/pnpm/yarn/bun run dev`, `nuxt/next/astro/vinxi dev`, `vite`, `ng serve`, `webpack serve`, … | `dev-monitor up "<dir>" --wait` (blocks until ready, prints the URL) |
-| `npm/pnpm/yarn/bun run build`, `nuxt/next/astro/vite build`, … | `dev-monitor build "<dir>"` |
+| `npm/pnpm/yarn/bun run dev`, `nuxt/next/astro/vinxi dev`, `vite`, `ng serve`, `webpack serve`, … | `owl-monitor up "<dir>" --wait` (blocks until ready, prints the URL) |
+| `npm/pnpm/yarn/bun run build`, `nuxt/next/astro/vite build`, … | `owl-monitor build "<dir>"` (synchronous; ✅/❌ verdict) |
 
-The block message also points to `dev-monitor status --json` (per-project `ready`/`url`/`pid`/
-`exitCode`/`lastError`) and `dev-monitor --help` for the full surface, so an agent can operate and
+The block message also points to `owl-monitor status --json` (per-project `ready`/`url`/`pid`/
+`exitCode`/`lastError`) and `owl-monitor --help` for the full surface, so an agent can operate and
 self-diagnose without curling the port or reading internal files.
+
+**Capturing a failing build's error.** `owl-monitor build` prints only the *tail* of the build
+output — enough for most errors, but a big tool dump (e.g. a Rollup `watchFiles` object) can push the
+real message off the top. So on failure it also prints `↳ full build log: <path>`, and the whole
+build output is always readable with:
+
+```bash
+owl-monitor logs "<dir>" --build      # the ENTIRE last build — the real error header, not the tail
+```
+
+This is the reliable way for an agent to read a build error in full instead of guessing from a
+truncated tail.
 
 It deliberately does **not** touch `xcodebuild`, `go build`, `cargo build`, `docker build`,
 `make`, `npm install`, `npm test`, `npm run dev:<variant>`, or any command that already calls
-`dev-monitor`. There is **no inline escape hatch**: dev/build/preview launches always route through
+`owl-monitor`. There is **no inline escape hatch**: dev/build/preview launches always route through
 the app. To run one unsupervised, uninstall the hook (Settings → General → Claude Code).
 
 ## Install
 
-**Easiest — from the app:** Dev Monitor → **Settings → General → Claude Code** → **Install hook**
+**Easiest — from the app:** Owl Monitor → **Settings → General → Claude Code** → **Install hook**
 (and **Uninstall hook** to remove it). It writes the script to `~/.claude/hooks/` and adds the
 PreToolUse entry to `~/.claude/settings.json`, preserving your other settings. Restart Claude Code
 afterwards (hooks load at session start).
@@ -47,8 +59,8 @@ afterwards (hooks load at session start).
 
    ```bash
    mkdir -p ~/.claude/hooks
-   cp integrations/claude/route-dev-through-devmonitor.sh ~/.claude/hooks/
-   chmod +x ~/.claude/hooks/route-dev-through-devmonitor.sh
+   cp integrations/claude/route-dev-through-owlmonitor.sh ~/.claude/hooks/
+   chmod +x ~/.claude/hooks/route-dev-through-owlmonitor.sh
    ```
 
 2. Merge this into `~/.claude/settings.json` (see `settings.snippet.json`):
@@ -61,7 +73,7 @@ afterwards (hooks load at session start).
            "matcher": "Bash",
            "hooks": [
              { "type": "command",
-               "command": "bash /Users/<you>/.claude/hooks/route-dev-through-devmonitor.sh" }
+               "command": "bash /Users/<you>/.claude/hooks/route-dev-through-owlmonitor.sh" }
            ]
          }
        ]
@@ -77,4 +89,4 @@ Claude Code runs the hook before every Bash tool call, passing the call as JSON 
 script extracts `.tool_input.command` with `plutil` (ships with macOS — no `jq` needed), matches it
 against the dev/build patterns, and on a match writes guidance to **stderr** and exits **2**, which
 makes Claude Code block the call and feed that guidance back to the model. Anything else exits 0
-(allowed). Requires only the Dev Monitor `dev-monitor` CLI on `PATH` (`~/.local/bin`).
+(allowed). Requires only the Owl Monitor `owl-monitor` CLI on `PATH` (`~/.local/bin`).

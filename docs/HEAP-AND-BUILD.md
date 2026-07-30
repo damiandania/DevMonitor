@@ -1,6 +1,6 @@
 # Heap autoscaling & the build pipeline
 
-This is the single page to read to understand how Dev Monitor decides **how much memory
+This is the single page to read to understand how Owl Monitor decides **how much memory
 (`--max-old-space-size`) to give a project**, how it **autoscales on out-of-memory**, how the
 **build** runs, and how all of it is **persisted**. Start here; the file/line pointers at the end
 take you to the code.
@@ -102,9 +102,9 @@ the build also:
 
 ## 4. Persistence — survives reinstalls
 
-Everything is stored in **`~/Library/Application Support/DevMonitor/projects.json`** (one JSON array
+Everything is stored in **`~/Library/Application Support/OwlMonitor/projects.json`** (one JSON array
 of `Project`), written by `ProjectStore.save` on every `AppState.persist()`. This path is **outside**
-the `.app` bundle, so replacing `/Applications/Dev Monitor.app` with a new build **does not** touch
+the `.app` bundle, so replacing `/Applications/Owl Monitor.app` with a new build **does not** touch
 it — project config (including learned heap levels) carries across upgrades.
 
 **Backward/forward compatible decoding** (`Project.init(from:)`): every field added over time is read
@@ -120,16 +120,27 @@ new part — each autoscaler climb (`setAutoHeapGB` / `setBuildAutoHeapGB`).
 
 ## 5. The build CLI is synchronous
 
-`dev-monitor build [path]` **waits** for the build (including all autoscale retries) and prints the
+`owl-monitor build [path]` **waits** for the build (including all autoscale retries) and prints the
 tail of its output plus a verdict (`✅ build succeeded` / `❌ build failed`), exiting non-zero on
 failure — instead of returning immediately with "building …". This lets a caller (or an agent) see
 the real result.
 
 How: the hub handler (`IPCServer.handle`, `case "build"`) is `async` and awaits
-`AppState.runBuildAndWait`; when the build (and its retries) finish it writes the last ~40 log lines
-as `ok` messages followed by an `ok`/`error` verdict, then closes the socket. The **CLI binary is
-unchanged** — it already reads the socket to EOF, prints each message, and exits non-zero on the
-trailing `error`. So a change here only needs the **app** rebuilt, not the CLI reinstalled.
+`AppState.runBuildAndWait`; when the build (and its retries) finish it writes the tail of the log
+(40 lines on success, 200 on failure) as `ok` messages, then — on failure — the build-log path
+(`↳ full build log: <path>`), then an `ok`/`error` verdict, and closes the socket. The CLI reads the
+socket to EOF, prints each message, and exits non-zero on the trailing `error`.
+
+**The whole error is never truncated away.** A tail can bury the real message under a big tool dump
+(e.g. a Rollup `watchFiles` array of every server module). So `BuildRunner` also mirrors every build —
+fresh per run — to `<name>-<id>.build.log` next to the dev-server log; it's exposed as `buildLogPath`
+on `status` and printed in full by **`owl-monitor logs [path] --build`**. `BuildRunner` resolves the
+login `PATH` (`ShellEnvironment`) before spawning, like `DevSession`, so a build that runs before any
+server on a fresh app launch still finds `node` (no `exit 127`).
+
+> The `--build` reader and `buildLogPath` field touch the CLI + shared `IPCProtocol`, so they *do*
+> need the CLI rebuilt — but the CLI now ships **inside the app bundle** and is symlinked into
+> `~/.local/bin` (Settings → Claude Code → **Install CLI**), so a fresh app build keeps them in lockstep.
 
 ---
 
@@ -152,7 +163,7 @@ the effective GB (the learned level), when off a manual GB picker. Bindings go t
   setting (forces a save), and confirm the new fields appear (`autoHeapGB`, `buildMemoryGB`,
   `buildMemoryAuto`, `buildAutoHeapGB`).
 - **Build autoscaling:** put a memory-heavy project's *build* in auto with `buildAutoHeapGB: 4`, run
-  `dev-monitor build <path>`, and watch `buildAutoHeapGB` climb 4 → 6 → 8 in `projects.json` (it's
+  `owl-monitor build <path>`, and watch `buildAutoHeapGB` climb 4 → 6 → 8 in `projects.json` (it's
   re-written on each climb). On an 8 GB Mac a project that needs >8 GB will OOM at every rung and end
   in failure — that still **demonstrates** the ladder + persistence (the stored level reaches 8).
 - **Dev autoscaling:** same idea with `memoryAuto: true`; an OOM relaunch bumps `autoHeapGB`.
@@ -163,11 +174,11 @@ the effective GB (the learned level), when off a manual GB picker. Bindings go t
 
 | File | Role |
 |------|------|
-| `DevMonitor/Core/HeapScaling.swift` | The ladder (4→6→8) + OOM detection. Single source of policy. |
-| `DevMonitor/Model/Project.swift` | The heap fields, Codable retro-compat, `effectiveMemoryGB` / `effectiveBuildMemoryGB`. |
-| `DevMonitor/Core/DevSession.swift` | Dev-server launch + OOM relaunch (`biggerHeap`, `onHeapEscalated`). |
-| `DevMonitor/Core/BuildRunner.swift` | One-shot build process; injects the heap, captures exit code + log. |
-| `DevMonitor/App/AppState.swift` | `launch`, `runBuild`/`runBuildAndWait` (build retry loop), the setters that persist. |
-| `DevMonitor/Core/IPCServer.swift` | Hub; the synchronous `build` handler. |
-| `DevMonitor/Views/AppSettingsView.swift` | The Memory / Build memory rows. |
-| `DevMonitor/Store/ProjectStore.swift` | Load/save `projects.json` in Application Support. |
+| `OwlMonitor/Core/HeapScaling.swift` | The ladder (4→6→8) + OOM detection. Single source of policy. |
+| `OwlMonitor/Model/Project.swift` | The heap fields, Codable retro-compat, `effectiveMemoryGB` / `effectiveBuildMemoryGB`. |
+| `OwlMonitor/Core/DevSession.swift` | Dev-server launch + OOM relaunch (`biggerHeap`, `onHeapEscalated`). |
+| `OwlMonitor/Core/BuildRunner.swift` | One-shot build process; injects the heap, captures exit code + log. |
+| `OwlMonitor/App/AppState.swift` | `launch`, `runBuild`/`runBuildAndWait` (build retry loop), the setters that persist. |
+| `OwlMonitor/Core/IPCServer.swift` | Hub; the synchronous `build` handler. |
+| `OwlMonitor/Views/AppSettingsView.swift` | The Memory / Build memory rows. |
+| `OwlMonitor/Store/ProjectStore.swift` | Load/save `projects.json` in Application Support. |
