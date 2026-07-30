@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Dev Monitor is pre-1.0; security fixes land on the latest `master` and are noted in
+Owl Monitor is pre-1.0; security fixes land on the latest `master` and are noted in
 [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Reporting a vulnerability
@@ -10,16 +10,16 @@ Dev Monitor is pre-1.0; security fixes land on the latest `master` and are noted
 Please report security issues **privately** — do not open a public issue for an unfixed
 vulnerability.
 
-- Preferred: open a [private security advisory](https://github.com/damiandania/DevMonitor/security/advisories/new)
+- Preferred: open a [private security advisory](https://github.com/damiandania/Owl-Monitor/security/advisories/new)
   on this repository.
 - Otherwise, contact the maintainer via the GitHub profile [@damiandania](https://github.com/damiandania).
 
-Please include the macOS version, the Dev Monitor version, and steps to reproduce. We aim to
+Please include the macOS version, the Owl Monitor version, and steps to reproduce. We aim to
 acknowledge a report within a few days.
 
 ## Security posture
 
-A few things to know about how Dev Monitor runs, since it supervises other processes:
+A few things to know about how Owl Monitor runs, since it supervises other processes:
 
 - **Not sandboxed.** The app launches arbitrary dev servers, reads system process metrics, and spawns
   `node`/`npm`/`claude`, so it runs outside the App Sandbox. Release builds use the **hardened
@@ -31,5 +31,5 @@ A few things to know about how Dev Monitor runs, since it supervises other proce
   `claude` CLI in plan mode with write tools disallowed; foreign processes are only closed after
   explicit confirmation, never automatically (except orphaned dev servers under memory pressure,
   which is off-switchable).
-- **No telemetry.** Dev Monitor does not phone home; persisted data (projects, settings, logs, event
-  history) stays under `~/Library/Application Support/DevMonitor`.
+- **No telemetry.** Owl Monitor does not phone home; persisted data (projects, settings, logs, event
+  history) stays under `~/Library/Application Support/OwlMonitor`.

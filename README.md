@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="DevMonitor/Resources/Assets.xcassets/AppIcon.appiconset/icon_512.png" alt="Dev Monitor" width="120" />
+<img src="brand/Logo-light.png" alt="Owl Monitor" width="128">
 
-# Dev Monitor
+# Owl Monitor
 
 **A native macOS app that launches, supervises, and auto-recycles your JS/TS dev servers — so a hung Nuxt process never pins a CPU core again.**
 
@@ -12,7 +12,7 @@ Live resource graphs · hang detection · crash auto-revive · build runner · a
 [![Swift 6.3](https://img.shields.io/badge/Swift-6.3-F05138?logo=swift&logoColor=white)](#requirements)
 ![SwiftUI · Liquid Glass](https://img.shields.io/badge/SwiftUI-Liquid%20Glass-2C7EF8)
 ![Claude](https://img.shields.io/badge/Claude-integrated-D97757)
-[![CI](https://github.com/damiandania/DevMonitor/actions/workflows/ci.yml/badge.svg)](https://github.com/damiandania/DevMonitor/actions/workflows/ci.yml)
+[![CI](https://github.com/damiandania/Owl-Monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/damiandania/Owl-Monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [Features](#features) · [Quick start](#quick-start) · [CLI](#command-line-interface) · [How it works](#under-the-hood) · [Architecture](docs/ARCHITECTURE.md)
@@ -21,14 +21,14 @@ Live resource graphs · hang detection · crash auto-revive · build runner · a
 
 ---
 
-Dev Monitor runs your dev servers the way a production process manager runs services: it **launches** them with the right heap, **watches** CPU/memory/health in real time, **recycles** them when they hang, **revives** them when they crash, and gives you **one place** — app, notch bar, or CLI — to see and control every server across every project.
+Owl Monitor runs your dev servers the way a production process manager runs services: it **launches** them with the right heap, **watches** CPU/memory/health in real time, **recycles** them when they hang, **revives** them when they crash, and gives you **one place** — app, notch bar, or CLI — to see and control every server across every project.
 
-> **Why it exists.** A doubled `npm` wrapper once left an orphaned Nuxt process listening on `:3000` but unresponsive — pinning a CPU core and dragging the whole Mac down, with nothing obvious to kill. Dev Monitor does that supervision properly and *visibly*, so it can't happen quietly again.
+> **Why it exists.** A doubled `npm` wrapper once left an orphaned Nuxt process listening on `:3000` but unresponsive — pinning a CPU core and dragging the whole Mac down, with nothing obvious to kill. Owl Monitor does that supervision properly and *visibly*, so it can't happen quietly again.
 
-> **Built for small Macs.** Dev Monitor is tuned for machines where **RAM is the bottleneck** — an 8 GB Mac juggling a dev server, a production build, an editor and a browser. It actively manages that scarcity instead of leaving you to babysit Activity Monitor: heap that **autoscales** to what each project actually needs (and remembers it), dev servers **paused** to make room for a build, inactive memory **purged** before the kernel runs out of swap, and a **pressure system** that frees RAM *before* the machine grinds to a halt or the kernel starts SIGKILLing your build.
+> **Built for small Macs.** Owl Monitor is tuned for machines where **RAM is the bottleneck** — an 8 GB Mac juggling a dev server, a production build, an editor and a browser. It actively manages that scarcity instead of leaving you to babysit Activity Monitor: heap that **autoscales** to what each project actually needs (and remembers it), dev servers **paused** to make room for a build, inactive memory **purged** before the kernel runs out of swap, and a **pressure system** that frees RAM *before* the machine grinds to a halt or the kernel starts SIGKILLing your build.
 
 <div align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dev Monitor — a supervised dev server with live CPU / memory / swap meters and an integrated terminal" width="760" />
+  <img src="docs/screenshots/dashboard.png" alt="Owl Monitor — a supervised dev server with live CPU / memory / swap meters and an integrated terminal" width="760" />
   <br />
   <sub>A supervised server running with live CPU / memory / swap meters and its own terminal tab — the sidebar lists every project, each with a live status dot.</sub>
 </div>
@@ -61,12 +61,12 @@ Dev Monitor runs your dev servers the way a production process manager runs serv
 Reclaims memory **before** the machine stalls — both when it's detected as *stuck* (CPU pinned, or memory full and swapping, for a sustained window) **and proactively around every build**:
 - **Inactive memory is purged.** The system memory cache is released (`purge`) before a build and again mid-build under pressure — often a 1–2 GB swing — so a heavy build doesn't push the machine into swap exhaustion and a kernel SIGKILL (jetsam).
 - **Orphaned dev processes auto-close.** A dev server detected by its real binary in argv (`…/.bin/nuxt`, `vite/bin/vite`, `next dev`, …) that isn't in the managed tree is killed (SIGTERM → SIGKILL) and a **notification** lists what was closed. The managed server, editor, and system are excluded.
-- **Everything else stays a suggestion.** A sidebar panel surfaces other heavy processes — a fast **Haiku** evaluation of what's worth killing — each with a red **skull** button you press yourself. Critical processes (editor, WindowServer, Finder, daemons, Dev Monitor itself) are never suggested or auto-closed.
+- **Everything else stays a suggestion.** A sidebar panel surfaces other heavy processes — a fast **Haiku** evaluation of what's worth killing — each with a red **skull** button you press yourself. Critical processes (editor, WindowServer, Finder, daemons, Owl Monitor itself) are never suggested or auto-closed.
 - **Warns before you dig the hole.** Starting a server whose heap won't fit in free RAM — or when swap is already high — posts a **low-memory warning** (it never blocks the launch, just tells you), and a distinct **high-swap** alert fires once when swap climbs past ~60% so you can close idle projects before the Mac starts to stutter.
 
 ### 🔨 Build runner — tuned for tight RAM
 - Runs the project's build as a **separate tracked tree** with its own Activity row and terminal tab; the **Build** button becomes a red **Stop build** while running. The CLI's `build` is **synchronous** — it waits for the build and reports the exit code plus a ✅/❌ verdict (so an agent or a script gets the real result).
-- **The whole build error is never lost.** Each build's complete output is mirrored to its own log file, so `dev-monitor build`'s printed tail (and a big tool dump like a Rollup `watchFiles` object that can bury the real message) never hides it: on failure the CLI prints `↳ full build log: <path>`, and `dev-monitor logs --build` prints the entire thing.
+- **The whole build error is never lost.** Each build's complete output is mirrored to its own log file, so `owl-monitor build`'s printed tail (and a big tool dump like a Rollup `watchFiles` object that can bury the real message) never hides it: on failure the CLI prints `↳ full build log: <path>`, and `owl-monitor logs --build` prints the entire thing.
 - **Pauses all active dev servers** while building (relaunching them after): on an 8 GB Mac a build running alongside a multi-GB dev server gets SIGKILLed by the kernel before it can finish.
 - **Autoscales the build heap** 4 → 6 → 8 on OOM, with its **own** learned level independent from the dev server's.
 - **Frees RAM aggressively around the build**: `purge`s inactive/cached memory (before, and again under pressure during), surfaces the resource advisor to close heavy non-essential apps, watches memory pressure to act **before** the kernel jetsams the build, and runs Node with `--optimize-for-size`. → [`docs/HEAP-AND-BUILD.md`](docs/HEAP-AND-BUILD.md)
@@ -78,13 +78,13 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 - **Appearance** — app-wide **Theme** (System / Light / Dark) and a separate **Terminal** theme for the log panes.
 
 ### ⌨️ CLI + central hub
-- Drive everything from any terminal: `dev-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f` · `logs --build` (the full error of the last build). **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. Install it in one click from **Settings → Claude Code → Install CLI** (it's bundled in the app). → [CLI reference](#command-line-interface)
+- Drive everything from any terminal: `owl-monitor up` (idempotent) · `build` (**synchronous**; pauses servers + frees RAM) · `status [--json]` · `stop` · `restart` · `logs -f` · `logs --build` (the full error of the last build). **One supervised server per project**, several concurrently; the CLI **auto-starts the app** if the hub isn't running. Install it in one click from **Settings → Claude Code → Install CLI** (it's bundled in the app). → [CLI reference](#command-line-interface)
 
 ### 🤖 Claude integration
-- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw dev servers (`npm run dev` / `nuxt dev` / …), framework **builds**, and production **previews** (`npm run preview` / `next start` / …), redirecting each to the matching `dev-monitor` command so every terminal's servers land in one supervised place. When it blocks a build, the message also tells the agent to read the full error with `dev-monitor logs --build` — so a failing build is diagnosable, not a truncated tail. → [`integrations/claude/`](integrations/claude/)
-- **Agents coordinate instead of colliding** — if a build is in flight, `dev-monitor up`/`preview` won't interrupt it: it reports the build (elapsed + ETA), and with `--wait` **queues behind it** and starts the server once the build finishes. `status --json` exposes `building` so another Claude can see and wait.
+- **Routes other Claude Code sessions through the app** — a global `PreToolUse` hook hard-blocks raw dev servers (`npm run dev` / `nuxt dev` / …), framework **builds**, and production **previews** (`npm run preview` / `next start` / …), redirecting each to the matching `owl-monitor` command so every terminal's servers land in one supervised place. When it blocks a build, the message also tells the agent to read the full error with `owl-monitor logs --build` — so a failing build is diagnosable, not a truncated tail. → [`integrations/claude/`](integrations/claude/)
+- **Agents coordinate instead of colliding** — if a build is in flight, `owl-monitor up`/`preview` won't interrupt it: it reports the build (elapsed + ETA), and with `--wait` **queues behind it** and starts the server once the build finishes. `status --json` exposes `building` so another Claude can see and wait.
 - **External alerts** — set a **Slack / Discord / incoming-webhook** URL in Settings and every notification that passes your category toggles is also POSTed there (one JSON body carries both Slack's `text` and Discord's `content`). Best-effort — a down webhook never affects supervision.
-- **Live Scan** (read-only) — the Doctor **watches** Dev Monitor + the machine for a chosen window (1 / 2 / 5 min, with a progress bar), then `claude` returns a **copyable** report: what every process is and *who it belongs to*, the activity over the window, any errors/bugs (correlated to the app's own source), and concrete improvement points. Never edits anything (`--permission-mode plan`, write tools disallowed).
+- **Live Scan** (read-only) — the Doctor **watches** Owl Monitor + the machine for a chosen window (1 / 2 / 5 min, with a progress bar), then `claude` returns a **copyable** report: what every process is and *who it belongs to*, the activity over the window, any errors/bugs (correlated to the app's own source), and concrete improvement points. Never edits anything (`--permission-mode plan`, write tools disallowed).
 - **Project diagnosis** (read-only) — one click explains why a project's server or build failed, reading its config + the supervisor's failure context; the report is copyable.
 - **Resource advisor** (read-only) — Claude ranks the machine's heavy processes and proposes actions. Managed processes stop with one tap; **foreign processes are only closed after explicit confirmation — never auto-killed.**
 
@@ -95,29 +95,29 @@ Reclaims memory **before** the machine stalls — both when it's detected as *st
 ```bash
 # 1. Generate the Xcode project and build the app
 brew install xcodegen
-cd DevMonitor
+cd OwlMonitor
 xcodegen generate
-xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor -configuration Debug \
+xcodebuild -project OwlMonitor.xcodeproj -scheme OwlMonitor -configuration Debug \
   -derivedDataPath build build
 
 # 2. Launch it
-open "build/Build/Products/Debug/Dev Monitor.app"
+open "build/Build/Products/Debug/Owl Monitor.app"
 ```
 
 Add a project from the sidebar, hit **Launch**, and the server comes up supervised with live graphs. To drive it from a terminal instead, see the [CLI](#command-line-interface).
 
 ### Download a release (no build needed)
 
-Grab the latest build from [GitHub Releases](https://github.com/damiandania/DevMonitor/releases):
+Grab the latest build from [GitHub Releases](https://github.com/damiandania/Owl-Monitor/releases):
 
-1. Download **`Dev Monitor-<version>.dmg`**, open it, and drag **Dev Monitor** into **Applications**.
+1. Download **`Owl Monitor-<version>.dmg`**, open it, and drag **Owl Monitor** into **Applications**.
 2. The app is **unsigned** (no Apple Developer ID yet), so Gatekeeper blocks the first launch. Either **right-click the app → Open → Open**, or clear the quarantine flag once:
    ```bash
-   xattr -dr com.apple.quarantine "/Applications/Dev Monitor.app"
+   xattr -dr com.apple.quarantine "/Applications/Owl Monitor.app"
    ```
-3. Install the CLI — **easiest:** open **Dev Monitor → Settings → General → Claude Code → Install CLI**. The `dev-monitor` binary ships inside the app; the button symlinks it into `~/.local/bin` so the CLI always matches the app. (Manual alternative, from **`dev-monitor-<version>.zip`**:)
+3. Install the CLI — **easiest:** open **Owl Monitor → Settings → General → Claude Code → Install CLI**. The `owl-monitor` binary ships inside the app; the button symlinks it into `~/.local/bin` so the CLI always matches the app. (Manual alternative, from **`owl-monitor-<version>.zip`**:)
    ```bash
-   unzip dev-monitor-<version>.zip && mkdir -p ~/.local/bin && cp dev-monitor ~/.local/bin/ && chmod +x ~/.local/bin/dev-monitor
+   unzip owl-monitor-<version>.zip && mkdir -p ~/.local/bin && cp owl-monitor ~/.local/bin/ && chmod +x ~/.local/bin/owl-monitor
    ```
    Make sure `~/.local/bin` is on your `PATH` (the button warns if it isn't).
 
@@ -125,7 +125,7 @@ Grab the latest build from [GitHub Releases](https://github.com/damiandania/DevM
 
 ### Install a release build
 
-One command builds Release, signs with a **stable local certificate**, and installs the app to `/Applications` + the `dev-monitor` CLI to `~/.local/bin`:
+One command builds Release, signs with a **stable local certificate**, and installs the app to `/Applications` + the `owl-monitor` CLI to `~/.local/bin`:
 
 ```bash
 bash tools/install-local.sh
@@ -147,30 +147,30 @@ Without that local file (CI, a fresh clone) the include is a no-op and builds st
 
 ## Command-line interface
 
-While the app is running it hosts a local hub (Unix socket). Any terminal — or a Claude Code session — can drive it with `dev-monitor` instead of running the dev server directly.
+While the app is running it hosts a local hub (Unix socket). Any terminal — or a Claude Code session — can drive it with `owl-monitor` instead of running the dev server directly.
 
 | Command | What it does |
 |---|---|
-| `dev-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent**; `--gb N` pins the heap; `--wait` blocks until HTTP-ready and prints the URL. If a build is running, `--wait` **queues behind it**; without `--wait` it reports the build and exits (never interrupts it). |
-| `dev-monitor preview [path] [--gb N] [--wait]` | Serve the **production build** (needs a `preview`/`start` script). Same build-coordination as `up`. |
-| `dev-monitor build [path]` | Build the project (synchronous; ✅/❌ + non-zero on failure); adds a build tab. On failure prints `↳ full build log: <path>` — read it all with `logs --build`. |
-| `dev-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath` · `buildLogPath` · `building` · `buildElapsed` · `buildETA`. |
-| `dev-monitor stop [path] [--all]` | Stop one server (default: cwd), or `--all`. |
-| `dev-monitor restart [path]` | Relaunch from **any** state — including `Failed` / `Idle`. |
-| `dev-monitor remove [path]` | Stop and **forget** the project. Aliases: `rm`, `forget`. |
-| `dev-monitor logs [path] [-f]` | Print, or follow with `-f`, that project's own dev-server log. |
-| `dev-monitor logs [path] --build` | Print the **whole** last build's output — the full error, not the tail. |
-| `dev-monitor version` · `docs` | Version (`-v`) · help (`-h`, `--help`). |
+| `owl-monitor up [path] [--gb N] [--wait]` | Start + supervise a project (default: cwd). **Idempotent**; `--gb N` pins the heap; `--wait` blocks until HTTP-ready and prints the URL. If a build is running, `--wait` **queues behind it**; without `--wait` it reports the build and exits (never interrupts it). |
+| `owl-monitor preview [path] [--gb N] [--wait]` | Serve the **production build** (needs a `preview`/`start` script). Same build-coordination as `up`. |
+| `owl-monitor build [path]` | Build the project (synchronous; ✅/❌ + non-zero on failure); adds a build tab. On failure prints `↳ full build log: <path>` — read it all with `logs --build`. |
+| `owl-monitor status [--json]` | List every known project with state + port. `--json` adds `ready` · `url` · `pid` · `exitCode` · `lastError` · `logPath` · `buildLogPath` · `building` · `buildElapsed` · `buildETA`. |
+| `owl-monitor stop [path] [--all]` | Stop one server (default: cwd), or `--all`. |
+| `owl-monitor restart [path]` | Relaunch from **any** state — including `Failed` / `Idle`. |
+| `owl-monitor remove [path]` | Stop and **forget** the project. Aliases: `rm`, `forget`. |
+| `owl-monitor logs [path] [-f]` | Print, or follow with `-f`, that project's own dev-server log. |
+| `owl-monitor logs [path] --build` | Print the **whole** last build's output — the full error, not the tail. |
+| `owl-monitor version` · `docs` | Version (`-v`) · help (`-h`, `--help`). |
 
-Paths default to the current directory and resolve to absolute. Invalid input fails loudly: a non-project folder is rejected; unknown flags and a malformed `--gb` exit non-zero with a clear message. Full details — readiness semantics, heap sizing, failure diagnostics — in **[DevMonitor/USAGE.md](DevMonitor/USAGE.md)**.
+Paths default to the current directory and resolve to absolute. Invalid input fails loudly: a non-project folder is rejected; unknown flags and a malformed `--gb` exit non-zero with a clear message. Full details — readiness semantics, heap sizing, failure diagnostics — in **[OwlMonitor/USAGE.md](OwlMonitor/USAGE.md)**.
 
 ```jsonc
-// dev-monitor status --json  →  everything an agent needs to operate and self-correct
+// owl-monitor status --json  →  everything an agent needs to operate and self-correct
 [
   { "name": "MiddleSpace", "path": "…/MiddleSpace", "state": "Running · :3000",
     "ready": true, "url": "http://localhost:3000/", "pid": 12345, "port": 3000,
-    "logPath": "…/DevMonitor/logs/MiddleSpace-CA6AA3C8.log",
-    "buildLogPath": "…/DevMonitor/logs/MiddleSpace-CA6AA3C8.build.log" }
+    "logPath": "…/OwlMonitor/logs/MiddleSpace-CA6AA3C8.log",
+    "buildLogPath": "…/OwlMonitor/logs/MiddleSpace-CA6AA3C8.build.log" }
 ]
 ```
 
@@ -189,21 +189,33 @@ Paths default to the current directory and resolve to absolute. Invalid input fa
 A non-sandboxed SwiftUI app (`@Observable @MainActor` state) plus a small CLI target; long-running work — output streaming, sampling, health probing — runs off the main actor and hops back via `AsyncStream`. Full write-up in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ```
-DevMonitor/
+OwlMonitor/
   App/        @main App (single Window + notch-bar HUD), AppState
   Model/      Project, AppSettings, SessionState, MetricPoint, IPCProtocol
   Store/      ProjectStore (Application Support JSON)
   Core/       Detector, DevSession (supervisor + metrics + health), ProcessTree,
               SystemSampler (+ pressure detection), BuildRunner, IPCServer,
-              Notifier, ClaudeRunner, ResourceAdvisor
+              Notifier, ClaudeRunner, ResourceAdvisor, LegacyMigration
   Sys/        spawn.c (posix_spawn SETSID + CLOEXEC), metrics.c (libproc/mach),
               ipc.c, dm_exc.m (ObjC exception shim) + bridging header
   Views/      RootSplitView, DashboardView, GlobalTerminalView, MenuBarView,
               QuotaHUD + ClaudeMascot (the notch bar), ActivityView,
-              ProcessTableView, settings + Claude sheets
-  Resources/  Assets.xcassets (AppIcon + skull + github), Info.plist
-dev-monitor/  CLI target (IPC client, robust arg parsing in ArgParse.swift)
+              ProcessTableView, BrandMark, settings + Claude sheets
+  Resources/  Assets.xcassets (AppIcon + OwlLogo + skull + github), Info.plist
+owl-monitor/  CLI target (IPC client, robust arg parsing in ArgParse.swift)
+brand/        The artwork: app-icon.png (the icon), favicon.svg (the in-app OwlLogo badge),
+              Logo-light/dark.png (the flat mark, for docs)
 ```
+
+Every brand asset is designed artwork exported into `brand/`, and the app reads it from there — nothing
+is drawn in code. After re-exporting `brand/app-icon.png`, refresh every size in the asset catalog with:
+
+```bash
+swift tools/make-icon.swift
+```
+
+`brand/favicon.svg` is the badge shown in the sidebar and Settings; the asset catalog keeps it as a
+vector, so it stays sharp at any size.
 
 ---
 
@@ -216,7 +228,7 @@ A few non-obvious things this codebase gets right — each found and pinned down
 - **CPU timebase conversion** — `proc_pid_rusage` returns CPU time in *mach* units on Apple Silicon (not nanoseconds); scaled via `mach_timebase_info` (1:1 on Intel).
 - **Spawned servers don't inherit the IPC socket** — `POSIX_SPAWN_CLOEXEC_DEFAULT` (+ `FD_CLOEXEC` on the hub sockets) means a long-lived dev server can't hold the client socket open and block a cold-launch CLI call on `read()`.
 - **Nuxt's dev-lock is agent-only** — `std-env` enables it whenever `CLAUDECODE` / `AI_AGENT` is set, so it fires inside Claude Code terminals. Servers spawn with `NUXT_IGNORE_LOCK=1`, and the app's own LaunchServices environment has no agent vars, so app-spawned servers never lock.
-- **Astro 7 is forced to the foreground** — from v7, `astro dev` *auto-daemonizes* (detaches to the background, parent exits 0) when it detects an AI coding agent. A supervisor that expects a long-lived foreground process would read that instant exit as a crash and relaunch in a loop, so Astro servers spawn with `ASTRO_DEV_BACKGROUND=0` — Dev Monitor *is* the background supervisor.
+- **Astro 7 is forced to the foreground** — from v7, `astro dev` *auto-daemonizes* (detaches to the background, parent exits 0) when it detects an AI coding agent. A supervisor that expects a long-lived foreground process would read that instant exit as a crash and relaunch in a loop, so Astro servers spawn with `ASTRO_DEV_BACKGROUND=0` — Owl Monitor *is* the background supervisor.
 - **External dev servers are identified, not just listed** — argv that *looks like* a dev server is labelled *project :port* (project from the path before `/node_modules/`, port from a `proc_pidfdinfo` scan for the LISTENing socket), flagged external, and shown but never supervised.
 - **Notifications can't crash the app** — `UNUserNotificationCenter` can raise an Objective-C `NSException` (which Swift can't `try`/`catch`) on a bundle the daemon rejects, so every notification call is routed through a tiny ObjC `@try/@catch` shim (`dm_try`).
 - **Deterministic heap sizing** — in auto mode it follows the framework default (Nuxt/Next 8 · Astro/Vite 4 · Node 2), never a stale stored value; floored at 2 GB, capped at physical RAM.
@@ -247,7 +259,7 @@ When adding a feature, prefer extracting its decision logic into a pure (ideally
 | **P3** — Health &amp; recycle | HTTP health probe + strike state machine + automatic tree recycle |
 | **P4** — Notifications | Native notifications (crash/hang/recycle/build) with sound |
 | **P5** — Build runner | Run the project's build script as a tracked tree |
-| **P6** — Hub + CLI + docs | Unix-socket hub + `dev-monitor` CLI + auto-start |
+| **P6** — Hub + CLI + docs | Unix-socket hub + `owl-monitor` CLI + auto-start |
 | **P7** — Claude reports | Read-only **Live Scan** (timed observation → copyable report), per-project failure diagnosis, and Claude-shell/monitor identification |
 | **P8** — Polish &amp; dist | App icon, MenuBarExtra, Release → /Applications, CLI → `~/.local/bin` (ad-hoc signing) |
 | **P9** — Resource advisor | Claude-recommended actions on heavy processes; confirm before closing foreign |

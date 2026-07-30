@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build Dev Monitor + the CLI (Release), sign the app with the stable LOCAL certificate, and install:
-#   /Applications/Dev Monitor.app        (GUI app)
-#   ~/.local/bin/dev-monitor             (CLI)
+# Build Owl Monitor + the CLI (Release), sign the app with the stable LOCAL certificate, and install:
+#   /Applications/Owl Monitor.app        (GUI app)
+#   ~/.local/bin/owl-monitor             (CLI)
 #
 # The stable signature is the whole point (see tools/ensure-signing-cert.sh): grant the app's
 # permissions once and every future install keeps them — no more Downloads/Music/Automation re-prompts
@@ -18,14 +18,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 IDENTITY="$(bash tools/ensure-signing-cert.sh)"
-ENT="DevMonitor/Resources/DevMonitor.entitlements"
+ENT="OwlMonitor/Resources/OwlMonitor.entitlements"
 
 echo "Building Release (app + CLI)…"
-xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor  -configuration Release -derivedDataPath build build >/dev/null
-xcodebuild -project DevMonitor.xcodeproj -scheme dev-monitor -configuration Release -derivedDataPath build build >/dev/null
+xcodebuild -project OwlMonitor.xcodeproj -scheme OwlMonitor  -configuration Release -derivedDataPath build build >/dev/null
+xcodebuild -project OwlMonitor.xcodeproj -scheme owl-monitor -configuration Release -derivedDataPath build build >/dev/null
 
-APP="build/Build/Products/Release/Dev Monitor.app"
-CLI="build/Build/Products/Release/dev-monitor"
+APP="build/Build/Products/Release/Owl Monitor.app"
+CLI="build/Build/Products/Release/owl-monitor"
 [ -d "$APP" ] && [ -x "$CLI" ] || { echo "Release build artifacts missing" >&2; exit 1; }
 
 echo "Signing with \"$IDENTITY\" (hardened runtime)…"
@@ -34,13 +34,13 @@ codesign --force --options runtime --entitlements "$ENT" --sign "$IDENTITY" --de
 codesign --verify --deep --strict "$APP"
 
 echo "Installing…"
-rm -rf "/Applications/Dev Monitor.app"
-ditto "$APP" "/Applications/Dev Monitor.app"
+rm -rf "/Applications/Owl Monitor.app"
+ditto "$APP" "/Applications/Owl Monitor.app"
 mkdir -p "$HOME/.local/bin"
-ditto "$CLI" "$HOME/.local/bin/dev-monitor"
+ditto "$CLI" "$HOME/.local/bin/owl-monitor"
 
 echo
-echo "Installed /Applications/Dev Monitor.app — signed with \"$IDENTITY\":"
-codesign -dvv "/Applications/Dev Monitor.app" 2>&1 | grep -E "^Authority=|^Identifier=" || true
+echo "Installed /Applications/Owl Monitor.app — signed with \"$IDENTITY\":"
+codesign -dvv "/Applications/Owl Monitor.app" 2>&1 | grep -E "^Authority=|^Identifier=" || true
 echo
 echo "Grant the app's permissions once on first launch — every future build signed with this cert keeps them."

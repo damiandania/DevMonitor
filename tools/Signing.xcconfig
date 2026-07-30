@@ -1,4 +1,4 @@
-// Code-signing identity for LOCAL builds of Dev Monitor.
+// Code-signing identity for LOCAL builds of Owl Monitor.
 //
 // Default is ad-hoc ("-"), exactly as before — this is what CI and other contributors get, so nothing
 // changes for them.

@@ -1,6 +1,6 @@
-name: DevMonitor
+name: OwlMonitor
 options:
-  bundleIdPrefix: app.devmonitor
+  bundleIdPrefix: app.owlmonitor
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -18,65 +18,65 @@ settings:
     CODE_SIGN_STYLE: Manual
     SWIFT_STRICT_CONCURRENCY: complete
 targets:
-  DevMonitor:
+  OwlMonitor:
     type: application
     platform: macOS
     deploymentTarget: "26.0"
     sources:
-      - DevMonitor
+      - OwlMonitor
     # Build the CLI first (link:false — it's an executable, not something we link against) and drop it
-    # inside the app bundle (Contents/MacOS/dev-monitor). The "Install CLI" button in Settings then
-    # symlinks ~/.local/bin/dev-monitor at it, so the CLI always matches the running app (they share
+    # inside the app bundle (Contents/MacOS/owl-monitor). The "Install CLI" button in Settings then
+    # symlinks ~/.local/bin/owl-monitor at it, so the CLI always matches the running app (they share
     # IPCProtocol — a stale CLI would mis-decode `status`). Copy runs post-sign, so the nested binary
     # is ad-hoc like the app; a notarized release would need to re-sign it (see package-release.sh).
     dependencies:
-      - target: dev-monitor
+      - target: owl-monitor
         link: false
     postBuildScripts:
-      - name: Embed dev-monitor CLI into the app bundle
+      - name: Embed owl-monitor CLI into the app bundle
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          cp -f "$BUILT_PRODUCTS_DIR/dev-monitor" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/dev-monitor"
+          cp -f "$BUILT_PRODUCTS_DIR/owl-monitor" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/owl-monitor"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.app
-        PRODUCT_NAME: "Dev Monitor"
+        PRODUCT_BUNDLE_IDENTIFIER: app.owlmonitor.app
+        PRODUCT_NAME: "Owl Monitor"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_FILE: DevMonitor/Resources/Info.plist
+        INFOPLIST_FILE: OwlMonitor/Resources/Info.plist
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
-        SWIFT_OBJC_BRIDGING_HEADER: DevMonitor/Sys/DevMonitor-Bridging-Header.h
+        SWIFT_OBJC_BRIDGING_HEADER: OwlMonitor/Sys/OwlMonitor-Bridging-Header.h
       configs:
         # Hardened runtime + entitlements only on Release — that's what notarization requires. Debug
         # (and the test harness, which builds Debug) stay ad-hoc with no runtime, so they're untouched.
         # package-release.sh re-signs the Release build with a Developer ID when DEVELOPER_ID is set.
         Release:
           ENABLE_HARDENED_RUNTIME: YES
-          CODE_SIGN_ENTITLEMENTS: DevMonitor/Resources/DevMonitor.entitlements
-  dev-monitor:
+          CODE_SIGN_ENTITLEMENTS: OwlMonitor/Resources/OwlMonitor.entitlements
+  owl-monitor:
     type: tool
     platform: macOS
     deploymentTarget: "26.0"
     sources:
-      - dev-monitor
-      - path: DevMonitor/Model/IPCProtocol.swift
-      - path: DevMonitor/Sys/ipc.c
+      - owl-monitor
+      - path: OwlMonitor/Model/IPCProtocol.swift
+      - path: OwlMonitor/Sys/ipc.c
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.devmonitor.cli
-        PRODUCT_NAME: "dev-monitor"
-        SWIFT_OBJC_BRIDGING_HEADER: dev-monitor/Bridging.h
+        PRODUCT_BUNDLE_IDENTIFIER: app.owlmonitor.cli
+        PRODUCT_NAME: "owl-monitor"
+        SWIFT_OBJC_BRIDGING_HEADER: owl-monitor/Bridging.h
 schemes:
-  DevMonitor:
+  OwlMonitor:
     build:
       targets:
-        DevMonitor: all
+        OwlMonitor: all
     run:
       config: Debug
-  dev-monitor:
+  owl-monitor:
     build:
       targets:
-        dev-monitor: all
+        owl-monitor: all
     run:
       config: Debug

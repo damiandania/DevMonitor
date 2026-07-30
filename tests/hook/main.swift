@@ -46,10 +46,10 @@ func runHook(_ command: String, cwd: String = "/tmp/proj") -> (exit: Int32, stde
     return (proc.terminationStatus, err)
 }
 
-// PREVIEW_RE: a raw preview launch is blocked and routed to `dev-monitor preview`.
+// PREVIEW_RE: a raw preview launch is blocked and routed to `owl-monitor preview`.
 for cmd in ["npm run preview", "pnpm preview", "vite preview", "nuxt preview", "next start"] {
     let r = runHook(cmd)
-    chk(r.exit == 2 && r.stderr.contains("dev-monitor preview '/tmp/proj'"),
+    chk(r.exit == 2 && r.stderr.contains("owl-monitor preview '/tmp/proj'"),
         "hook: blocks preview launch — \(cmd)", "exit=\(r.exit) stderr=\(r.stderr)")
 }
 // Ambiguous bare `start` (e.g. create-react-app's dev server) is deliberately NOT blocked — only
@@ -57,16 +57,16 @@ for cmd in ["npm run preview", "pnpm preview", "vite preview", "nuxt preview", "
 let bareStart = runHook("npm start")
 chk(bareStart.exit == 0, "hook: bare 'npm start' is not treated as a preview", "exit=\(bareStart.exit)")
 // Already-routed and inspection commands stay exempt from the new rule too.
-let alreadyRouted = runHook("dev-monitor preview /tmp/proj")
-chk(alreadyRouted.exit == 0, "hook: a dev-monitor command is never blocked", "exit=\(alreadyRouted.exit)")
-let bareBuildCLI = runHook("dev-monitor build /tmp/proj")
-chk(bareBuildCLI.exit == 0, "hook: a bare 'dev-monitor build' is never blocked", "exit=\(bareBuildCLI.exit)")
-// Regression: a chained launch hiding behind a dev-monitor invocation must NOT slip through — the old
-// blanket `grep dev-monitor` substring match whitelisted the whole command, so `dev-monitor stop X &&
+let alreadyRouted = runHook("owl-monitor preview /tmp/proj")
+chk(alreadyRouted.exit == 0, "hook: a owl-monitor command is never blocked", "exit=\(alreadyRouted.exit)")
+let bareBuildCLI = runHook("owl-monitor build /tmp/proj")
+chk(bareBuildCLI.exit == 0, "hook: a bare 'owl-monitor build' is never blocked", "exit=\(bareBuildCLI.exit)")
+// Regression: a chained launch hiding behind a owl-monitor invocation must NOT slip through — the old
+// blanket `grep owl-monitor` substring match whitelisted the whole command, so `owl-monitor stop X &&
 // npm run build` ran unsupervised. It's now caught by BUILD_RE.
-let chainedHole = runHook("dev-monitor stop /tmp/proj && npm run build")
-chk(chainedHole.exit == 2 && chainedHole.stderr.contains("dev-monitor build '/tmp/proj'"),
-    "hook: a launch chained after a dev-monitor command is still blocked",
+let chainedHole = runHook("owl-monitor stop /tmp/proj && npm run build")
+chk(chainedHole.exit == 2 && chainedHole.stderr.contains("owl-monitor build '/tmp/proj'"),
+    "hook: a launch chained after a owl-monitor command is still blocked",
     "exit=\(chainedHole.exit) stderr=\(chainedHole.stderr)")
 // Hard block: DM_RAW=1 is no longer an escape hatch for launches — a build always routes through the
 // app. (This is the exact bypass a runaway session used to run builds unsupervised.)
@@ -90,7 +90,7 @@ let inspecting = runHook("pgrep -fl 'vite preview'")
 chk(inspecting.exit == 0, "hook: inspecting a preview command by name is not blocked", "exit=\(inspecting.exit)")
 // Regression: DEV_RE/BUILD_RE still fire after adding PREVIEW_RE.
 let devLaunch = runHook("npm run dev")
-chk(devLaunch.exit == 2 && devLaunch.stderr.contains("dev-monitor up"),
+chk(devLaunch.exit == 2 && devLaunch.stderr.contains("owl-monitor up"),
     "hook: still blocks a dev launch", "exit=\(devLaunch.exit)")
 
 do { try ClaudeHookInstaller.uninstall() } catch { print("FAIL hook: uninstall threw — \(error)") ; fail += 1 }

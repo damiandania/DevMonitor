@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to Dev Monitor. Loosely follows [Keep a Changelog](https://keepachangelog.com/);
+Notable changes to Owl Monitor. Loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions use [SemVer](https://semver.org/).
 
 ## [Unreleased]
@@ -38,22 +38,22 @@ versions use [SemVer](https://semver.org/).
 - **Distribution scaffolding** (opt-in, no effect on the default unsigned build): Developer ID signing
   + notarization in `tools/package-release.sh`, hardened runtime, a Sparkle auto-update hook, a
   Homebrew cask template, and a tag-triggered release workflow. See `docs/DISTRIBUTION.md`.
-- **Full build log + `dev-monitor logs --build`.** Each build now mirrors its **complete** output to
+- **Full build log + `owl-monitor logs --build`.** Each build now mirrors its **complete** output to
   its own file (`<name>-<id>.build.log`, fresh per build); `status --json` carries the `buildLogPath`,
-  and a failed `dev-monitor build` prints `↳ full build log: <path>`. The in-app pane and the CLI's
+  and a failed `owl-monitor build` prints `↳ full build log: <path>`. The in-app pane and the CLI's
   printed failure tail (bumped 40 → 200 lines) still only show a slice, so a big error dump (e.g. a
   Rollup `watchFiles` object that buries the real message) no longer hides it — the whole error is one
   command away (`BuildRunner`, `IPCServer`, `Model/Project.buildLogFileURL`).
-- **One-click CLI install.** The `dev-monitor` CLI now ships **inside the app bundle**
-  (`Contents/MacOS/dev-monitor`, embedded via `project.yml`); **Settings → Claude Code → Install CLI**
+- **One-click CLI install.** The `owl-monitor` CLI now ships **inside the app bundle**
+  (`Contents/MacOS/owl-monitor`, embedded via `project.yml`); **Settings → Claude Code → Install CLI**
   symlinks it into `~/.local/bin` so the CLI always matches the running app — they share
   `IPCProtocol`, and a stale copy would mis-decode `status` (`Core/CLIInstaller`). The block message
-  the hook shows agents now also points at `dev-monitor logs --build` for a failing build's full error.
+  the hook shows agents now also points at `owl-monitor logs --build` for a failing build's full error.
 
 ### Changed
 - **Menu-bar status glyph** now turns red when *any* supervised process (dev, worker, build, preview)
   is stopped or failed — not just a failed dev server.
-- **`dev-monitor build` is now synchronous.** It waits for the build to finish, then prints the tail
+- **`owl-monitor build` is now synchronous.** It waits for the build to finish, then prints the tail
   of the build output and a success/failure verdict — exiting non-zero on failure — instead of
   returning immediately with "building …". A caller (or an agent) gets the real result, not a
   fire-and-forget acknowledgement. Hub-side only: the existing CLI already reads the socket to EOF,
@@ -86,7 +86,7 @@ versions use [SemVer](https://semver.org/).
 - **Astro 7 dev servers no longer loop-relaunch.** From v7, `astro dev` auto-daemonizes when it
   detects an AI coding agent — the spawned process detaches and exits 0 immediately, which the
   supervisor read as a crash, relaunching forever. Astro projects now spawn with
-  `ASTRO_DEV_BACKGROUND=0`, keeping the server in the foreground where Dev Monitor supervises it
+  `ASTRO_DEV_BACKGROUND=0`, keeping the server in the foreground where Owl Monitor supervises it
   (the framework-specific env lives in `DevSession.frameworkEnv`, alongside Nuxt's `NUXT_IGNORE_LOCK`).
 - **Build failures now show a banner.** A failed build was delivered to Notification Center silently
   (a `.passive` interruption level); it's now urgent/time-sensitive so it breaks through as a banner,
@@ -94,7 +94,7 @@ versions use [SemVer](https://semver.org/).
 - **Cancelling a build no longer reports it as "failed".** Stopping a running build used to fire a
   "Build failed" notification because the process is signal-killed; a user-initiated stop is now
   suppressed (the paused dev server still relaunches).
-- **Builds no longer OOM (exit 6) on memory-heavy projects.** `dev-monitor build` (and the Build
+- **Builds no longer OOM (exit 6) on memory-heavy projects.** `owl-monitor build` (and the Build
   button) now inject the same `NODE_OPTIONS=--max-old-space-size` heap as the dev server, instead of
   running a bare `npm run build` with Node's small default heap.
 - **Dev servers managed by fnm/nvm no longer fail with `command not found` (exit 127).** The spawn
@@ -102,12 +102,12 @@ versions use [SemVer](https://semver.org/).
   managers put their shims — a GUI launch from launchd then had no `node`/`npm` on `PATH`. A new
   `ShellEnvironment` resolves the user's login+interactive `PATH` and exports it before each launch
   (re-resolved per launch, because fnm's per-shell dir is ephemeral).
-- **`dev-monitor build` no longer dies with `node: not found` (exit 127) right after an app launch.**
+- **`owl-monitor build` no longer dies with `node: not found` (exit 127) right after an app launch.**
   `BuildRunner` didn't resolve the shell `PATH` — it worked only because a prior dev-server launch had
   already resolved it in the process. A build that ran first (fresh app, no server started yet) got the
   bare launchd `PATH`. It now calls `ShellEnvironment.applyResolvedPATH()` before spawning, like
   `DevSession`/`WorkerRunner`.
-- **The hub no longer dies when a `dev-monitor` client disconnects.** It now ignores `SIGPIPE`
+- **The hub no longer dies when a `owl-monitor` client disconnects.** It now ignores `SIGPIPE`
   (as the CLI already did), so writing a reply to a client that has already exited can't terminate
   the whole app right after handling an `up`/`status`.
 - **A second instance can no longer steal the IPC socket** from a running hub — the listener probes
@@ -142,7 +142,7 @@ versions use [SemVer](https://semver.org/).
 ## [0.1.0] — 2026-06-18
 
 First public release — a native macOS app that launches, supervises, and auto-recycles JS/TS dev
-servers, with a `dev-monitor` CLI every terminal can route through.
+servers, with a `owl-monitor` CLI every terminal can route through.
 
 ### Added
 - **Detect & launch** dev servers (npm · pnpm · yarn · bun · deno; Nuxt · Next · Astro · Vite ·
@@ -166,4 +166,4 @@ servers, with a `dev-monitor` CLI every terminal can route through.
 - Distributed **unsigned** (ad-hoc) — the first launch needs **right-click → Open** (see the README).
 - **Requires macOS 26 or later** (the UI uses SwiftUI / Liquid Glass).
 
-[0.1.0]: https://github.com/damiandania/DevMonitor/releases/tag/v0.1.0
+[0.1.0]: https://github.com/damiandania/Owl-Monitor/releases/tag/v0.1.0

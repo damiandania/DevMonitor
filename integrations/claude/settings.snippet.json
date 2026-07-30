@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /Users/<you>/.claude/hooks/route-dev-through-devmonitor.sh"
+            "command": "bash /Users/<you>/.claude/hooks/route-dev-through-owlmonitor.sh"
           }
         ]
       }

@@ -22,14 +22,14 @@ Framework + package manager (e.g. Nuxt + pnpm), and anything unusual (monorepo, 
 **Diagnostics**
 ```
 # output of:
-dev-monitor status --json
+owl-monitor status --json
 # and, if relevant, the tail of:
-dev-monitor logs
+owl-monitor logs
 ```
 
 **Environment**
 - macOS version:
-- Dev Monitor version (Settings or the `.dmg` name):
+- Owl Monitor version (Settings or the `.dmg` name):
 - Installed from: built locally / GitHub Release / Homebrew
 
 **Screenshots / logs**

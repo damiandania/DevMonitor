@@ -14,7 +14,7 @@ let procs = [
 ]
 let snap = ResourceAdvisor.snapshotText(systemCPU: 75, systemMemPercent: 80, coreCount: 8, procs: procs)
 check(snap.contains("System CPU: 75% of 8 cores"), "snapshot: system cpu line")
-check(snap.contains("[DEV SERVER — managed by Dev Monitor]"), "snapshot: managed tag")
+check(snap.contains("[DEV SERVER — managed by Owl Monitor]"), "snapshot: managed tag")
 check(snap.contains("[foreign]"), "snapshot: foreign tag")
 check(snap.contains("pid 4242"), "snapshot: foreign pid")
 

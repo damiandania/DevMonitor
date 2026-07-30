@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Create — once — a stable, self-signed code-signing certificate in the login keychain, so every local
-# build of Dev Monitor is signed with the SAME identity.
+# build of Owl Monitor is signed with the SAME identity.
 #
 # Why this exists:
 #   macOS ties TCC permission grants (Downloads, Music, Automation, …) to an app's code-signing
-#   identity. Dev Monitor is ad-hoc signed (CODE_SIGN_IDENTITY = "-"), and an ad-hoc signature carries
+#   identity. Owl Monitor is ad-hoc signed (CODE_SIGN_IDENTITY = "-"), and an ad-hoc signature carries
 #   NO stable identity — TCC falls back to the cdhash, which changes on *every* build. So each reinstall
 #   looks like a brand-new app and macOS re-prompts for all permissions.
 #
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CERT_CN="Dev Monitor Local Signing"
+CERT_CN="Owl Monitor Local Signing"
 KEYCHAIN="${LOGIN_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 LOCAL_XCCONFIG="$ROOT/tools/Signing.local.xcconfig"
 
@@ -69,7 +69,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 # AES-256/SHA-256, which fails to import ("MAC verification failed"), so pass -legacy when supported;
 # LibreSSL already emits the legacy format and rejects the flag, so fall back without it. A non-empty
 # transient password is required — the empty-password MAC is what trips up the importer.
-P12_PASS="devmonitor-local"
+P12_PASS="owlmonitor-local"
 openssl pkcs12 -export -legacy -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
       -name "$CERT_CN" -out "$TMP/cert.p12" -passout "pass:$P12_PASS" >/dev/null 2>&1 \
   || openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \

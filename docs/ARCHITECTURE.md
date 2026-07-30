@@ -1,6 +1,6 @@
 # Architecture
 
-Dev Monitor is a non-sandboxed SwiftUI app (Swift 6, macOS 26 SDK) plus a small CLI target.
+Owl Monitor is a non-sandboxed SwiftUI app (Swift 6, macOS 26 SDK) plus a small CLI target.
 State is `@Observable @MainActor`; long-running work (output streaming, sampling, health probing)
 runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }`.
 
@@ -58,7 +58,7 @@ runs off the main actor and hops back through `AsyncStream`/`Task { @MainActor }
   `PATH` (`ShellEnvironment`) before spawning — like `DevSession`, so a build that runs before any
   server still finds `node` — and mirrors its **full** output (fresh per build) to
   `Project.buildLogFileURL`, so the whole error outlives the capped in-memory buffer and the CLI's
-  failure tail (`dev-monitor logs --build`).
+  failure tail (`owl-monitor logs --build`).
 - **`WorkerRunner`** — supervises a project's long-running background **worker** (a queue/job worker,
   `tsx watch …`): same spawn/stream plumbing as the build, but no port/health — it just runs and
   reports running / stopped / crashed.

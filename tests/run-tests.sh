@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev Monitor test system — verifies the whole project still works:
+# Owl Monitor test system — verifies the whole project still works:
 #   Phase 1 — the app + CLI actually compile (catches SwiftUI/view errors the unit suites can't).
 #   Phase 2 — headless unit suites for the C shims and the pure logic (fast, no Xcode host).
 #
@@ -8,9 +8,9 @@
 #   bash tests/run-tests.sh --unit   # units only (skip the slow build phase)
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/DevMonitor"
+SRC="$ROOT/OwlMonitor"
 SYS="$SRC/Sys"
-HDR="$SYS/DevMonitor-Bridging-Header.h"
+HDR="$SYS/OwlMonitor-Bridging-Header.h"
 BIN="$(mktemp -d)"
 export SHELL_SESSIONS_DISABLE=1
 fail=0
@@ -21,8 +21,8 @@ UNIT_ONLY=0
 if [ "$UNIT_ONLY" = 0 ]; then
   echo "── Phase 1: build app + CLI ────────────────────"
   ( cd "$ROOT" && xcodegen generate ) >/dev/null 2>&1
-  for scheme in DevMonitor dev-monitor; do
-    if ( cd "$ROOT" && xcodebuild -project DevMonitor.xcodeproj -scheme "$scheme" \
+  for scheme in OwlMonitor owl-monitor; do
+    if ( cd "$ROOT" && xcodebuild -project OwlMonitor.xcodeproj -scheme "$scheme" \
            -configuration Debug -derivedDataPath build build ) >"$BIN/build-$scheme.log" 2>&1; then
       echo "PASS $scheme compiles"
     else
@@ -77,9 +77,11 @@ build_run advisor "$ROOT/tests/advisor/main.swift" \
 build_run sleepguard "$ROOT/tests/sleepguard/main.swift" "$SRC/Core/SleepGuard.swift"
 build_run charts "$ROOT/tests/charts/main.swift" "$SRC/Core/MetricChartMath.swift"
 build_run memguard "$ROOT/tests/memguard/main.swift" "$SRC/Core/MemoryGuard.swift"
-build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/dev-monitor/ArgParse.swift"
+build_run argparse "$ROOT/tests/argparse/main.swift" "$ROOT/owl-monitor/ArgParse.swift"
 build_run git    "$ROOT/tests/git/main.swift" "$SRC/Core/GitInfo.swift"
 build_run hook   "$ROOT/tests/hook/main.swift" "$SRC/Core/ClaudeHookInstaller.swift"
+build_run migration "$ROOT/tests/migration/main.swift" "$SRC/Core/LegacyMigration.swift" \
+  "$SRC/Core/ClaudeHookInstaller.swift" "$SRC/Core/CLIInstaller.swift" "$SRC/Core/AppLog.swift"
 build_run ipc    "$ROOT/tests/ipc/main.swift" "$SRC/Core/IPCIO.swift" "$SRC/Model/IPCProtocol.swift" \
   "$SYS/ipc.c" -import-objc-header "$HDR"
 

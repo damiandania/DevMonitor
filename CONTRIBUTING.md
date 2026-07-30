@@ -1,6 +1,6 @@
-# Contributing to Dev Monitor
+# Contributing to Owl Monitor
 
-Thanks for your interest in improving Dev Monitor. This guide covers how to build, test, and submit
+Thanks for your interest in improving Owl Monitor. This guide covers how to build, test, and submit
 changes.
 
 ## Prerequisites
@@ -11,15 +11,15 @@ changes.
 ## Build & run
 
 ```bash
-cd DevMonitor            # the Xcode project lives one level down
-xcodegen generate        # regenerate DevMonitor.xcodeproj from project.yml
-xcodebuild -project DevMonitor.xcodeproj -scheme DevMonitor -configuration Debug \
+cd OwlMonitor            # the Xcode project lives one level down
+xcodegen generate        # regenerate OwlMonitor.xcodeproj from project.yml
+xcodebuild -project OwlMonitor.xcodeproj -scheme OwlMonitor -configuration Debug \
   -derivedDataPath build build
-open "build/Build/Products/Debug/Dev Monitor.app"
+open "build/Build/Products/Debug/Owl Monitor.app"
 ```
 
-> Dev servers on a machine running Dev Monitor are meant to go **through** the app
-> (`dev-monitor up <path>`), not raw `npm run dev`. The repo ships a Claude Code hook that enforces
+> Dev servers on a machine running Owl Monitor are meant to go **through** the app
+> (`owl-monitor up <path>`), not raw `npm run dev`. The repo ships a Claude Code hook that enforces
 > this — see [`integrations/claude/`](integrations/claude/).
 
 ## Tests
